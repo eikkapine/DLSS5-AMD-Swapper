@@ -3,10 +3,10 @@ param(
     [int]$Width = 640,
     [int]$Height = 360,
     [int]$Seconds = 25,
-    [int]$Interop = -1,
+    [int]$Interop = 1,
     [ValidateSet(0, 1)]
     [int]$Inline = 0,
-    [int]$StartupDelayMs = 2000,
+    [int]$StartupDelayMs = 1000,
     [string]$HipVisibleDevices,
     [switch]$Visible,
     [string]$Config = "Release",
@@ -146,8 +146,9 @@ function Invoke-ProbeValidation {
     $onReadiedMaxDelta = Get-ReportNumber -Text $onReportText -Name "max_readied_channel_delta_vs_expected"
     $hasFatalRuntimeLog = $combinedLogText -match $fatalRuntimePattern
 
-    $offLateCaptures = Get-LateCaptureFiles -Dir (Join-Path $RunRoot "off") -MinimumFrame 450
-    $onLateCaptures = Get-LateCaptureFiles -Dir (Join-Path $RunRoot "on") -MinimumFrame 450
+    $lateThreshold = if ($Frames -ge 450) { 450 } else { [Math]::Max(2, $Frames - 10) }
+    $offLateCaptures = Get-LateCaptureFiles -Dir (Join-Path $RunRoot "off") -MinimumFrame $lateThreshold
+    $onLateCaptures = Get-LateCaptureFiles -Dir (Join-Path $RunRoot "on") -MinimumFrame $lateThreshold
 
     $offExpectedMatches = @()
     foreach ($capture in $offLateCaptures) { $offExpectedMatches += (Test-FileBytesEqual -Left $capture.FullName -Right $offExpected) }
@@ -270,6 +271,10 @@ function New-ProbeRun {
     Copy-Item -LiteralPath $exe -Destination (Join-Path $dir "dlssnr_d3d12_probe.exe") -Force
     Copy-Item -LiteralPath $versionSourcePath -Destination (Join-Path $dir "version.dll") -Force
     Copy-Item -LiteralPath $nrSourcePath -Destination (Join-Path $dir "nvngx_dlssnr.dll") -Force
+    $weightsSource = Join-Path $workspaceRoot "dlssnr_on_amd_weights.bin"
+    if (Test-Path -LiteralPath $weightsSource) {
+        Copy-Item -LiteralPath $weightsSource -Destination (Join-Path $dir "dlssnr_on_amd_weights.bin") -Force
+    }
     New-Item -ItemType File -Force -Path (Join-Path $dir "SpecialK.deny.dlssnr_d3d12_probe") | Out-Null
     New-Item -ItemType File -Force -Path (Join-Path $dir "SpecialK.deny.dlssnr_d3d12_probe.exe") | Out-Null
 

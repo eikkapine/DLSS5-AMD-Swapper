@@ -32,6 +32,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <immintrin.h>
 
 using Microsoft::WRL::ComPtr;
 namespace wg = winrt::Windows::Graphics;
@@ -366,6 +367,68 @@ HWND CreateRenderWindow(HINSTANCE instance, const wchar_t* title, UINT width, UI
     return hwnd;
 }
 
+inline void SwizzleBgraToRgba(const uint8_t* src, uint8_t* dst, size_t pixelCount) {
+    const size_t totalBytes = pixelCount * 4;
+    size_t i = 0;
+    const __m256i mask256 = _mm256_setr_epi8(
+        2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15,
+        2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15
+    );
+    for (; i + 32 <= totalBytes; i += 32) {
+        __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+        v = _mm256_shuffle_epi8(v, mask256);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + i), v);
+    }
+    if (i + 16 <= totalBytes) {
+        const __m128i mask128 = _mm_setr_epi8(
+            2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15
+        );
+        __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
+        v = _mm_shuffle_epi8(v, mask128);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i), v);
+        i += 16;
+    }
+    for (; i < totalBytes; i += 4) {
+        dst[i + 0] = src[i + 2];
+        dst[i + 1] = src[i + 1];
+        dst[i + 2] = src[i + 0];
+        dst[i + 3] = src[i + 3];
+    }
+}
+
+inline void SwizzleRgbaToBgraOpaque(const uint8_t* src, uint8_t* dst, size_t pixelCount) {
+    const size_t totalBytes = pixelCount * 4;
+    size_t i = 0;
+    const __m256i mask256 = _mm256_setr_epi8(
+        2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15,
+        2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15
+    );
+    const __m256i alphaMask256 = _mm256_set1_epi32(static_cast<int>(0xFF000000));
+    for (; i + 32 <= totalBytes; i += 32) {
+        __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+        v = _mm256_shuffle_epi8(v, mask256);
+        v = _mm256_or_si256(v, alphaMask256);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + i), v);
+    }
+    if (i + 16 <= totalBytes) {
+        const __m128i mask128 = _mm_setr_epi8(
+            2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15
+        );
+        const __m128i alphaMask128 = _mm_set1_epi32(static_cast<int>(0xFF000000));
+        __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
+        v = _mm_shuffle_epi8(v, mask128);
+        v = _mm_or_si128(v, alphaMask128);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i), v);
+        i += 16;
+    }
+    for (; i < totalBytes; i += 4) {
+        dst[i + 0] = src[i + 2];
+        dst[i + 1] = src[i + 1];
+        dst[i + 2] = src[i + 0];
+        dst[i + 3] = 255;
+    }
+}
+
 class WindowCapture {
 public:
     explicit WindowCapture(HWND source) : source_(source) {
@@ -437,14 +500,14 @@ public:
         result.width = desc.Width;
         result.height = desc.Height;
         result.rgba.resize(static_cast<size_t>(result.width) * result.height * 4);
-        for (UINT y = 0; y < result.height; ++y) {
-            const auto* src = static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
-            auto* dst = result.rgba.data() + static_cast<size_t>(y) * result.width * 4;
-            for (UINT x = 0; x < result.width; ++x) {
-                dst[x * 4 + 0] = src[x * 4 + 2];
-                dst[x * 4 + 1] = src[x * 4 + 1];
-                dst[x * 4 + 2] = src[x * 4 + 0];
-                dst[x * 4 + 3] = src[x * 4 + 3];
+        const size_t rowBytes = static_cast<size_t>(result.width) * 4;
+        if (mapped.RowPitch == rowBytes) {
+            SwizzleBgraToRgba(static_cast<const uint8_t*>(mapped.pData), result.rgba.data(), static_cast<size_t>(result.width) * result.height);
+        } else {
+            for (UINT y = 0; y < result.height; ++y) {
+                const auto* src = static_cast<const uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
+                auto* dst = result.rgba.data() + static_cast<size_t>(y) * rowBytes;
+                SwizzleBgraToRgba(src, dst, result.width);
             }
         }
         d3dContext_->Unmap(staging_.Get(), 0);
@@ -550,6 +613,11 @@ public:
             WaitForGpu(5000);
             CloseHandle(fenceEvent_);
         }
+        if (upload_ && uploadMapped_) {
+            D3D12_RANGE writeRange{0, 0};
+            upload_->Unmap(0, &writeRange);
+            uploadMapped_ = nullptr;
+        }
     }
 
     void Present(const FramePixels& frame) {
@@ -601,15 +669,22 @@ public:
         commandList_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
         ExecuteCommands(5000);
+        D3D12_RANGE readRange{0, rowPitch_ * height_};
         void* mapped = nullptr;
-        Check(readback_->Map(0, nullptr, &mapped), "Map readback");
+        Check(readback_->Map(0, &readRange, &mapped), "Map readback");
         const auto* bytes = static_cast<const uint8_t*>(mapped);
-        for (UINT y = 0; y < height_; ++y) {
-            std::memcpy(out.rgba.data() + static_cast<size_t>(y) * width_ * 4,
-                        bytes + static_cast<size_t>(y) * rowPitch_,
-                        static_cast<size_t>(width_) * 4);
+        const size_t rowBytes = static_cast<size_t>(width_) * 4;
+        if (rowPitch_ == rowBytes) {
+            std::memcpy(out.rgba.data(), bytes, rowBytes * height_);
+        } else {
+            for (UINT y = 0; y < height_; ++y) {
+                std::memcpy(out.rgba.data() + static_cast<size_t>(y) * rowBytes,
+                            bytes + static_cast<size_t>(y) * rowPitch_,
+                            rowBytes);
+            }
         }
-        readback_->Unmap(0, nullptr);
+        D3D12_RANGE writeRange{0, 0};
+        readback_->Unmap(0, &writeRange);
         return out;
     }
 
@@ -683,19 +758,27 @@ private:
         D3D12_HEAP_PROPERTIES readbackHeap{};
         readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
         Check(device_->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback_)), "Create readback");
+
+        D3D12_RANGE readRange{0, 0};
+        Check(upload_->Map(0, &readRange, reinterpret_cast<void**>(&uploadMapped_)), "Map persistent upload");
     }
 
     void Upload(const FramePixels& frame) {
-        void* mapped = nullptr;
-        Check(upload_->Map(0, nullptr, &mapped), "Map upload");
-        const auto* src = frame.rgba.data();
-        auto* dst = static_cast<uint8_t*>(mapped);
-        for (UINT y = 0; y < height_; ++y) {
-            std::memcpy(dst + static_cast<size_t>(y) * rowPitch_,
-                        src + static_cast<size_t>(y) * width_ * 4,
-                        static_cast<size_t>(width_) * 4);
+        if (!uploadMapped_) {
+            throw std::runtime_error("Upload buffer is not mapped");
         }
-        upload_->Unmap(0, nullptr);
+        const auto* src = frame.rgba.data();
+        auto* dst = uploadMapped_;
+        const size_t rowBytes = static_cast<size_t>(width_) * 4;
+        if (rowPitch_ == rowBytes) {
+            std::memcpy(dst, src, rowBytes * height_);
+        } else {
+            for (UINT y = 0; y < height_; ++y) {
+                std::memcpy(dst + static_cast<size_t>(y) * rowPitch_,
+                            src + static_cast<size_t>(y) * rowBytes,
+                            rowBytes);
+            }
+        }
     }
 
     void ResetCommands() {
@@ -746,6 +829,7 @@ private:
     ComPtr<ID3D12Resource> backBuffers_[kBufferCount];
     D3D12_RESOURCE_STATES bufferStates_[kBufferCount]{};
     ComPtr<ID3D12Resource> upload_;
+    uint8_t* uploadMapped_ = nullptr;
     ComPtr<ID3D12Resource> readback_;
     UINT64 rowPitch_ = 0;
     UINT frameIndex_ = 0;
@@ -871,17 +955,120 @@ FramePixels BlendFrames(const FramePixels& original, const FramePixels& nr, floa
         return original;
     }
     const float amount = std::clamp(strength, 0.0f, 1.0f);
+    if (amount <= 0.0f) {
+        return original;
+    }
+    const uint32_t alpha = static_cast<uint32_t>(std::lround(amount * 256.0f));
+    if (alpha == 0) {
+        return original;
+    }
+
     FramePixels out;
     out.width = original.width;
     out.height = original.height;
-    out.rgba.resize(original.rgba.size());
-    for (size_t i = 0; i < original.rgba.size(); i += 4) {
-        for (size_t channel = 0; channel < 3; ++channel) {
-            const float a = static_cast<float>(original.rgba[i + channel]);
-            const float b = static_cast<float>(nr.rgba[i + channel]);
-            out.rgba[i + channel] = static_cast<uint8_t>(std::clamp(a + (b - a) * amount, 0.0f, 255.0f));
+    const size_t totalBytes = original.rgba.size();
+    out.rgba.resize(totalBytes);
+
+    const uint8_t* pOrig = original.rgba.data();
+    const uint8_t* pNr = nr.rgba.data();
+    uint8_t* pOut = out.rgba.data();
+
+    if (alpha >= 256) {
+        const __m256i alphaMask256 = _mm256_set1_epi32(static_cast<int>(0xFF000000));
+        size_t i = 0;
+        for (; i + 32 <= totalBytes; i += 32) {
+            __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pNr + i));
+            v = _mm256_or_si256(v, alphaMask256);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(pOut + i), v);
         }
-        out.rgba[i + 3] = 255;
+        if (i + 16 <= totalBytes) {
+            const __m128i alphaMask128 = _mm_set1_epi32(static_cast<int>(0xFF000000));
+            __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pNr + i));
+            v = _mm_or_si128(v, alphaMask128);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(pOut + i), v);
+            i += 16;
+        }
+        for (; i < totalBytes; i += 4) {
+            pOut[i + 0] = pNr[i + 0];
+            pOut[i + 1] = pNr[i + 1];
+            pOut[i + 2] = pNr[i + 2];
+            pOut[i + 3] = 255;
+        }
+        return out;
+    }
+
+    const uint32_t invAlpha = 256 - alpha;
+    const __m256i vAlpha = _mm256_set1_epi16(static_cast<short>(alpha));
+    const __m256i vInvAlpha = _mm256_set1_epi16(static_cast<short>(invAlpha));
+    const __m256i vRound = _mm256_set1_epi16(128);
+    const __m256i zero256 = _mm256_setzero_si256();
+    const __m256i alphaMask256 = _mm256_set1_epi32(static_cast<int>(0xFF000000));
+
+    size_t i = 0;
+    for (; i + 32 <= totalBytes; i += 32) {
+        const __m256i vOrig = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pOrig + i));
+        const __m256i vNrVal = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(pNr + i));
+
+        const __m256i orig_lo = _mm256_unpacklo_epi8(vOrig, zero256);
+        const __m256i orig_hi = _mm256_unpackhi_epi8(vOrig, zero256);
+        const __m256i nr_lo = _mm256_unpacklo_epi8(vNrVal, zero256);
+        const __m256i nr_hi = _mm256_unpackhi_epi8(vNrVal, zero256);
+
+        __m256i res_lo = _mm256_mullo_epi16(orig_lo, vInvAlpha);
+        res_lo = _mm256_add_epi16(res_lo, _mm256_mullo_epi16(nr_lo, vAlpha));
+        res_lo = _mm256_add_epi16(res_lo, vRound);
+        res_lo = _mm256_srli_epi16(res_lo, 8);
+
+        __m256i res_hi = _mm256_mullo_epi16(orig_hi, vInvAlpha);
+        res_hi = _mm256_add_epi16(res_hi, _mm256_mullo_epi16(nr_hi, vAlpha));
+        res_hi = _mm256_add_epi16(res_hi, vRound);
+        res_hi = _mm256_srli_epi16(res_hi, 8);
+
+        __m256i packed = _mm256_packus_epi16(res_lo, res_hi);
+        packed = _mm256_or_si256(packed, alphaMask256);
+
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(pOut + i), packed);
+    }
+
+    if (i + 16 <= totalBytes) {
+        const __m128i vAlpha128 = _mm_set1_epi16(static_cast<short>(alpha));
+        const __m128i vInvAlpha128 = _mm_set1_epi16(static_cast<short>(invAlpha));
+        const __m128i vRound128 = _mm_set1_epi16(128);
+        const __m128i zero128 = _mm_setzero_si128();
+        const __m128i alphaMask128 = _mm_set1_epi32(static_cast<int>(0xFF000000));
+
+        const __m128i vOrig = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pOrig + i));
+        const __m128i vNrVal = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pNr + i));
+
+        const __m128i orig_lo = _mm_unpacklo_epi8(vOrig, zero128);
+        const __m128i orig_hi = _mm_unpackhi_epi8(vOrig, zero128);
+        const __m128i nr_lo = _mm_unpacklo_epi8(vNrVal, zero128);
+        const __m128i nr_hi = _mm_unpackhi_epi8(vNrVal, zero128);
+
+        __m128i res_lo = _mm_mullo_epi16(orig_lo, vInvAlpha128);
+        res_lo = _mm_add_epi16(res_lo, _mm_mullo_epi16(nr_lo, vAlpha128));
+        res_lo = _mm_add_epi16(res_lo, vRound128);
+        res_lo = _mm_srli_epi16(res_lo, 8);
+
+        __m128i res_hi = _mm_mullo_epi16(orig_hi, vInvAlpha128);
+        res_hi = _mm_add_epi16(res_hi, _mm_mullo_epi16(nr_hi, vAlpha128));
+        res_hi = _mm_add_epi16(res_hi, vRound128);
+        res_hi = _mm_srli_epi16(res_hi, 8);
+
+        __m128i packed = _mm_packus_epi16(res_lo, res_hi);
+        packed = _mm_or_si128(packed, alphaMask128);
+
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(pOut + i), packed);
+        i += 16;
+    }
+
+    for (; i < totalBytes; i += 4) {
+        for (size_t ch = 0; ch < 3; ++ch) {
+            const uint32_t a = pOrig[i + ch];
+            const uint32_t b = pNr[i + ch];
+            pOut[i + ch] = static_cast<uint8_t>((a * invAlpha + b * alpha + 128) >> 8);
+        }
+        pOut[i + 3] = 255;
     }
     return out;
 }
@@ -976,14 +1163,14 @@ public:
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         Check(context_->Map(upload_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped), "Map visible upload");
-        for (UINT y = 0; y < height_; ++y) {
-            auto* dst = static_cast<uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
-            const auto* src = frame.rgba.data() + static_cast<size_t>(y) * width_ * 4;
-            for (UINT x = 0; x < width_; ++x) {
-                dst[x * 4 + 0] = src[x * 4 + 2];
-                dst[x * 4 + 1] = src[x * 4 + 1];
-                dst[x * 4 + 2] = src[x * 4 + 0];
-                dst[x * 4 + 3] = 255;
+        const size_t rowBytes = static_cast<size_t>(width_) * 4;
+        if (mapped.RowPitch == rowBytes) {
+            SwizzleRgbaToBgraOpaque(frame.rgba.data(), static_cast<uint8_t*>(mapped.pData), static_cast<size_t>(width_) * height_);
+        } else {
+            for (UINT y = 0; y < height_; ++y) {
+                auto* dst = static_cast<uint8_t*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
+                const auto* src = frame.rgba.data() + static_cast<size_t>(y) * rowBytes;
+                SwizzleRgbaToBgraOpaque(src, dst, width_);
             }
         }
         context_->Unmap(upload_.Get(), 0);
@@ -1375,10 +1562,14 @@ int wmain(int argc, wchar_t** argv) {
                 continue;
             }
             FramePixels original = PrepareInputFrame(*lastInputFrame, options);
-            lastOriginalFrame = original;
+            if (options.saveCaptures) {
+                lastOriginalFrame = original;
+            }
             nrPresenter.Present(original);
             FramePixels nrFrame = options.noProxy ? original : nrPresenter.CaptureBackBuffer();
-            lastNrFrame = nrFrame;
+            if (options.saveCaptures) {
+                lastNrFrame = nrFrame;
+            }
             if (!options.noProxy && SourceMeaningfullyNonBlack(original) && !FrameHasNonBlackPixels(nrFrame)) {
                 ++consecutiveBrokenNrFrames;
                 effectEnabled = false;
@@ -1390,7 +1581,9 @@ int wmain(int argc, wchar_t** argv) {
                 consecutiveBrokenNrFrames = 0;
             }
             FramePixels display = BlendFrames(original, nrFrame, strength, effectEnabled);
-            lastDisplayFrame = display;
+            if (options.saveCaptures) {
+                lastDisplayFrame = display;
+            }
             visiblePresenter.Present(display);
             if (!readyWritten) {
                 WriteReadyFileAtomic(options.readyFile, bridge);

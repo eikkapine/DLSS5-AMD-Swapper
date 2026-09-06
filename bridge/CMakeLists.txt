@@ -22,5 +22,16 @@ target_link_libraries(DlssNrBridge PRIVATE
 )
 
 if (MSVC)
-    target_compile_options(DlssNrBridge PRIVATE /W4 /permissive- /EHsc /await)
+    target_compile_options(DlssNrBridge PRIVATE
+        /W4
+        /permissive-
+        /EHsc
+        /await
+        $<$<CONFIG:Release>:/O2 /Oi /Ot /GL /arch:AVX2 /fp:fast>
+        $<$<CONFIG:RelWithDebInfo>:/O2 /Oi /Ot /GL /arch:AVX2 /fp:fast>
+    )
+    target_link_options(DlssNrBridge PRIVATE
+        $<$<CONFIG:Release>:/LTCG>
+        $<$<CONFIG:RelWithDebInfo>:/LTCG>
+    )
 endif()
