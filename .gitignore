@@ -1,0 +1,95 @@
+# Build outputs
+**/bin/
+**/obj/
+**/build/
+**/build-*/
+**/x64/
+**/Release/
+**/Debug/
+artifacts/
+runs/
+**/runs/
+**/runtime/
+**/artifacts/
+probe/runs/
+
+# Proprietary/runtime binaries and generated native outputs
+*.dll
+*.exe
+*.addon
+*.addon*
+*.lib
+*.pdb
+*.obj
+*.ilk
+*.exp
+*.bin
+*.raw
+*.zip
+*.7z
+*.bak
+
+# Private runtime assets, weights, captures, and logs
+backup-original/
+weights/
+models/
+raw/
+images/
+logs/
+captures/
+screenshots/
+comparisons/
+wallpaper-tests/
+*.log
+*.dmp
+*.etl
+*.ppm
+*.bmp
+*.png
+*.webp
+*.jxr
+*.hdr
+*.dds
+*.jpg
+*.jpeg
+*wallpaper*
+*Wallpaper*
+*comparison*
+*Comparison*
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.engine
+
+# Upstream/local clones
+LosslessProxy/
+
+# Private config and environment
+.env
+.env.*
+*.local
+*.local.*
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Editor and OS files
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Internal development acceptance notes
+/PLAN.md
+/nr-bridge/
+
+
+# Approved comparison crops; all other captures stay private
+!docs/images/
+docs/images/*
+!docs/images/cs2-native-off.png
+!docs/images/cs2-native-on.png
+!docs/images/comparison.json

@@ -1,0 +1,22 @@
+{
+  "source": "CS2 menu, frozen captured frame",
+  "source_dimensions": [
+    2560,
+    1440
+  ],
+  "crop_xyxy": [
+    1080,
+    100,
+    1720,
+    850
+  ],
+  "crop_dimensions": [
+    640,
+    750
+  ],
+  "image_processing": "Identical pixel crop only; no resizing, sharpening, generated pixels or color changes.",
+  "input_original_max_error": 0,
+  "full_frame_rgb_mean_absolute_difference": 2.870935962818287,
+  "full_frame_rgb_max_difference": 55,
+  "scope": "Native-size bridge output; final native Lossless Scaling end-to-end test was not completed."
+}
