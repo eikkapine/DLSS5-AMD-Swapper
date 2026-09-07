@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "run_id": "20260907-host-timing-baseline",
+  "version": "development-host-timing",
+  "bridge_sha256": "075421cea1b2bb153204212724f64dd6cf86c7bdd5ca95a3f199169adea5e596",
+  "hash_association": "Provided by caller; verify with the deployment record, not the current executable alone",
+  "analysis_created_at_utc": "2026-09-07T20:24:41.270826+00:00",
+  "source_sha256": {
+    "cadence": "d31e27ed48f526b120e19cab3667e069f7002eab60a05039857eda447472b612",
+    "hip": "626884ff7461b43d4063cc5984ec9d6fff1066f70a4b1f3035fcfe7de8ff15df"
+  },
+  "cadence": {
+    "configuration_from_header": {
+      "width": 2560,
+      "height": 1440,
+      "suppress_identical_rgb": 1,
+      "transport": "gpu_shared"
+    },
+    "effect_state_recorded": false,
+    "shutdown_row_present": false,
+    "whole_recording": {
+      "elapsed_s": 90.523,
+      "changed_rgb_submissions": 1997,
+      "changed_rgb_per_s": 22.060691757895786,
+      "identical_submissions_suppressed": 7552,
+      "image_checks": 9549,
+      "keepalive_feeds": null,
+      "publication_rechecks": null
+    },
+    "selected_window": {
+      "requested_since_s": 20.0,
+      "requested_until_s": 60.0,
+      "actual_start_s": 20.109,
+      "actual_end_s": 59.355,
+      "summed_interval_s": 39.244,
+      "changed_rgb_submissions": 688,
+      "changed_rgb_per_s": 17.531342370808275,
+      "feed_iterations": 4140,
+      "feed_iterations_per_s": 105.49383345224747,
+      "capture_per_s_from_rounded_rates": 47.98042707165426,
+      "occluded_submissions": 0
+    }
+  },
+  "manual_report": {
+    "base_fps": 18.0,
+    "framegen_multiplier": 2.0,
+    "nominal_output_fps": 36.0,
+    "measured_display_fps": null
+  },
+  "limitations": [
+    "Analysis reads existing logs only; no tests, playback or GPU work are started.",
+    "Changed RGB submissions, HIP calls, neural jobs and displayed/generated FPS are distinct.",
+    "Nominal output FPS is arithmetic, not an LSFG/display measurement.",
+    "Window selection includes complete logged intervals only; endpoints are rounded.",
+    "Whole-run averages can include bypass, strength changes and startup; effect state may be missing.",
+    "Different gameplay runs are observational comparisons, not controlled A/B benchmarks.",
+    "HIP device-wait duration includes queued work and contention, not isolated kernel time.",
+    "HIP threads have overlapping windows and must not be summed as one critical path."
+  ],
+  "hip": {
+    "requested_since_s": 20.0,
+    "requested_until_s": 60.0,
+    "clock_origin": "HIP observer start; distinct from visible cadence start",
+    "threads": [
+      {
+        "label": "observed-thread-1",
+        "summed_window_ms": 39733.5255,
+        "nondefault_launches": 0,
+        "launch_calls_per_device_wait": 156.0,
+        "launch_wall_ms_per_device_wait": 0.15701601731601733,
+        "apis": {
+          "launch": {
+            "calls": 108108,
+            "wall_ms": 108.8121,
+            "mean_wall_ms_per_call": 0.0010065129315129314,
+            "maximum_call_ms": 0.5167,
+            "errors": 0
+          },
+          "device_wait": {
+            "calls": 693,
+            "wall_ms": 36119.0873,
+            "mean_wall_ms_per_call": 52.119895093795094,
+            "maximum_call_ms": 67.2301,
+            "errors": 0
+          },
+          "stream_wait": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "event_wait": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "copy": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "copy_async": {
+            "calls": 2772,
+            "wall_ms": 6.1739,
+            "mean_wall_ms_per_call": 0.0022272366522366523,
+            "maximum_call_ms": 0.0496,
+            "errors": 0
+          }
+        }
+      }
+    ]
+  }
+}

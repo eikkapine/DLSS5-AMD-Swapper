@@ -88,6 +88,18 @@ $comparisonOnImage = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\cs2
 $comparisonJson = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\comparison.json") -Name "comparison.json"
 $thirdParty = Resolve-RequiredFile -Path (Join-Path $autoScaleRoot "THIRD_PARTY.md") -Name "auto-scale THIRD_PARTY.md"
 $license = Resolve-RequiredFile -Path (Join-Path $repoRoot "LICENSE") -Name "nr-development LICENSE"
+$versionFile = Resolve-RequiredFile -Path (Join-Path $repoRoot "VERSION") -Name "project VERSION"
+$releaseManifest = Resolve-RequiredFile -Path (Join-Path $repoRoot "RELEASE.json") -Name "release artifact manifest"
+$version = (Get-Content -LiteralPath $versionFile -Raw).Trim()
+if ($version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw "Invalid project version" }
+$declared = Get-Content -LiteralPath $releaseManifest -Raw | ConvertFrom-Json
+if ($declared.version -ne $version) { throw "VERSION and RELEASE.json disagree" }
+foreach ($artifact in @(@{path=$bridgeExe; name='DlssNrBridge.exe'}, @{path=$autoScaleDll; name='Lossless.dll'})) {
+    $expected = @($declared.artifacts | Where-Object { $_.name -eq $artifact.name })
+    if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $artifact.path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected[0].sha256) {
+        throw "Artifact does not match the declared release: $($artifact.name)"
+    }
+}
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $outputRoot = (Resolve-Path -LiteralPath $OutputDirectory).Path
@@ -122,9 +134,22 @@ Add-PackageFile -Source $comparisonJson -RelativePath "docs\images\comparison.js
 Add-PackageFile -Source $thirdParty -RelativePath "docs\THIRD_PARTY.md" -Entries $entries
 Add-PackageFile -Source $license -RelativePath "LICENSE" -Entries $entries
 Add-PackageFile -Source $license -RelativePath "docs\LICENSE.txt" -Entries $entries
+Add-PackageFile -Source $versionFile -RelativePath "VERSION" -Entries $entries
+Add-PackageFile -Source $releaseManifest -RelativePath "RELEASE.json" -Entries $entries
+foreach ($relative in @('progress.md', 'async-recovery.md', 'fresh-output.md', 'gpu-handoff.md',
+        'neural-inference-plan.md', 'neural-speedup.md', 'neural-host-timing.md', 'inference-feed.md',
+        "releases\v$version.md")) {
+    $source = Resolve-RequiredFile -Path (Join-Path $docsRoot $relative) -Name $relative
+    Add-PackageFile -Source $source -RelativePath ("docs\" + $relative) -Entries $entries
+}
+Get-ChildItem -LiteralPath (Join-Path $docsRoot 'measurements') -Filter '*.json' -File | ForEach-Object {
+    Add-PackageFile -Source $_.FullName -RelativePath ("docs\measurements\" + $_.Name) -Entries $entries
+}
+Add-PackageFile -Source (Join-Path $repoRoot 'bridge\scripts\Analyze-Run.py') -RelativePath 'bridge\scripts\Analyze-Run.py' -Entries $entries
 
 $manifest = [pscustomobject]@{
     package = [System.IO.Path]::GetFileName($zipPath)
+    version = $version
     created_at = (Get-Date).ToString("o")
     contents_are_allowlisted = $true
     contains_vendor_runtime_or_lossless_scaling_files = $false

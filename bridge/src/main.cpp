@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <timeapi.h>
 #include <wrl/client.h>
 #include <d3d11.h>
 #include <d3d12.h>
@@ -26,6 +27,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <regex>
@@ -33,8 +35,12 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <immintrin.h>
+
+#include "gpu_transport.h"
+#include "hip_host_timing.h"
 
 using Microsoft::WRL::ComPtr;
 namespace wg = winrt::Windows::Graphics;
@@ -63,6 +69,11 @@ struct Options {
     bool noProxy = false;
     bool freezeSource = false;
     bool nativeResolution = false;
+    bool preciseScheduling = true;
+    bool repeatPresentations = false;
+    bool completionPacing = true;
+    bool cpuTransport = false;
+    bool hipHostTiming = true;
     std::wstring stopEventName;
     DWORD parentPid = 0;
     UINT warmupFrames = 301;
@@ -86,6 +97,89 @@ struct PerformanceStats {
         }
         ++frames;
     }
+};
+
+// The neural DLL polls for work with Sleep(1). Request precise wake-ups in
+// this process, including while its output is covered by Lossless Scaling.
+// This changes scheduling only; it does not skip work or alter GPU fences.
+class ScopedRenderScheduling {
+public:
+    explicit ScopedRenderScheduling(bool enabled) {
+        if (!enabled) {
+            return;
+        }
+        previous_.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        if (GetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                  &previous_, sizeof(previous_))) {
+            auto requested = previous_;
+            requested.ControlMask |= kControlledFlags;
+            requested.StateMask &= ~kControlledFlags;
+            policyApplied_ = SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                                   &requested, sizeof(requested)) != FALSE;
+            if (!policyApplied_) {
+                policyError_ = GetLastError();
+            }
+        } else {
+            policyError_ = GetLastError();
+        }
+        TIMECAPS caps{};
+        MMRESULT timerResult = timeGetDevCaps(&caps, sizeof(caps));
+        if (timerResult == TIMERR_NOERROR) {
+            const UINT period = std::max<UINT>(1, caps.wPeriodMin);
+            if (period <= caps.wPeriodMax) {
+                timerResult = timeBeginPeriod(period);
+                if (timerResult == TIMERR_NOERROR) {
+                    period_ = period;
+                }
+            } else {
+                timerResult = TIMERR_NOCANDO;
+            }
+        }
+        SYSTEMTIME now{};
+        GetLocalTime(&now);
+        std::ofstream log("bridge-scheduling.log", std::ios::app);
+        log << now.wYear << '-' << now.wMonth << '-' << now.wDay << ' '
+            << now.wHour << ':' << now.wMinute << ':' << now.wSecond
+            << " pid=" << GetCurrentProcessId()
+            << " timer_period_ms=" << period_
+            << " timer_result=" << timerResult
+            << " foreground_qos_and_occlusion_policy=" << policyApplied_
+            << " policy_error=" << policyError_ << '\n';
+    }
+
+    ~ScopedRenderScheduling() {
+        if (period_ != 0) {
+            timeEndPeriod(period_);
+        }
+        if (policyApplied_) {
+            // Preserve any unrelated policy changed since this scope began.
+            PROCESS_POWER_THROTTLING_STATE current{};
+            current.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+            if (GetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                      &current, sizeof(current))) {
+                current.ControlMask = (current.ControlMask & ~kControlledFlags)
+                                    | (previous_.ControlMask & kControlledFlags);
+                current.StateMask = (current.StateMask & ~kControlledFlags)
+                                  | (previous_.StateMask & kControlledFlags);
+                SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                      &current, sizeof(current));
+            } else {
+                SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+                                      &previous_, sizeof(previous_));
+            }
+        }
+    }
+
+    ScopedRenderScheduling(const ScopedRenderScheduling&) = delete;
+    ScopedRenderScheduling& operator=(const ScopedRenderScheduling&) = delete;
+
+private:
+    static constexpr ULONG kControlledFlags = PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                                           | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    PROCESS_POWER_THROTTLING_STATE previous_{};
+    UINT period_ = 0;
+    DWORD policyError_ = ERROR_SUCCESS;
+    bool policyApplied_ = false;
 };
 
 std::string NarrowAscii(const std::wstring& value) {
@@ -319,6 +413,16 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.freezeSource = true;
         } else if (arg == L"--native-resolution") {
             options.nativeResolution = true;
+        } else if (arg == L"--default-scheduling") {
+            options.preciseScheduling = false;
+        } else if (arg == L"--repeat-presentations") {
+            options.repeatPresentations = true;
+        } else if (arg == L"--fixed-neural-feed") {
+            options.completionPacing = false;
+        } else if (arg == L"--cpu-transport") {
+            options.cpuTransport = true;
+        } else if (arg == L"--no-hip-timing") {
+            options.hipHostTiming = false;
         } else if (arg == L"--warmup-frames") {
             options.warmupFrames = std::stoul(needValue(L"--warmup-frames"));
         } else if (arg == L"--max-fps") {
@@ -479,14 +583,46 @@ public:
         return closed_.load();
     }
 
-    std::optional<FramePixels> TryCapture() {
+    ID3D11Device* device() const { return d3dDevice_.Get(); }
+    ID3D11DeviceContext* context() const { return d3dContext_.Get(); }
+
+    // The caller retains the WGC frame until the input-ready fence and the
+    // neural feed copy have completed. The capture pool cannot recycle a
+    // surface while our GPU is still reading it.
+    wgc::Direct3D11CaptureFrame TryCaptureTexture(ComPtr<ID3D11Texture2D>& texture) {
+        texture.Reset();
         if (!IsWindow(source_) || IsIconic(source_)) {
             closed_.store(true);
-            return std::nullopt;
+            return nullptr;
+        }
+        auto frame = framePool_.TryGetNextFrame();
+        if (!frame) return nullptr;
+        if (auto newer = framePool_.TryGetNextFrame()) {
+            frame.Close();
+            frame = std::move(newer);
+        }
+        const auto size = frame.ContentSize();
+        if (size.Width <= 0 || size.Height <= 0) {
+            frame.Close();
+            return nullptr;
+        }
+        if (size.Width != lastSize_.Width || size.Height != lastSize_.Height) {
+            frame.Close();
+            throw std::runtime_error("Native source dimensions changed; restart scaling at the new resolution");
+        }
+        auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+        Check(access->GetInterface(IID_PPV_ARGS(&texture)), "Get GPU capture texture");
+        return frame;
+    }
+
+    bool TryCapture(FramePixels& result) {
+        if (!IsWindow(source_) || IsIconic(source_)) {
+            closed_.store(true);
+            return false;
         }
         auto frame = framePool_.TryGetNextFrame();
         if (!frame) {
-            return std::nullopt;
+            return false;
         }
         // The capture pool has two slots. Prefer the newest complete frame rather
         // than displaying a queued older frame after a slow neural evaluation.
@@ -496,7 +632,7 @@ public:
         }
         const auto size = frame.ContentSize();
         if (size.Width <= 0 || size.Height <= 0) {
-            return std::nullopt;
+            return false;
         }
         if (size.Width != lastSize_.Width || size.Height != lastSize_.Height) {
             lastSize_ = size;
@@ -521,13 +657,14 @@ public:
             Check(d3dDevice_->CreateTexture2D(&stagingDesc_, nullptr, &staging_), "CreateTexture2D staging");
         }
 
+        result.width = desc.Width;
+        result.height = desc.Height;
+        // Reuse caller-owned storage; allocate before mapping so an allocation
+        // failure cannot leave the staging texture mapped.
+        result.rgba.resize(static_cast<size_t>(result.width) * result.height * 4);
         d3dContext_->CopyResource(staging_.Get(), texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         Check(d3dContext_->Map(staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map staging");
-        FramePixels result;
-        result.width = desc.Width;
-        result.height = desc.Height;
-        result.rgba.resize(static_cast<size_t>(result.width) * result.height * 4);
         const size_t rowBytes = static_cast<size_t>(result.width) * 4;
         if (mapped.RowPitch == rowBytes) {
             SwizzleBgraToRgba(static_cast<const uint8_t*>(mapped.pData), result.rgba.data(), static_cast<size_t>(result.width) * result.height);
@@ -539,7 +676,7 @@ public:
             }
         }
         d3dContext_->Unmap(staging_.Get(), 0);
-        return result;
+        return true;
     }
 
 private:
@@ -631,6 +768,23 @@ FramePixels PrepareInputFrame(const FramePixels& src, const Options& options) {
     return ScaleToFit(src, options.width, options.height);
 }
 
+const FramePixels& SelectInputFrame(const FramePixels& src,
+                                   const Options& options,
+                                   std::optional<FramePixels>& prepared,
+                                   bool sourceChanged) {
+    if (options.nativeResolution) {
+        ValidateNativeDimensions(src, options.width, options.height);
+        return src;
+    }
+    if (src.width == options.width && src.height == options.height) {
+        return src;
+    }
+    if (!prepared || sourceChanged) {
+        prepared = PrepareInputFrame(src, options);
+    }
+    return *prepared;
+}
+
 class D3D12Presenter {
 public:
     D3D12Presenter(HWND hwnd, UINT width, UINT height) : hwnd_(hwnd), width_(width), height_(height) {
@@ -644,9 +798,7 @@ public:
             try {
                 WaitForGpu(5000);
             } catch (const std::exception& ex) {
-                // Destruction must not terminate the process while unwinding a
-                // GPU error; the original exception is reported by wmain.
-                std::cerr << "D3D12 cleanup: " << ex.what() << "\n";
+                bridge_gpu::StopAfterUnconfirmedGpuCompletion(ex.what());
             }
             CloseHandle(fenceEvent_);
         }
@@ -657,9 +809,14 @@ public:
         }
     }
 
-    void Present(const FramePixels& frame) {
+    void Present(const FramePixels& frame, bool inputChanged = true) {
         frameIndex_ = swapChain_->GetCurrentBackBufferIndex();
-        Upload(frame);
+        // The upload heap retains its bytes. Only rewrite it for a newly
+        // captured/prepared input; every neural feed Present still happens.
+        if (inputChanged || !uploadInitialized_) {
+            Upload(frame);
+            uploadInitialized_ = true;
+        }
         ResetCommands();
         SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_DEST);
         D3D12_TEXTURE_COPY_LOCATION dst{};
@@ -684,6 +841,59 @@ public:
             Check(present, "Present");
         }
         ++presentCount_;
+    }
+
+    ID3D12Device* device() const { return device_.Get(); }
+
+    void DrainForShutdown() { WaitForGpu(5000); }
+
+    void PresentGpu(bridge_gpu::FrameTransport& transport) {
+        frameIndex_ = swapChain_->GetCurrentBackBufferIndex();
+        // The D3D11 signal has already been flushed before this queue wait.
+        Check(queue_->Wait(transport.inputReadyFence(), transport.inputReadyValue()),
+              "Wait for GPU capture texture");
+        ResetCommands();
+        auto acquire = Transition(transport.inputResource(), D3D12_RESOURCE_STATE_COMMON,
+                                  D3D12_RESOURCE_STATE_COPY_SOURCE);
+        commandList_->ResourceBarrier(1, &acquire);
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_DEST);
+        commandList_->CopyResource(backBuffers_[frameIndex_].Get(), transport.inputResource());
+        auto release = Transition(transport.inputResource(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                  D3D12_RESOURCE_STATE_COMMON);
+        commandList_->ResourceBarrier(1, &release);
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
+        // Retain the established allocator/input ownership fence. This wait
+        // also permits the caller to release the WGC capture frame safely.
+        ExecuteCommands(5000);
+        Check(swapChain_->Present(0, 0), "Present GPU neural feed");
+        uploadInitialized_ = false;
+        ++presentCount_;
+    }
+
+    void CopyOutputGpu(bridge_gpu::FrameTransport& transport) {
+        if (transport.consumerDoneValue() != 0) {
+            Check(queue_->Wait(transport.consumerDoneFence(), transport.consumerDoneValue()),
+                  "Wait for prior GPU output consumer");
+        }
+        ResetCommands();
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        auto acquire = Transition(transport.outputResource(), D3D12_RESOURCE_STATE_COMMON,
+                                  D3D12_RESOURCE_STATE_COPY_DEST);
+        commandList_->ResourceBarrier(1, &acquire);
+        commandList_->CopyResource(transport.outputResource(), backBuffers_[frameIndex_].Get());
+        auto release = Transition(transport.outputResource(), D3D12_RESOURCE_STATE_COPY_DEST,
+                                  D3D12_RESOURCE_STATE_COMMON);
+        commandList_->ResourceBarrier(1, &release);
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
+        // Compose waits on outputReady on D3D11, then completes its bounded
+        // consumer fence before returning. That transitively completes this
+        // copy and allocator use, so a separate CPU wait here is redundant.
+        // The caller must Compose (or DrainForShutdown on error) before any
+        // subsequent ResetCommands or release of the shared texture.
+        SubmitCommands();
+        const UINT64 outputValue = transport.NextOutputValue();
+        Check(queue_->Signal(transport.outputReadyFence(), outputValue), "Signal GPU neural output copy");
+        transport.WaitForOutput(outputValue);
     }
 
     FramePixels CaptureBackBuffer() {
@@ -810,6 +1020,10 @@ private:
         if (!uploadMapped_) {
             throw std::runtime_error("Upload buffer is not mapped");
         }
+        if (frame.width != width_ || frame.height != height_ ||
+            frame.rgba.size() != static_cast<size_t>(width_) * height_ * 4) {
+            throw std::runtime_error("Neural presenter received an unexpected frame size");
+        }
         const auto* src = frame.rgba.data();
         auto* dst = uploadMapped_;
         const size_t rowBytes = static_cast<size_t>(width_) * 4;
@@ -829,21 +1043,36 @@ private:
         Check(commandList_->Reset(allocator_.Get(), nullptr), "commandList Reset");
     }
 
-    void ExecuteCommands(DWORD timeoutMs) {
+    void SubmitCommands() {
         Check(commandList_->Close(), "Close commandList");
         ID3D12CommandList* lists[] = {commandList_.Get()};
         queue_->ExecuteCommandLists(1, lists);
+    }
+
+    void ExecuteCommands(DWORD timeoutMs) {
+        SubmitCommands();
         WaitForGpu(timeoutMs);
     }
 
     void WaitForGpu(DWORD timeoutMs) {
         const UINT64 value = ++fenceValue_;
         Check(queue_->Signal(fence_.Get(), value), "fence Signal");
-        if (fence_->GetCompletedValue() < value) {
+        auto completedValue = [&]() {
+            const UINT64 completed = fence_->GetCompletedValue();
+            if (completed == UINT64_MAX) {
+                Check(device_->GetDeviceRemovedReason(), "D3D12 device removed during fence wait");
+                throw std::runtime_error("D3D12 fence reported device removal");
+            }
+            return completed;
+        };
+        if (completedValue() < value) {
             Check(fence_->SetEventOnCompletion(value, fenceEvent_), "SetEventOnCompletion");
             DWORD wait = WaitForSingleObject(fenceEvent_, timeoutMs);
             if (wait != WAIT_OBJECT_0) {
                 throw std::runtime_error("Timed out waiting for D3D12 fence");
+            }
+            if (completedValue() < value) {
+                throw std::runtime_error("D3D12 fence signaled before submitted work completed");
             }
         }
     }
@@ -873,6 +1102,7 @@ private:
     D3D12_RESOURCE_STATES bufferStates_[kBufferCount]{};
     ComPtr<ID3D12Resource> upload_;
     uint8_t* uploadMapped_ = nullptr;
+    bool uploadInitialized_ = false;
     ComPtr<ID3D12Resource> readback_;
     UINT64 rowPitch_ = 0;
     UINT frameIndex_ = 0;
@@ -947,6 +1177,17 @@ struct RuntimeHealth {
     bool fatal = false;
     std::string detail;
 };
+
+bool UsesAsyncBackbufferRuntime() {
+    const auto ini = std::filesystem::absolute("dlssnr_on_amd.ini");
+    auto setting = [&](const wchar_t* name) {
+        return GetPrivateProfileIntW(L"DlssNrOnAmd", name, -1, ini.c_str());
+    };
+    // Missing or changed settings fail closed to the original feed cadence.
+    // In particular, never defer a producer needed by inline/FSR work.
+    return setting(L"Enabled") == 1 && setting(L"Inline") == 0 &&
+           setting(L"UseFsrInputs") == 0 && setting(L"Interop") == 1;
+}
 
 
 void ResetRuntimeLogForCurrentLaunch() {
@@ -1172,9 +1413,39 @@ private:
     std::vector<int> registered_;
 };
 
+// Compare every displayed RGB byte, without a threshold or hash collisions.
+// Alpha is excluded because visible upload always replaces it with 255.
+bool SameVisibleRgb(const FramePixels& left, const FramePixels& right) {
+    if (left.width != right.width || left.height != right.height ||
+        left.rgba.size() != right.rgba.size()) {
+        return false;
+    }
+    const __m256i rgbMask = _mm256_set1_epi32(0x00ffffff);
+    size_t offset = 0;
+    for (; offset + 32 <= left.rgba.size(); offset += 32) {
+        const __m256i a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(left.rgba.data() + offset));
+        const __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(right.rgba.data() + offset));
+        const __m256i difference = _mm256_and_si256(_mm256_xor_si256(a, b), rgbMask);
+        if (!_mm256_testz_si256(difference, difference)) {
+            return false;
+        }
+    }
+    for (; offset + 3 < left.rgba.size(); offset += 4) {
+        if (left.rgba[offset] != right.rgba[offset] ||
+            left.rgba[offset + 1] != right.rgba[offset + 1] ||
+            left.rgba[offset + 2] != right.rgba[offset + 2]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 class D3D11Presenter {
 public:
-    D3D11Presenter(HWND hwnd, UINT width, UINT height) : hwnd_(hwnd), width_(width), height_(height) {
+    D3D11Presenter(HWND hwnd, UINT width, UINT height, bool repeatPresentations,
+                   ID3D11Device* sharedDevice, ID3D11DeviceContext* sharedContext)
+        : hwnd_(hwnd), width_(width), height_(height), device_(sharedDevice), context_(sharedContext),
+          repeatPresentations_(repeatPresentations) {
         DXGI_SWAP_CHAIN_DESC desc{};
         desc.BufferDesc.Width = width_;
         desc.BufferDesc.Height = height_;
@@ -1185,21 +1456,13 @@ public:
         desc.OutputWindow = hwnd_;
         desc.Windowed = TRUE;
         desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-        UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-        D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
-        Check(D3D11CreateDeviceAndSwapChain(nullptr,
-                                           D3D_DRIVER_TYPE_HARDWARE,
-                                           nullptr,
-                                           flags,
-                                           levels,
-                                           static_cast<UINT>(std::size(levels)),
-                                           D3D11_SDK_VERSION,
-                                           &desc,
-                                           &swapChain_,
-                                           &device_,
-                                           nullptr,
-                                           &context_),
-              "D3D11CreateDeviceAndSwapChain");
+        ComPtr<IDXGIDevice> dxgiDevice;
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIFactory> factory;
+        Check(device_.As(&dxgiDevice), "Query visible DXGI device");
+        Check(dxgiDevice->GetAdapter(&adapter), "Get visible adapter");
+        Check(adapter->GetParent(IID_PPV_ARGS(&factory)), "Get visible DXGI factory");
+        Check(factory->CreateSwapChain(device_.Get(), &desc, &swapChain_), "Create visible D3D11 swapchain");
 
         D3D11_TEXTURE2D_DESC uploadDesc{};
         uploadDesc.Width = width_;
@@ -1212,12 +1475,24 @@ public:
         uploadDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         uploadDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         Check(device_->CreateTexture2D(&uploadDesc, nullptr, &upload_), "CreateTexture2D visible upload");
+
+        ComPtr<ID3D11Texture2D> backBuffer;
+        Check(swapChain_->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "Get visible GPU render target");
+        Check(device_->CreateRenderTargetView(backBuffer.Get(), nullptr, &gpuTarget_), "Create visible GPU render target");
     }
 
-    void Present(const FramePixels& frame) {
+    bool Present(const FramePixels& frame, bool forcePresent = false) {
         if (frame.width != width_ || frame.height != height_ || frame.rgba.size() != static_cast<size_t>(width_) * height_ * 4) {
             throw std::runtime_error("Visible presenter received an unexpected frame size");
         }
+        const bool changed = !hasPresentedFrame_ || !SameVisibleRgb(frame, lastPresentedFrame_);
+        if (!repeatPresentations_ && !forcePresent && !repaintRequired_ && !changed) {
+            ++duplicatesSkipped_;
+            return false;
+        }
+        // Allocate before mapping GPU memory. Retain this allocation for later
+        // comparisons; copy pixels only after an accepted visible submission.
+        lastPresentedFrame_.rgba.resize(frame.rgba.size());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         Check(context_->Map(upload_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped), "Map visible upload");
         const size_t rowBytes = static_cast<size_t>(width_) * 4;
@@ -1235,13 +1510,57 @@ public:
         ComPtr<ID3D11Texture2D> backBuffer;
         Check(swapChain_->GetBuffer(0, IID_PPV_ARGS(&backBuffer)), "D3D11 GetBuffer");
         context_->CopyResource(backBuffer.Get(), upload_.Get());
-        Check(swapChain_->Present(1, 0), "D3D11 Present");
+        const HRESULT result = swapChain_->Present(1, 0);
+        Check(result, "D3D11 Present");
         ++presentCount_;
+        if (result == DXGI_STATUS_OCCLUDED) {
+            // Keep retrying while covered. Do not let a cached identical image
+            // prevent a successful repaint after the window becomes visible.
+            repaintRequired_ = true;
+            ++occludedSubmissions_;
+        } else {
+            if (changed) {
+                ++changedRgbUpdates_;
+                lastPresentedFrame_.width = frame.width;
+                lastPresentedFrame_.height = frame.height;
+                std::memcpy(lastPresentedFrame_.rgba.data(), frame.rgba.data(), frame.rgba.size());
+            }
+            hasPresentedFrame_ = true;
+            repaintRequired_ = false;
+        }
+        return true;
+    }
+
+    bool PresentGpu(bridge_gpu::FrameTransport& transport, const bridge_gpu::FrameStatistics& stats,
+                    bool forcePresent = false) {
+        if (!repeatPresentations_ && !forcePresent && !repaintRequired_ && !stats.changed) {
+            ++duplicatesSkipped_;
+            return false;
+        }
+        transport.DrawVisible(gpuTarget_.Get());
+        const HRESULT result = swapChain_->Present(1, 0);
+        Check(result, "Present visible GPU image");
+        ++presentCount_;
+        if (result == DXGI_STATUS_OCCLUDED) {
+            repaintRequired_ = true;
+            ++occludedSubmissions_;
+        } else {
+            if (stats.changed) ++changedRgbUpdates_;
+            transport.AcceptPresentation();
+            repaintRequired_ = false;
+            hasPresentedFrame_ = false; // A later CPU fallback must refresh its own history.
+        }
+        transport.FinishPresentation();
+        return true;
     }
 
     uint64_t presentCount() const {
         return presentCount_;
     }
+
+    uint64_t changedRgbUpdates() const { return changedRgbUpdates_; }
+    uint64_t duplicatesSkipped() const { return duplicatesSkipped_; }
+    uint64_t occludedSubmissions() const { return occludedSubmissions_; }
 
 private:
     HWND hwnd_ = nullptr;
@@ -1251,7 +1570,15 @@ private:
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<IDXGISwapChain> swapChain_;
     ComPtr<ID3D11Texture2D> upload_;
+    ComPtr<ID3D11RenderTargetView> gpuTarget_;
     uint64_t presentCount_ = 0;
+    uint64_t changedRgbUpdates_ = 0;
+    uint64_t duplicatesSkipped_ = 0;
+    uint64_t occludedSubmissions_ = 0;
+    FramePixels lastPresentedFrame_;
+    bool hasPresentedFrame_ = false;
+    bool repaintRequired_ = false;
+    bool repeatPresentations_ = false;
 };
 
 void UpdateBridgeTitle(HWND hwnd, bool enabled, float strength, bool frozenSource) {
@@ -1293,6 +1620,8 @@ void WriteReport(const std::filesystem::path& path,
     report << "visible_elapsed_seconds=" << visibleSeconds << "\n";
     report << "bridge_present_fps=" << (visibleSeconds > 0 ? visiblePresented / visibleSeconds : 0) << "\n";
     report << "max_fps=" << options.maxFps << "\n";
+    report << "precise_scheduling_requested=" << (options.preciseScheduling && !options.noProxy) << "\n";
+    report << "suppress_identical_rgb=" << (!options.repeatPresentations && !options.noProxy) << "\n";
     report << "fps_note=bridge presents are not unique neural jobs or game FPS\n";
     constexpr const char* stageNames[] = {"capture", "prepare", "nr_present", "readback", "guard_blend", "visible_present"};
     for (size_t i = 0; i < performance.stageMs.size(); ++i) {
@@ -1367,13 +1696,31 @@ int wmain(int argc, wchar_t** argv) {
             return false;
         };
 
+        auto waitForActivity = [&](std::chrono::milliseconds duration, bool includeHipProgress) {
+            std::array<HANDLE, 3> handles{};
+            DWORD count = 0;
+            if (stopEvent) handles[count++] = stopEvent.get();
+            if (parentProcess) handles[count++] = parentProcess.get();
+            if (includeHipProgress) {
+                if (HANDLE event = HipWorkProgressEvent()) handles[count++] = event;
+            }
+            const DWORD timeout = static_cast<DWORD>(std::clamp<int64_t>(duration.count(), 1, 5));
+            if (MsgWaitForMultipleObjectsEx(count, count ? handles.data() : nullptr,
+                    timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_FAILED) {
+                throw std::runtime_error("Bridge activity wait failed: " + std::to_string(GetLastError()));
+            }
+        };
+
+        ScopedRenderScheduling scheduling(options.preciseScheduling && !options.noProxy);
         [[maybe_unused]] HMODULE proxy = nullptr;
+        const char* hipTimingStatus = "no_proxy";
         if (!options.noProxy) {
             ResetRuntimeLogForCurrentLaunch();
             proxy = LoadLibraryW(L"version.dll");
             if (!proxy) {
                 throw std::runtime_error("LoadLibraryW(version.dll) failed");
             }
+            hipTimingStatus = StartHipHostTiming(proxy, options.hipHostTiming);
             if (options.startupDelayMs > 0) {
                 Sleep(options.startupDelayMs);
             }
@@ -1382,11 +1729,18 @@ int wmain(int argc, wchar_t** argv) {
         HINSTANCE instance = GetModuleHandleW(nullptr);
         WindowCapture capture(source);
         const auto start = std::chrono::steady_clock::now();
-        // A limit is a start-to-start budget, never a delay added after work.
-        // Default pacing comes from the visible swapchain's single vblank wait.
-        const auto frameInterval = options.maxFps > 0
+        // The producer must keep feeding the asynchronous runtime even when
+        // visible output is identical. Bound polling independently of visible
+        // Present so suppressing an upload cannot create an uncapped busy loop.
+        // This is a start-to-start budget, not extra sleep after GPU work.
+        const bool suppressIdenticalRgb = !options.repeatPresentations && !options.noProxy;
+        const auto requestedInterval = options.maxFps > 0
             ? std::chrono::nanoseconds(1000000000ULL / options.maxFps)
             : std::chrono::nanoseconds::zero();
+        const auto minimumFeedInterval = suppressIdenticalRgb
+            ? std::chrono::nanoseconds(1000000000ULL / 120)
+            : std::chrono::nanoseconds::zero();
+        const auto frameInterval = std::max(requestedInterval, minimumFeedInterval);
         auto nextFrameAt = std::chrono::steady_clock::now();
         uint64_t capturedFrames = 0;
         uint64_t warmupFrames = 0;
@@ -1397,9 +1751,35 @@ int wmain(int argc, wchar_t** argv) {
         bool pendingHotkeySnapshot = false;
         UINT consecutiveBrokenNrFrames = 0;
         std::optional<FramePixels> lastInputFrame;
-        std::optional<FramePixels> lastOriginalFrame;
+        std::optional<FramePixels> preparedInputFrame;
         std::optional<FramePixels> lastNrFrame;
         std::optional<FramePixels> lastDisplayFrame;
+        FramePixels captureFrame;
+        std::optional<bool> sourceNonBlack;
+
+        auto captureLatestInput = [&]() -> bool {
+            if (!capture.TryCapture(captureFrame)) {
+                return false;
+            }
+            // The first native frame establishes the dimensions below.
+            if (options.nativeResolution && lastInputFrame) {
+                ValidateNativeDimensions(captureFrame, options.width, options.height);
+            }
+            sourceActualWidth = captureFrame.width;
+            sourceActualHeight = captureFrame.height;
+            ++capturedFrames;
+            if (options.freezeSource && lastInputFrame) {
+                return false;
+            }
+            if (!lastInputFrame) {
+                lastInputFrame.emplace();
+            }
+            // Keep both allocations alive across captures. No pixel data is
+            // copied or discarded when promoting the newest captured image.
+            std::swap(*lastInputFrame, captureFrame);
+            sourceNonBlack.reset();
+            return true;
+        };
 
         auto pumpMessages = [&]() -> bool {
             MSG msg{};
@@ -1425,12 +1805,7 @@ int wmain(int argc, wchar_t** argv) {
                 if (capture.closed()) {
                     throw std::runtime_error("Source window closed before native-resolution dimensions were captured");
                 }
-                auto maybeFrame = capture.TryCapture();
-                if (maybeFrame) {
-                    sourceActualWidth = maybeFrame->width;
-                    sourceActualHeight = maybeFrame->height;
-                    lastInputFrame = std::move(*maybeFrame);
-                    ++capturedFrames;
+                if (captureLatestInput()) {
                     break;
                 }
                 if (std::chrono::steady_clock::now() >= firstFrameDeadline) {
@@ -1467,28 +1842,16 @@ int wmain(int argc, wchar_t** argv) {
             }
             const auto now = std::chrono::steady_clock::now();
             if (now < nextFrameAt) {
-                std::this_thread::sleep_for(std::min(std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameAt - now), std::chrono::milliseconds(5)));
+                std::this_thread::sleep_for(std::min(std::chrono::ceil<std::chrono::milliseconds>(nextFrameAt - now), std::chrono::milliseconds(5)));
                 continue;
             }
-            auto maybeFrame = capture.TryCapture();
-            if (maybeFrame) {
-                if (options.nativeResolution) {
-                    ValidateNativeDimensions(*maybeFrame, options.width, options.height);
-                }
-                sourceActualWidth = maybeFrame->width;
-                sourceActualHeight = maybeFrame->height;
-                if (!options.freezeSource || !lastInputFrame) {
-                    lastInputFrame = std::move(*maybeFrame);
-                }
-                ++capturedFrames;
-            }
+            const bool inputChanged = captureLatestInput();
             if (!lastInputFrame) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
-            FramePixels original = PrepareInputFrame(*lastInputFrame, options);
-            lastOriginalFrame = original;
-            nrPresenter.Present(original);
+            const FramePixels& original = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, inputChanged);
+            nrPresenter.Present(original, inputChanged);
             ++warmupFrames;
             nextFrameAt = now + frameInterval;
         }
@@ -1510,32 +1873,26 @@ int wmain(int argc, wchar_t** argv) {
                 if (options.seconds > 0 && std::chrono::steady_clock::now() - start >= std::chrono::seconds(options.seconds)) {
                     throw std::runtime_error("Timed out before DLSS-NR runtime health was verified");
                 }
-                auto maybeFrame = capture.TryCapture();
-                if (maybeFrame) {
-                    if (options.nativeResolution) {
-                        ValidateNativeDimensions(*maybeFrame, options.width, options.height);
-                    }
-                    sourceActualWidth = maybeFrame->width;
-                    sourceActualHeight = maybeFrame->height;
-                    if (!options.freezeSource || !lastInputFrame) {
-                        lastInputFrame = std::move(*maybeFrame);
-                    }
-                    ++capturedFrames;
-                }
+                const bool inputChanged = captureLatestInput();
                 if (!lastInputFrame) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                     continue;
                 }
-                FramePixels original = PrepareInputFrame(*lastInputFrame, options);
-                lastOriginalFrame = original;
-                nrPresenter.Present(original);
-                lastNrFrame = nrPresenter.CaptureBackBuffer();
+                const FramePixels& original = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, inputChanged);
+                nrPresenter.Present(original, inputChanged);
+                if (!lastNrFrame) {
+                    lastNrFrame.emplace();
+                }
+                nrPresenter.CaptureBackBuffer(*lastNrFrame);
                 RuntimeHealth health = ReadRuntimeHealth();
                 lastHealthDetail = health.detail;
                 if (health.fatal) {
                     throw std::runtime_error("DLSS-NR runtime is not healthy: " + health.detail);
                 }
-                healthy = health.logPresent && health.completedJob && (!SourceMeaningfullyNonBlack(original) || FrameHasNonBlackPixels(*lastNrFrame));
+                if (!sourceNonBlack.has_value()) {
+                    sourceNonBlack = SourceMeaningfullyNonBlack(original);
+                }
+                healthy = health.logPresent && health.completedJob && (!*sourceNonBlack || FrameHasNonBlackPixels(*lastNrFrame));
                 if (!healthy) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(33));
                 }
@@ -1547,33 +1904,175 @@ int wmain(int argc, wchar_t** argv) {
 
         ShowWindow(nrWindow, SW_HIDE);
         HWND bridge = CreateRenderWindow(instance, L"DLSS NR Bridge", options.width, options.height, true, true);
-        D3D11Presenter visiblePresenter(bridge, options.width, options.height);
+        D3D11Presenter visiblePresenter(bridge, options.width, options.height, !suppressIdenticalRgb,
+                                       capture.device(), capture.context());
+        std::unique_ptr<bridge_gpu::FrameTransport> gpuTransport;
+        std::string transportDetail = "cpu: diagnostic, fixed-size, bypass, or explicit compatibility mode";
+        if (options.nativeResolution && !options.noProxy && !options.cpuTransport &&
+            !options.saveCaptures && !options.freezeSource) {
+            try {
+                gpuTransport = std::make_unique<bridge_gpu::FrameTransport>(
+                    capture.device(), capture.context(), nrPresenter.device(), options.width, options.height);
+                const FramePixels& initial = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, false);
+                gpuTransport->SeedInput(initial.rgba.data(), options.width * 4);
+                transportDetail = "gpu_shared: d3d11_nt textures imported into D3D12; native pixels; 16-byte status readback per compose";
+            } catch (const std::exception& error) {
+                gpuTransport.reset();
+                // Unsupported sharing may use the existing CPU path. Device
+                // loss must still stop the session instead of being concealed.
+                Check(capture.device()->GetDeviceRemovedReason(), "Capture device removed during transport setup");
+                Check(nrPresenter.device()->GetDeviceRemovedReason(), "Neural device removed during transport setup");
+                transportDetail = std::string("cpu_fallback: ") + error.what();
+            }
+        }
         Hotkeys hotkeys;
         bool effectEnabled = true;
         float strength = 1.0f;
         UpdateBridgeTitle(bridge, effectEnabled, strength, options.freezeSource);
 
+        auto guardBlackOutput = [&](bool sourceIsNonblack, bool neuralIsNonblack) {
+            if (!options.noProxy && sourceIsNonblack && !neuralIsNonblack) {
+                ++consecutiveBrokenNrFrames;
+                effectEnabled = false;
+                UpdateBridgeTitle(bridge, effectEnabled, strength, options.freezeSource);
+                if (consecutiveBrokenNrFrames >= 30) {
+                    throw std::runtime_error("DLSS-NR output stayed black for 30 presented frames while source was nonblack");
+                }
+            } else if (neuralIsNonblack || !sourceIsNonblack) {
+                consecutiveBrokenNrFrames = 0;
+            }
+        };
+
         auto saveSnapshot = [&](const std::string& prefix, uint64_t index) {
-            if (!options.saveCaptures || !lastInputFrame || !lastOriginalFrame || !lastNrFrame || !lastDisplayFrame) {
+            if (!options.saveCaptures || !lastInputFrame || !lastNrFrame || !lastDisplayFrame) {
                 return;
             }
+            const FramePixels& original = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, false);
             std::ostringstream name;
             name << prefix << "_" << std::setw(3) << std::setfill('0') << index
                  << "_" << (effectEnabled ? "on" : "off") << "_" << std::fixed << std::setprecision(1) << strength;
             const std::string stem = name.str();
             SavePpm(options.captureDir / (stem + "_input.ppm"), *lastInputFrame);
-            SavePpm(options.captureDir / (stem + "_original.ppm"), *lastOriginalFrame);
+            SavePpm(options.captureDir / (stem + "_original.ppm"), original);
             SavePpm(options.captureDir / (stem + "_nr.ppm"), *lastNrFrame);
             SavePpm(options.captureDir / (stem + "_display.ppm"), *lastDisplayFrame);
         };
 
         auto nextRuntimeLogCheck = std::chrono::steady_clock::now() + std::chrono::seconds(1);
 
+        const bool completionPacingAvailable = options.completionPacing && gpuTransport &&
+            suppressIdenticalRgb && ReadHipWorkProgress().available;
+        bool asyncBackbufferRuntime = completionPacingAvailable && UsesAsyncBackbufferRuntime();
+        uint64_t seenReturnedWaits = ReadHipWorkProgress().returnedWaits;
+        uint64_t busyFeedDeferrals = 0;
+        uint64_t completionHintFeeds = 0;
+        uint64_t publicationRechecks = 0;
+        uint64_t keepaliveFeeds = 0;
+        uint64_t prefetchedCaptures = 0;
+        auto lastGpuFeedAt = std::chrono::steady_clock::now();
+        constexpr auto feedKeepalive = std::chrono::milliseconds(100);
+
+        // While neural work is busy, keep just the latest *unsubmitted* capture.
+        // This releases older pool slots without GPU copies or pixel readback.
+        // Once submitted, ownership moves into the existing fenced try/catch.
+        wgc::Direct3D11CaptureFrame prefetchedFrame{nullptr};
+        ComPtr<ID3D11Texture2D> prefetchedTexture;
+        auto prefetchLatestCapture = [&]() {
+            ComPtr<ID3D11Texture2D> texture;
+            auto frame = capture.TryCaptureTexture(texture);
+            if (!frame) return;
+            if (prefetchedFrame) prefetchedFrame.Close();
+            prefetchedFrame = std::move(frame);
+            prefetchedTexture = std::move(texture);
+            ++capturedFrames;
+            ++prefetchedCaptures;
+        };
+
         bool readyWritten = false;
         bool running = true;
         FramePixels reusableNrFrame;
         PerformanceStats performance;
         const auto visibleStart = std::chrono::steady_clock::now();
+        auto cadenceAt = visibleStart;
+        uint64_t cadenceFeed = nrPresenter.presentCount();
+        uint64_t cadenceChanged = 0;
+        uint64_t cadencePresented = 0;
+        uint64_t cadenceSkipped = 0;
+        uint64_t cadenceOccluded = 0;
+        uint64_t gpuTransportFrames = 0;
+        uint64_t cadenceGpuFrames = 0;
+        uint64_t cadenceCaptured = capturedFrames;
+        uint64_t cadenceIterations = 0;
+        std::array<double, 6> cadenceStages{};
+        std::ofstream cadenceLog("bridge-cadence-" + std::to_string(GetCurrentProcessId()) + ".log");
+        cadenceLog << "width=" << options.width << " height=" << options.height
+                   << " suppress_identical_rgb=" << suppressIdenticalRgb
+                   << " minimum_feed_interval_ms=" << std::chrono::duration<double, std::milli>(frameInterval).count()
+                   << " transport=" << (gpuTransport ? "gpu_shared" : "cpu")
+                   << " runtime_scheduling=unchanged\n"
+                   << "transport_detail=" << transportDetail << '\n'
+                   << "gpu_transport_revision=tree64_direct_endpoints_deferred_copy_wait\n"
+                   << "hip_host_timing=" << hipTimingStatus << '\n'
+                   << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
+                   << " keepalive_ms=" << feedKeepalive.count()
+                   << " explicit_max_fps=" << options.maxFps << '\n'
+                   << "completion_pacing_note=returned HIP waits are scheduling hints, not ready images; normal output fences and RGB comparison remain required\n"
+                   << "note=changed_rgb_fps counts changed RGB submissions, not neural jobs, displayed/game FPS or LSFG output\n";
+        cadenceLog.flush();
+        auto logCadence = [&](bool final) {
+            const auto at = std::chrono::steady_clock::now();
+            const double seconds = std::chrono::duration<double>(at - cadenceAt).count();
+            if ((!final && seconds < 1.0) || seconds <= 0.0) {
+                return;
+            }
+            FlushHipHostTiming();
+            const uint64_t feed = nrPresenter.presentCount();
+            const uint64_t changed = visiblePresenter.changedRgbUpdates();
+            const uint64_t presented = visiblePresenter.presentCount();
+            const uint64_t skipped = visiblePresenter.duplicatesSkipped();
+            const uint64_t occluded = visiblePresenter.occludedSubmissions();
+            cadenceLog << std::fixed << std::setprecision(3)
+                       << "elapsed_s=" << std::chrono::duration<double>(at - visibleStart).count()
+                       << " interval_s=" << seconds
+                       << " feed_fps=" << (feed - cadenceFeed) / seconds
+                       << " changed_rgb_fps=" << (changed - cadenceChanged) / seconds
+                       << " visible_submit_fps=" << (presented - cadencePresented) / seconds
+                       << " capture_fps=" << (capturedFrames - cadenceCaptured) / seconds
+                       << " gpu_transport_frames=" << (gpuTransportFrames - cadenceGpuFrames)
+                       << " identical_skipped=" << (skipped - cadenceSkipped)
+                       << " occluded_submissions=" << (occluded - cadenceOccluded)
+                       << " total_changed=" << changed << " total_skipped=" << skipped
+                       << " busy_feed_deferrals=" << busyFeedDeferrals
+                       << " completion_hint_feeds=" << completionHintFeeds
+                       << " publication_rechecks=" << publicationRechecks
+                       << " keepalive_feeds=" << keepaliveFeeds
+                       << " prefetched_captures=" << prefetchedCaptures
+                       << " final=" << final;
+            if (gpuTransport) {
+                // Cumulative work counters, not presentation or inference FPS.
+                cadenceLog << " total_direct_image_checks=" << gpuTransport->directImageCount()
+                           << " total_blended_images=" << gpuTransport->blendedImageCount()
+                           << " total_source_analyses=" << gpuTransport->sourceAnalysisCount();
+            }
+            constexpr const char* stageNames[] = {"capture", "prepare", "nr_present", "output_handoff", "guard_blend", "visible_present"};
+            const uint64_t iterations = performance.frames - cadenceIterations;
+            for (size_t index = 0; index < cadenceStages.size(); ++index) {
+                cadenceLog << ' ' << stageNames[index] << "_ms="
+                           << (iterations ? (performance.stageMs[index] - cadenceStages[index]) / iterations : 0.0);
+            }
+            cadenceLog << '\n';
+            cadenceLog.flush();
+            cadenceAt = at;
+            cadenceFeed = feed;
+            cadenceChanged = changed;
+            cadencePresented = presented;
+            cadenceSkipped = skipped;
+            cadenceOccluded = occluded;
+            cadenceCaptured = capturedFrames;
+            cadenceGpuFrames = gpuTransportFrames;
+            cadenceIterations = performance.frames;
+            cadenceStages = performance.stageMs;
+        };
         while (running) {
             if (shouldStop()) {
                 break;
@@ -1618,38 +2117,126 @@ int wmain(int argc, wchar_t** argv) {
                     throw std::runtime_error("DLSS-NR runtime became unhealthy: " + health.detail);
                 }
                 nextRuntimeLogCheck = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                asyncBackbufferRuntime = completionPacingAvailable && UsesAsyncBackbufferRuntime();
             }
 
             const auto now = std::chrono::steady_clock::now();
-            if (now < nextFrameAt) {
-                std::this_thread::sleep_for(std::min(std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameAt - now), std::chrono::milliseconds(5)));
+            const bool paceForInference = asyncBackbufferRuntime && readyWritten &&
+                effectEnabled && strength >= 1.0f && !pendingHotkeySnapshot;
+            const auto progress = paceForInference ? ReadHipWorkProgress() : HipWorkProgress{};
+            const bool completionHint = progress.available && progress.returnedWaits != seenReturnedWaits;
+            const bool keepaliveDue = now >= lastGpuFeedAt + feedKeepalive;
+            if (progress.available && progress.activeWaits && !completionHint && !keepaliveDue) {
+                // The previous iteration's output handoff has already finished.
+                // Avoid interrupting inference with another full GPU feed/copy/
+                // compare just to rediscover the same output. A keepalive bounds
+                // this optimization even if a future runtime needs more feeds.
+                prefetchLatestCapture();
+                ++busyFeedDeferrals;
+                waitForActivity(std::chrono::ceil<std::chrono::milliseconds>(
+                    lastGpuFeedAt + feedKeepalive - now), true);
+                logCadence(false);
+                continue;
+            }
+            // A returned wait can wake a feed immediately instead of waiting for
+            // the next 120 Hz poll. The user's explicit --max-fps still wins.
+            const auto feedAt = completionHint ? lastGpuFeedAt + requestedInterval : nextFrameAt;
+            if (now < feedAt) {
+                waitForActivity(std::chrono::ceil<std::chrono::milliseconds>(feedAt - now), paceForInference);
                 continue;
             }
             std::array<PerformanceStats::Clock::time_point, 7> stageTimes;
             stageTimes[0] = PerformanceStats::Clock::now();
-            auto maybeFrame = capture.TryCapture();
-            if (maybeFrame) {
-                if (options.nativeResolution) {
-                    ValidateNativeDimensions(*maybeFrame, options.width, options.height);
+            if (gpuTransport) {
+                ComPtr<ID3D11Texture2D> capturedTexture;
+                wgc::Direct3D11CaptureFrame capturedFrame{nullptr};
+                try {
+                    capturedFrame = capture.TryCaptureTexture(capturedTexture);
+                    if (capturedFrame) {
+                        ++capturedFrames;
+                        if (prefetchedFrame) prefetchedFrame.Close();
+                        prefetchedFrame = nullptr;
+                        prefetchedTexture.Reset();
+                    } else if (prefetchedFrame) {
+                        capturedFrame = std::move(prefetchedFrame);
+                        prefetchedFrame = nullptr;
+                        capturedTexture = std::move(prefetchedTexture);
+                    }
+                    if (progress.available) seenReturnedWaits = progress.returnedWaits;
+                    if (completionHint) ++completionHintFeeds;
+                    if (progress.available && progress.activeWaits && keepaliveDue) ++keepaliveFeeds;
+                    lastGpuFeedAt = now;
+                    stageTimes[1] = PerformanceStats::Clock::now();
+                    if (capturedFrame) {
+                        gpuTransport->UpdateInput(capturedTexture.Get());
+                    }
+                    stageTimes[2] = PerformanceStats::Clock::now();
+                    nrPresenter.PresentGpu(*gpuTransport);
+                    if (capturedFrame) {
+                        capturedFrame.Close();
+                        capturedFrame = nullptr;
+                    }
+                    stageTimes[3] = PerformanceStats::Clock::now();
+                    nrPresenter.CopyOutputGpu(*gpuTransport);
+                    const UINT alpha = effectEnabled
+                        ? static_cast<UINT>(std::lround(std::clamp(strength, 0.0f, 1.0f) * 256.0f)) : 0;
+                    auto stats = gpuTransport->Compose(alpha);
+                    stageTimes[4] = PerformanceStats::Clock::now();
+                    const bool wasEnabled = effectEnabled;
+                    guardBlackOutput(stats.sourceMeaningfullyNonblack, stats.neuralNonblack);
+                    if (wasEnabled && !effectEnabled) {
+                        stats = gpuTransport->Compose(0);
+                    }
+                    stageTimes[5] = PerformanceStats::Clock::now();
+                    const bool visibleSubmitted = visiblePresenter.PresentGpu(
+                        *gpuTransport, stats, !readyWritten || pendingHotkeySnapshot);
+                    stageTimes[6] = PerformanceStats::Clock::now();
+                    performance.Record(stageTimes);
+                    ++gpuTransportFrames;
+                    if (visibleSubmitted && !readyWritten) {
+                        WriteReadyFileAtomic(options.readyFile, bridge);
+                        readyWritten = true;
+                    }
+                    if (visibleSubmitted) pendingHotkeySnapshot = false;
+                    nextFrameAt = now + frameInterval;
+                    if (completionHint && !ReadHipWorkProgress().activeWaits) {
+                        // HIP returns before the runtime publishes its ready
+                        // flag. If this feed raced publication, give it one
+                        // near-term follow-up instead of another full poll
+                        // interval. The follow-up cannot recursively rearm
+                        // itself without a genuinely new returned-wait hint.
+                        nextFrameAt = now + std::max(requestedInterval,
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::milliseconds(1)));
+                        ++publicationRechecks;
+                    }
+                    logCadence(false);
+                } catch (...) {
+                    // Keep both the WGC frame and shared allocations alive
+                    // while draining the producer first, then the consumer.
+                    // In particular, failed Present/Copy waits are not proof
+                    // that these buffers have stopped being used by the GPU.
+                    try {
+                        nrPresenter.DrainForShutdown();
+                        gpuTransport->DrainForShutdown();
+                    } catch (const std::exception& cleanupError) {
+                        bridge_gpu::StopAfterUnconfirmedGpuCompletion(cleanupError.what());
+                    } catch (...) {
+                        bridge_gpu::StopAfterUnconfirmedGpuCompletion("unknown GPU cleanup error");
+                    }
+                    throw;
                 }
-                sourceActualWidth = maybeFrame->width;
-                sourceActualHeight = maybeFrame->height;
-                if (!options.freezeSource || !lastInputFrame) {
-                    lastInputFrame = std::move(*maybeFrame);
-                }
-                ++capturedFrames;
+                continue;
             }
+            const bool inputChanged = captureLatestInput();
             if (!lastInputFrame) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
             stageTimes[1] = PerformanceStats::Clock::now();
-            if (!lastOriginalFrame || (maybeFrame && !options.freezeSource)) {
-                lastOriginalFrame = PrepareInputFrame(*lastInputFrame, options);
-            }
-            const FramePixels& original = *lastOriginalFrame;
+            const FramePixels& original = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, inputChanged);
             stageTimes[2] = PerformanceStats::Clock::now();
-            nrPresenter.Present(original);
+            nrPresenter.Present(original, inputChanged);
             stageTimes[3] = PerformanceStats::Clock::now();
             if (!options.noProxy) {
                 nrPresenter.CaptureBackBuffer(reusableNrFrame);
@@ -1659,16 +2246,11 @@ int wmain(int argc, wchar_t** argv) {
             if (options.saveCaptures) {
                 lastNrFrame = nrFrame;
             }
-            if (!options.noProxy && SourceMeaningfullyNonBlack(original) && !FrameHasNonBlackPixels(nrFrame)) {
-                ++consecutiveBrokenNrFrames;
-                effectEnabled = false;
-                UpdateBridgeTitle(bridge, effectEnabled, strength, options.freezeSource);
-                if (consecutiveBrokenNrFrames >= 30) {
-                    throw std::runtime_error("DLSS-NR output stayed black for 30 presented frames while source was nonblack");
-                }
-            } else if (FrameHasNonBlackPixels(nrFrame) || !SourceMeaningfullyNonBlack(original)) {
-                consecutiveBrokenNrFrames = 0;
+            if (!sourceNonBlack.has_value()) {
+                sourceNonBlack = SourceMeaningfullyNonBlack(original);
             }
+            const bool nrNonBlack = FrameHasNonBlackPixels(nrFrame);
+            guardBlackOutput(*sourceNonBlack, nrNonBlack);
             // Full-strength NR and bypass need no extra full-frame copy. The
             // visible upload still forces opaque alpha, exactly as before.
             FramePixels blended;
@@ -1683,24 +2265,26 @@ int wmain(int argc, wchar_t** argv) {
                 lastDisplayFrame = *display;
             }
             stageTimes[5] = PerformanceStats::Clock::now();
-            visiblePresenter.Present(*display);
+            const bool visibleSubmitted = visiblePresenter.Present(*display, !readyWritten || pendingHotkeySnapshot);
             stageTimes[6] = PerformanceStats::Clock::now();
             performance.Record(stageTimes);
-            if (!readyWritten) {
+            if (visibleSubmitted && !readyWritten) {
                 WriteReadyFileAtomic(options.readyFile, bridge);
                 readyWritten = true;
             }
             nextFrameAt = now + frameInterval;
+            logCadence(false);
 
-            if (pendingHotkeySnapshot) {
+            if (visibleSubmitted && pendingHotkeySnapshot) {
                 saveSnapshot("hotkey", transitionSnapshots++);
                 pendingHotkeySnapshot = false;
             }
-            if (options.saveCaptures && savedFrames < 3) {
+            if (visibleSubmitted && options.saveCaptures && savedFrames < 3) {
                 saveSnapshot("frame", savedFrames);
                 ++savedFrames;
             }
         }
+        logCadence(true);
 
         if (options.saveCaptures) {
             WriteReport(options.captureDir / "bridge-report.txt",

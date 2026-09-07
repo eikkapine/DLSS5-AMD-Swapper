@@ -49,6 +49,8 @@ Relative paths resolve from the folder containing `Lossless.dll`.
 
 The proxy applies only the settings needed for the bridge target before it calls the real `Activate`: resize-before-scaling off, clip cursor off, multi-display mode on, and WGC capture (`ForceCaptureApi=1`). The default `NativeResolution=0` uses `Width` and `Height` and preserves the selected scaler. If the scaler is Off, `DefaultScalingTypeIfOff=1` selects LS1. With `NativeResolution=1`, the proxy forwards `--native-resolution` and requests 1:1 presentation: custom scaling mode, scaling type off, and scale factor `1.0`.
 
+These capture and geometry overrides also apply when the profile changes while a bridge is ready or active. The proxy forwards that settings call's frame-generation options unchanged and logs the effective capture API, frame-generation type, multiplier and target. This preserves the bridge as Lossless Scaling's input; it does not establish that LSFG produces smoother motion. See the [recovery and performance notes](../docs/async-recovery.md) for the manual verification boundary.
+
 `CaptureDirectory` and `FreezeSource` are private diagnostics for verification runs. Leave both at their defaults for normal use. When `CaptureDirectory` is non-empty, the proxy forwards it as `--capture-dir` so the bridge can save comparison frames and its report. When `FreezeSource=1`, the proxy forwards `--freeze-source` so the bridge can reuse the first valid captured source frame for same-frame comparison.
 
 ## IPC contract with the bridge

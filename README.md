@@ -1,6 +1,6 @@
 # NR Auto Scale
 
-[![Release](https://img.shields.io/badge/Release-v0.1.0--pre.1-blue.svg)](https://github.com/eikkapine/NR-Auto-Scale/releases/tag/v0.1.0-pre.1)
+[![Release](https://img.shields.io/badge/Release-v0.1.0--pre.2-blue.svg)](https://github.com/eikkapine/NR-Auto-Scale/releases/tag/v0.1.0-pre.2)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011%2024H2%20(x64)-0078d4.svg?logo=windows)](https://microsoft.com/windows)
 [![Target Architecture](https://img.shields.io/badge/Target%20GPU-AMD%20Radeon%20RX%209070%20XT%20(RDNA4)-ed1c24.svg?logo=amd)](https://www.amd.com)
@@ -9,7 +9,9 @@
 
 **NR Auto Scale** is an open-source bridge and native proxy architecture that brings **NVIDIA DLSS Neural Rendering (DLSS-NR / DLSS 5)** compatibility runtimes to **AMD RDNA4 hardware** through **Lossless Scaling**.
 
-**Source update (7 September 2026):** setup, the proxy and bridge launcher now default to **1280×720 processing**, with native resolution available as an option. The optimized bridge removes the old 33 ms per-frame delay. A controlled RX 9070 XT test measured **52.98 neural evaluations/s at 720p**; presentation rate is a separate metric. These changes are in the source tree and are not included in the older `v0.1.0-pre.1` binary package. See the [performance and verification report](docs/performance.md) for the resolution rationale, measurements and limitations.
+**v0.1.0-pre.2 — native-resolution progress checkpoint (7 September 2026).** This preview publishes the manually exercised GPU-sharing, exact duplicate suppression, HIP timing and inference-aware feeding changes. The latest RX 9070 XT run at **2560×1440** recorded **1,112 changed RGB submissions in 60.238 seconds: 18.46/s**. The user reports about **19 FPS**, or nominally **38 FPS with 2× frame generation**; generated/displayed FPS was not measured by the bridge. **60 FPS remains an unmet target.** See the [progress ledger](docs/progress.md), [release notes](docs/releases/v0.1.0-pre.2.md), and [artifact hashes](RELEASE.json).
+
+The package contains the same project-built bridge executable as that manual run, not an additional untested performance change. Native mode processes the captured application size at full effect strength; no model, precision or resolution reduction is used by these optimizations. Setup still defaults to fixed **1280×720** unless `NativeResolution=1` is selected. The earlier 720p measurements are [historical results](docs/performance.md), not current native-resolution performance.
 
 NR Auto Scale separates screen capture and neural evaluation from the target application's process. It captures eligible visible windows through Windows Graphics Capture without injecting the bridge into the source application. Compatibility with protected content and individual games still needs testing.
 
@@ -28,7 +30,7 @@ NR Auto Scale separates screen capture and neural evaluation from the target app
 
 ## 🔍 Visual Comparison
 
-The crops below come from an earlier native-resolution test using the same frozen source frame in Counter-Strike 2. They show identical pixel rectangles without resizing or post-capture processing. **They are not examples of the new 720p default.**
+The crops below come from an earlier native-resolution test using the same frozen source frame in Counter-Strike 2. They show identical pixel rectangles without resizing or post-capture processing. **They are historical examples, not a new visual-equivalence test of v0.1.0-pre.2.**
 
 | Original Native Source | DLSS Neural Rendering Enabled |
 | :---: | :---: |
@@ -155,7 +157,7 @@ ForceCaptureApi=1
 4. **User-Supplied Runtimes**: Users must provide their own legally acquired AMD compatibility proxy (`version.dll`), `nvngx_dlssnr.dll`, and HIP 7.2 runtime files.
 
 ### Automated Setup
-1. Download the latest release package (`v0.1.0-pre.1`) from the [Releases](https://github.com/eikkapine/NR-Auto-Scale/releases) page.
+1. Download the preview package (`v0.1.0-pre.2`) from the [Releases](https://github.com/eikkapine/NR-Auto-Scale/releases) page.
 2. Extract the archive outside of the Lossless Scaling folder.
 3. Run:
    ```cmd
@@ -167,7 +169,9 @@ ForceCaptureApi=1
 
 For advanced or developer installation workflows, see [docs/install.md](docs/install.md).
 
-For the new 720p default and performance changes, build from the current source. Existing installations keep their saved INI settings; updating source alone does not migrate them. Stop scaling, back up `NrAutoScale.ini`, set `NativeResolution=0`, `Width=1280`, `Height=720`, and restart Lossless Scaling. Keep your neural runtime settings and chosen scaler unchanged.
+To select native application resolution during setup, run `Setup.cmd -NativeResolution 1`. An existing native installation already has `NativeResolution=1`; its width/height fallbacks are ignored. Updating source alone does not migrate settings. Keep existing runtime files and profiles, and do not rerun setup just to replace the bridge executable. Stop scaling before replacing `nr-bridge/runtime/DlssNrBridge.exe`; compare its SHA-256 with [RELEASE.json](RELEASE.json). No vendor runtime, model, weights, app profile or private configuration is included in the package.
+
+Each manual run can be recorded using [Analyze-Run.py](bridge/scripts/Analyze-Run.py). It reads settled logs, creates an append-only summary, and separates reported base FPS, changed images, HIP waits and nominal frame-generation output. The [iteration workflow](docs/progress.md#manual-iteration-workflow) describes the process. No automated tests or playback were run for this checkpoint.
 
 ---
 

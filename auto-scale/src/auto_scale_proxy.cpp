@@ -590,13 +590,7 @@ void WatchReadiness(std::uint64_t generation,
     closeWatcherHandle();
 }
 
-void ApplyBridgeSettings() {
-    SettingsSnapshot settings;
-    {
-        std::lock_guard lock(g_mutex);
-        settings = g_settings;
-    }
-
+void ApplyBridgeSettings(SettingsSnapshot settings) {
     if (!settings.valid || !g_originalApplySettings) {
         return;
     }
@@ -616,6 +610,13 @@ void ApplyBridgeSettings() {
         settings.captureApi = g_config.forceCaptureApi;
     }
 
+    std::wstringstream handoff;
+    handoff << L"Neural bridge -> Lossless Scaling: captureApi=" << settings.captureApi
+            << L" frameGenType=" << settings.frameGenType
+            << L" multiplier=" << settings.frameGenMultiplier
+            << L" target=" << settings.frameGenTarget;
+    Log(handoff.str());
+
     g_originalApplySettings(settings.scalingMode, settings.scalingFitMode, settings.scalingType, settings.scalingSubtype,
                             settings.scaleFactor, settings.resizeBeforeScale, settings.sharpness, settings.vrs,
                             settings.frameGenType, settings.frameGenSize, settings.frameGenMode, settings.frameGenMultiplier, settings.frameGenTarget,
@@ -624,6 +625,15 @@ void ApplyBridgeSettings() {
                             settings.captureApi, settings.queueTarget, settings.drawFps, settings.gpuId, settings.displayId,
                             settings.cropLeft, settings.cropTop, settings.cropRight, settings.cropBottom, settings.multiDisplayMode,
                             settings.setupPhase);
+}
+
+void ApplyBridgeSettings() {
+    SettingsSnapshot settings;
+    {
+        std::lock_guard lock(g_mutex);
+        settings = g_settings;
+    }
+    ApplyBridgeSettings(settings);
 }
 
 LRESULT CALLBACK ControlWndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
@@ -901,6 +911,8 @@ extern "C" __declspec(dllexport) void __fastcall ApplySettings(
         return;
     }
 
+    SettingsSnapshot incoming;
+    bool bridgeTarget = false;
     {
         std::lock_guard lock(g_mutex);
         g_settings = SettingsSnapshot{scalingMode, scalingFitMode, scalingType, scalingSubtype,
@@ -911,6 +923,16 @@ extern "C" __declspec(dllexport) void __fastcall ApplySettings(
                                       captureApi, queueTarget, drawFps, gpuId, displayId,
                                       cropLeft, cropTop, cropRight, cropBottom, multiDisplayMode,
                                       setupPhase, true};
+        incoming = g_settings;
+        bridgeTarget = g_config.enabled && g_child.bridgeHwnd != nullptr && g_child.process.hProcess != nullptr;
+    }
+
+    // Keep this call's frame-generation choices, but retain the capture and
+    // geometry required by the ready/active bridge. Forward outside the lock:
+    // the original implementation may call back into the proxy.
+    if (bridgeTarget) {
+        ApplyBridgeSettings(incoming);
+        return;
     }
 
     g_originalApplySettings(scalingMode, scalingFitMode, scalingType, scalingSubtype,

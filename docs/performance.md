@@ -1,5 +1,10 @@
 # Bridge performance and verification — 7 September 2026
 
+> Historical 360p/720p investigation, before the later native-resolution work.
+> Its tests, runtime version, defaults and installation hashes describe that
+> earlier pass, not validation of the current preview. Current native results,
+> manual-only verification and v0.1.0-pre.2 are in [progress.md](progress.md).
+
 The optimized bridge is installed in `../nr-bridge/runtime/DlssNrBridge.exe` relative to the repository root. The first optimization pass preserved the installed 640×360 preset. A subsequent requested resolution update changes the saved preset and source defaults to **1280×720**. The neural runtime, weights, neural settings and Lossless Scaling profile remain unchanged.
 
 ## 720p default and online evidence

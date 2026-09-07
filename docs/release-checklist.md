@@ -1,5 +1,20 @@
 # Release Checklist
 
+## v0.1.0-pre.2 checkpoint exception and status
+
+The user authorized publication after manually reporting approximately 19 FPS.
+This experimental checkpoint uses production compilation, static/package/hash
+inspection and the existing manual logs, with no automated tests or playback.
+The older checklist below is a historical/full-validation reference and must
+not be presented as passed for this preview. Current wording and limits are in
+[the release notes](releases/v0.1.0-pre.2.md) and [progress.md](progress.md).
+
+The package uses the exact manually exercised bridge executable. Source/setup
+defaults remain fixed 720p; the user's measured profile selects native 1440p.
+Native image equivalence, broad compatibility and 60 FPS remain unverified.
+
+## Historical full-validation checklist
+
 Complete this checklist before publishing a public GitHub repository.
 
 ## Build And Test

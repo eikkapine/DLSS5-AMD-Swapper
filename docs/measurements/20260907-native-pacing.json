@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "run_id": "20260907-native-pacing",
+  "version": "0.1.0-pre.2",
+  "bridge_sha256": "d902dc89c6977a9012028844da6acd788a2386e2c1bb43da71fa805cd230a85f",
+  "hash_association": "Provided by caller; verify with the deployment record, not the current executable alone",
+  "analysis_created_at_utc": "2026-09-07T20:24:38.884410+00:00",
+  "source_sha256": {
+    "cadence": "463fc5c853804679cecc22469b317806339076bc080556fde1e55887982dc5d6",
+    "hip": "401fb0dd5f1d6de195cec28d88cbbf4254232f0c308c2fe39de6b02548249e61",
+    "runtime": "5299dfb17877552241fbae1e56e1c9991319362f06e3aae1ffc9f92dce438e3e"
+  },
+  "cadence": {
+    "configuration_from_header": {
+      "width": 2560,
+      "height": 1440,
+      "suppress_identical_rgb": 1,
+      "transport": "gpu_shared",
+      "completion_pacing": "worker_wait_hints"
+    },
+    "effect_state_recorded": false,
+    "shutdown_row_present": true,
+    "whole_recording": {
+      "elapsed_s": 60.238,
+      "changed_rgb_submissions": 1112,
+      "changed_rgb_per_s": 18.460108237325276,
+      "identical_submissions_suppressed": 429,
+      "image_checks": 1541,
+      "keepalive_feeds": 0,
+      "publication_rechecks": 431
+    },
+    "selected_window": {
+      "requested_since_s": 20.0,
+      "requested_until_s": 60.0,
+      "actual_start_s": 20.046,
+      "actual_end_s": 59.151,
+      "summed_interval_s": 39.104,
+      "changed_rgb_submissions": 731,
+      "changed_rgb_per_s": 18.69373977086743,
+      "feed_iterations": 1020,
+      "feed_iterations_per_s": 26.08428805237316,
+      "capture_per_s_from_rounded_rates": 50.27508986292962,
+      "occluded_submissions": 0
+    }
+  },
+  "manual_report": {
+    "base_fps": 19.0,
+    "framegen_multiplier": 2.0,
+    "nominal_output_fps": 38.0,
+    "measured_display_fps": null
+  },
+  "limitations": [
+    "Analysis reads existing logs only; no tests, playback or GPU work are started.",
+    "Changed RGB submissions, HIP calls, neural jobs and displayed/generated FPS are distinct.",
+    "Nominal output FPS is arithmetic, not an LSFG/display measurement.",
+    "Window selection includes complete logged intervals only; endpoints are rounded.",
+    "Whole-run averages can include bypass, strength changes and startup; effect state may be missing.",
+    "Different gameplay runs are observational comparisons, not controlled A/B benchmarks.",
+    "HIP device-wait duration includes queued work and contention, not isolated kernel time.",
+    "HIP threads have overlapping windows and must not be summed as one critical path."
+  ],
+  "hip": {
+    "requested_since_s": 20.0,
+    "requested_until_s": 60.0,
+    "clock_origin": "HIP observer start; distinct from visible cadence start",
+    "threads": [
+      {
+        "label": "observed-thread-1",
+        "summed_window_ms": 39002.5599,
+        "nondefault_launches": 0,
+        "launch_calls_per_device_wait": 156.0,
+        "launch_wall_ms_per_device_wait": 0.15953787878787878,
+        "apis": {
+          "launch": {
+            "calls": 113256,
+            "wall_ms": 115.8245,
+            "mean_wall_ms_per_call": 0.0010226787101787103,
+            "maximum_call_ms": 0.3624,
+            "errors": 0
+          },
+          "device_wait": {
+            "calls": 726,
+            "wall_ms": 37459.1828,
+            "mean_wall_ms_per_call": 51.59667052341598,
+            "maximum_call_ms": 56.4821,
+            "errors": 0
+          },
+          "stream_wait": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "event_wait": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "copy": {
+            "calls": 0,
+            "wall_ms": 0.0,
+            "mean_wall_ms_per_call": null,
+            "maximum_call_ms": 0.0,
+            "errors": 0
+          },
+          "copy_async": {
+            "calls": 2904,
+            "wall_ms": 7.0911,
+            "mean_wall_ms_per_call": 0.0024418388429752066,
+            "maximum_call_ms": 0.0864,
+            "errors": 0
+          }
+        }
+      }
+    ]
+  },
+  "runtime": {
+    "version": "v0.2.15",
+    "build": "f47996ae",
+    "sampled_jobs": [
+      {
+        "job": 1,
+        "wall_ms": 41
+      },
+      {
+        "job": 2,
+        "wall_ms": 40
+      },
+      {
+        "job": 3,
+        "wall_ms": 42
+      },
+      {
+        "job": 100,
+        "wall_ms": 51
+      },
+      {
+        "job": 200,
+        "wall_ms": 55
+      },
+      {
+        "job": 300,
+        "wall_ms": 54
+      },
+      {
+        "job": 400,
+        "wall_ms": 54
+      },
+      {
+        "job": 500,
+        "wall_ms": 53
+      },
+      {
+        "job": 600,
+        "wall_ms": 51
+      },
+      {
+        "job": 700,
+        "wall_ms": 52
+      },
+      {
+        "job": 800,
+        "wall_ms": 53
+      },
+      {
+        "job": 900,
+        "wall_ms": 51
+      },
+      {
+        "job": 1000,
+        "wall_ms": 57
+      },
+      {
+        "job": 1100,
+        "wall_ms": 49
+      }
+    ],
+    "observed_fault_lines": 0,
+    "observed_gpu_error_lines": 0,
+    "note": "Sparse job samples; marker counts are not a comprehensive runtime-health certification"
+  }
+}
