@@ -42,6 +42,8 @@ int wmain(int argc, wchar_t** argv) {
               << " capture_dir=" << astest::Narrow(captureDirArg)
               << " freeze_source=" << (freezeSourceArg ? 1 : 0)
               << " native_resolution=" << (nativeResolutionArg ? 1 : 0)
+              << " width=" << astest::Narrow(astest::ArgValue(argc, argv, L"--width"))
+              << " height=" << astest::Narrow(astest::ArgValue(argc, argv, L"--height"))
               << " hip=" << astest::Narrow(hip)
               << " mode=" << astest::Narrow(mode);
         astest::AppendLog(LogPath(), start.str());

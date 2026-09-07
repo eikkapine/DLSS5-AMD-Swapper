@@ -3,9 +3,9 @@ param(
     [string]$ProxyVersionSource,
     [string]$NrSource,
     [string]$HipVisibleDevices = "1",
-    [int]$Width = 960,
-    [int]$Height = 540,
-    [int]$NativeResolution = 1,
+    [int]$Width = 1280,
+    [int]$Height = 720,
+    [int]$NativeResolution = 0,
     [int]$ReadyTimeoutMs = 180000,
     [string]$BuiltAutoScaleDllPath,
     [string]$BridgeExe,
@@ -169,7 +169,7 @@ if ($ValidateOnly) {
     Write-Host "AMD proxy version.dll: $proxyPath"
     Write-Host "NVIDIA nvngx_dlssnr.dll: $nrPath"
     Write-Host "HIP_VISIBLE_DEVICES=$HipVisibleDevices (machine-specific)"
-    Write-Host "NativeResolution=$NativeResolution; Width/Height are only used when native-resolution mode is disabled for debugging."
+    Write-Host "NativeResolution=$NativeResolution; fixed processing bounds=${Width}x${Height} (ignored when NativeResolution=1)."
     Write-Host "ReadyTimeoutMs=$ReadyTimeoutMs"
     exit 0
 }

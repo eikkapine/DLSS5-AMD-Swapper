@@ -2,7 +2,7 @@
 
 This folder builds a native `Lossless.dll` proxy that lets Lossless Scaling scale the DLSS-NR bridge window automatically instead of asking the user to choose the bridge manually.
 
-The default path is native resolution. The bridge captures and presents at the source window size, and the proxy tells Lossless Scaling to use a 1:1 target so the visible effect comes from DLSS-NR rather than an extra upscaling pass.
+The default path processes within 1280×720 bounds, preserves source aspect ratio, and lets Lossless Scaling upscale the bridge output. Native source-size processing and 1:1 presentation remain available with `NativeResolution=1`.
 
 The proxy loads `Lossless_original.dll`, forwards Lossless Scaling exports, and wraps:
 
@@ -35,19 +35,19 @@ RuntimeDirectory=nr-bridge\runtime
 CaptureDirectory=
 HipVisibleDevices=1
 FreezeSource=0
-NativeResolution=1
-Width=960
-Height=540
+NativeResolution=0
+Width=1280
+Height=720
 StartupDelayMs=2000
 WarmupFrames=320
 ReadyTimeoutMs=180000
-DefaultScalingTypeIfOff=0
+DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 ```
 
 Relative paths resolve from the folder containing `Lossless.dll`.
 
-The proxy applies only the settings needed for the bridge target before it calls the real `Activate`: resize-before-scaling off, clip cursor off, multi-display mode on, and WGC capture (`ForceCaptureApi=1`). With `NativeResolution=1`, it also forwards `--native-resolution` to the bridge and applies 1:1 Lossless Scaling target settings: custom scaling mode, scaling type off, and scale factor `1.0`. Set `NativeResolution=0` only when you want the older fixed-size bridge path that uses `Width` and `Height`.
+The proxy applies only the settings needed for the bridge target before it calls the real `Activate`: resize-before-scaling off, clip cursor off, multi-display mode on, and WGC capture (`ForceCaptureApi=1`). The default `NativeResolution=0` uses `Width` and `Height` and preserves the selected scaler. If the scaler is Off, `DefaultScalingTypeIfOff=1` selects LS1. With `NativeResolution=1`, the proxy forwards `--native-resolution` and requests 1:1 presentation: custom scaling mode, scaling type off, and scale factor `1.0`.
 
 `CaptureDirectory` and `FreezeSource` are private diagnostics for verification runs. Leave both at their defaults for normal use. When `CaptureDirectory` is non-empty, the proxy forwards it as `--capture-dir` so the bridge can save comparison frames and its report. When `FreezeSource=1`, the proxy forwards `--freeze-source` so the bridge can reuse the first valid captured source frame for same-frame comparison.
 
@@ -56,7 +56,7 @@ The proxy applies only the settings needed for the bridge target before it calls
 The proxy starts:
 
 ```text
-DlssNrBridge.exe --source-hwnd 0x... --width 960 --height 540 --startup-delay-ms 2000 --warmup-frames 320 --ready-file <ready.txt> --stop-event Local\DlssNrStop-<pid>-<generation> --parent-pid <pid> --native-resolution
+DlssNrBridge.exe --source-hwnd 0x... --width 1280 --height 720 --startup-delay-ms 2000 --warmup-frames 320 --ready-file <ready.txt> --stop-event Local\DlssNrStop-<pid>-<generation> --parent-pid <pid>
 ```
 
 The bridge writes the decimal bridge window handle to the ready file after the first healthy visible present. The proxy verifies that the handle is still a visible window owned by the bridge child process before forwarding activation.

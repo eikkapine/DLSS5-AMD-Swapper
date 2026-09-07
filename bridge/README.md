@@ -15,7 +15,7 @@ Strength is clamped from `0.0` to `1.0`. The visible window title shows the curr
 ## Command line
 
 ```powershell
-DlssNrBridge.exe --source-title "NR Static Image Test" --width 960 --height 540 --seconds 25 --capture-dir runs\bridge-proof
+DlssNrBridge.exe --source-title "NR Static Image Test" --width 1280 --height 720 --seconds 25 --capture-dir runs\bridge-proof
 ```
 
 Useful options:
@@ -23,7 +23,7 @@ Useful options:
 - `--list-windows` prints capturable top-level windows with hwnd, pid, size, and title.
 - `--source-hwnd 0x123456` selects a source window by handle.
 - `--source-title "partial title"` selects the first visible, non-minimized window whose title contains the text.
-- `--width 1280 --height 720` sets the bridge output bounds for explicit-size debug runs. The source is scaled to fit while preserving aspect ratio.
+- `--width 1280 --height 720` sets the default processing/output bounds, also used by `Start-Bridge.ps1` and auto-scale setup. The source is scaled to fit while preserving aspect ratio.
 - `--native-resolution` waits for the first valid WGC frame, creates NR/visible swapchains at that exact source size, bypasses scaling, and fails clearly if the source dimensions change. Native mode errors if the captured source is larger than 3840x2160.
 - `--seconds 25` exits after a bounded run.
 - `--startup-delay-ms 2000` waits after loading `version.dll` before creating the D3D12 swapchain.
@@ -61,6 +61,12 @@ cmake --build nr-development/bridge/build --config Release
 ```
 
 The implementation uses the Windows SDK Windows Graphics Capture interop path: `IGraphicsCaptureItemInterop::CreateForWindow` for HWND capture and `Direct3D11CaptureFramePool::CreateFreeThreaded` for capture frames without a dispatcher queue.
+
+## Frame pacing and performance diagnostics
+
+The default has no extra frame-delay cap: the visible D3D11 swapchain paces presentation, while the private D3D12 feed uses an unsynchronized present. An optional `--max-fps 30` sets a start-to-start frame budget; `--max-fps 0` restores default pacing. This option does not change image resolution, neural strength or model settings.
+
+Capture reports now include `bridge_present_fps`, `visible_elapsed_seconds`, and per-stage host timing. These measure bridge presentation and host costs, not unique neural frames, game FPS or end-to-end input latency. See [the measured performance report](../docs/performance.md) for how completed neural jobs were measured separately.
 
 ## Acceptance criteria
 

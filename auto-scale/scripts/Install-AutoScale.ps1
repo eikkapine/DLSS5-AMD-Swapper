@@ -3,15 +3,15 @@ param(
     [Parameter(Mandatory = $true)][string]$ProxyVersionSource,
     [Parameter(Mandatory = $true)][string]$NrSource,
     [string]$HipVisibleDevices = "1",
-    [int]$Width = 960,
-    [int]$Height = 540,
+    [int]$Width = 1280,
+    [int]$Height = 720,
     [string]$BuiltAutoScaleDllPath = (Join-Path $PSScriptRoot "..\build\Release\Lossless.dll"),
     [string]$BridgeExe = (Join-Path $PSScriptRoot "..\..\bridge\build\Release\DlssNrBridge.exe"),
     [string]$OriginalSource,
     [int]$StartupDelayMs = 2000,
     [int]$WarmupFrames = 320,
     [int]$ReadyTimeoutMs = 180000,
-    [int]$NativeResolution = 1
+    [int]$NativeResolution = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -264,7 +264,7 @@ StartupDelayMs=$StartupDelayMs
 WarmupFrames=$WarmupFrames
 ReadyTimeoutMs=$ReadyTimeoutMs
 NativeResolution=$NativeResolution
-DefaultScalingTypeIfOff=0
+DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 "@
 Write-TextWithManifestBackup -Target $configPath -Content $autoScaleConfig -BackupRoot $backupRoot -LsDir $lsDirPath -Entries $entries

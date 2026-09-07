@@ -220,6 +220,11 @@ TestCaseRuntime PrepareRuntime(const Args& args,
     std::filesystem::copy_file(args.wrapper, rt.dir / L"Lossless.dll", std::filesystem::copy_options::overwrite_existing);
     std::filesystem::copy_file(args.fakeOriginal, rt.dir / L"Lossless_original.dll", std::filesystem::copy_options::overwrite_existing);
     std::filesystem::copy_file(args.fakeBridge, rt.runtimeDir / L"DlssNrBridge.exe", std::filesystem::copy_options::overwrite_existing);
+    // Match the deployed bridge's opt-out from global Special K injection.
+    // Overlay shutdown hooks can otherwise keep the fake child alive after
+    // wmain returns, invalidating the exit/lifecycle tests themselves.
+    astest::WriteTextAtomic(rt.runtimeDir / L"SpecialK.deny.DlssNrBridge", L"\n");
+    astest::WriteTextAtomic(rt.runtimeDir / L"SpecialK.deny.DlssNrBridge.exe", L"\n");
 
     const std::wstring bridgePath = bridgeExeOverride.empty() ? (rt.runtimeDir / L"DlssNrBridge.exe").wstring() : bridgeExeOverride;
     std::wofstream config(rt.dir / L"NrAutoScale.ini", std::ios::binary | std::ios::trunc);
@@ -258,8 +263,8 @@ LoadedProxy LoadProxy(const TestCaseRuntime& rt) {
     return proxy;
 }
 
-void ApplyKnownSettings(const LoadedProxy& proxy) {
-    proxy.ApplySettings(10, 11, 0, 13,
+void ApplyKnownSettings(const LoadedProxy& proxy, int scalingType = 0) {
+    proxy.ApplySettings(10, 11, scalingType, 13,
                         1.5f, 1, 16, 1,
                         18, 19, 20, 2.5f, 3.5f,
                         24, 1, 1, 1, 1,
@@ -382,7 +387,7 @@ void TestDiagnosticsForwarded(const Args& args) {
     Require(Contains(log, "capture_dir="), "diagnostics bridge log missing capture-dir field");
     Require(Contains(log, "diagnostics-forwarded\\captures"), "configured CaptureDirectory was not forwarded to bridge");
     Require(Contains(log, "freeze_source=1"), "configured FreezeSource was not forwarded to bridge");
-    Require(Contains(log, "native_resolution=1"), "default NativeResolution was not forwarded to bridge");
+    Require(Contains(log, "native_resolution=1"), "explicit NativeResolution=1 was not forwarded to bridge");
     Require(Contains(log, "original_activate_hwnd="), "diagnostics case did not call original Activate after readiness");
     Require(proxy.Activate(nullptr), "diagnostics unscale returned false");
     CleanupProxy(proxy);
@@ -417,6 +422,39 @@ void TestFixedSizeCompatibility(const Args& args) {
     ClearEnvWChecked(L"AUTO_SCALE_FAKE_BRIDGE_MODE");
     RecordPass(args, "fixed_size_compatibility");
     std::cout << "PASS fixed_size_compatibility\n";
+}
+
+void TestDefaultResolution(const Args& args, const std::string& name, bool missingIni, int selectedScaler) {
+    const auto rt = PrepareRuntime(args, name);
+    const auto configPath = rt.dir / L"NrAutoScale.ini";
+    if (missingIni) {
+        std::filesystem::remove(configPath);
+    } else {
+        // Deliberately omit size, native-mode and fallback keys. This tests
+        // production defaults rather than repeating them in test configuration.
+        astest::WriteTextAtomic(configPath, L"[AutoScale]\nReadyTimeoutMs=5000\nStartupDelayMs=0\nWarmupFrames=0\n");
+    }
+    SetEnvWChecked(L"AUTO_SCALE_TEST_LOG", rt.log.wstring());
+    SetEnvWChecked(L"AUTO_SCALE_FAKE_BRIDGE_MODE", L"delay=150");
+    HWND source = astest::CreateTestWindow(L"AutoScaleHarnessSourceDefaults", L"AutoScale Harness Defaults");
+    LoadedProxy proxy = LoadProxy(rt);
+    InitProxy(proxy);
+    ApplyKnownSettings(proxy, selectedScaler);
+    Require(proxy.Activate(source), "default-resolution activation failed");
+    Require(WaitForCallback(2, source, 0, std::chrono::milliseconds(3000)), "default-resolution bridge did not become active");
+    const auto log = ReadText(rt.log);
+    Require(Contains(log, "native_resolution=0 width=1280 height=720"), "missing resolution keys did not launch fixed 1280x720");
+    const auto applies = LinesWithPrefix(log, "original_apply_settings=");
+    Require(applies.size() >= 2, "default-resolution bridge settings were not applied");
+    const int expectedScaler = selectedScaler == 0 ? 1 : selectedScaler;
+    Require(Contains(applies.back(), "10,11," + std::to_string(expectedScaler) + ",13,1.5,0"),
+            "default-resolution path did not select fallback or preserve the chosen scaler/geometry settings");
+    Require(proxy.Activate(nullptr), "default-resolution unscale failed");
+    CleanupProxy(proxy);
+    DestroyWindow(source);
+    ClearEnvWChecked(L"AUTO_SCALE_FAKE_BRIDGE_MODE");
+    RecordPass(args, name);
+    std::cout << "PASS " << name << "\n";
 }
 
 void TestDisabledPassThrough(const Args& args) {
@@ -532,12 +570,17 @@ int wmain(int argc, wchar_t** argv) {
         std::filesystem::create_directories(args.runRoot);
 
         const std::set<std::string> selected = args.only.empty()
-            ? std::set<std::string>{"happy", "cancel", "diagnostics", "fixed-size", "disabled", "source-close", "child-exit", "missing", "invalid"}
+            ? std::set<std::string>{"happy", "cancel", "diagnostics", "fixed-size", "defaults", "disabled", "source-close", "child-exit", "missing", "invalid"}
             : std::set<std::string>{args.only};
         if (selected.count("happy")) TestHappyPath(args);
         if (selected.count("cancel")) TestCancelPending(args);
         if (selected.count("diagnostics")) TestDiagnosticsForwarded(args);
         if (selected.count("fixed-size")) TestFixedSizeCompatibility(args);
+        if (selected.count("defaults")) {
+            TestDefaultResolution(args, "defaults_missing_ini", true, 0);
+            TestDefaultResolution(args, "defaults_partial_ini", false, 0);
+            TestDefaultResolution(args, "defaults_preserve_scaler", false, 2);
+        }
         if (selected.count("disabled")) TestDisabledPassThrough(args);
         if (selected.count("source-close")) TestSourceCloseAfterActive(args);
         if (selected.count("child-exit")) TestChildExitAfterActive(args);

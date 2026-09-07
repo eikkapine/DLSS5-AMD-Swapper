@@ -1,7 +1,7 @@
 param(
     [switch]$Build,
-    [int]$Width = 960,
-    [int]$Height = 540,
+    [int]$Width = 1280,
+    [int]$Height = 720,
     [int]$WarmupFrames = 320,
     [int]$StartupDelayMs = 2000,
     [string]$HipVisibleDevices = '1',

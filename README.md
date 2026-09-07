@@ -9,15 +9,17 @@
 
 **NR Auto Scale** is an open-source bridge and native proxy architecture that brings **NVIDIA DLSS Neural Rendering (DLSS-NR / DLSS 5)** compatibility runtimes to **AMD RDNA4 hardware** through **Lossless Scaling**.
 
-By completely decoupling screen capture and neural evaluation from the target application's process, NR Auto Scale enables DLSS Neural Rendering on **any on-screen window**—including PC games, video players, browsers, and desktop emulators—without in-process game hooks, anti-cheat risks, or game-specific modding.
+**Source update (7 September 2026):** setup, the proxy and bridge launcher now default to **1280×720 processing**, with native resolution available as an option. The optimized bridge removes the old 33 ms per-frame delay. A controlled RX 9070 XT test measured **52.98 neural evaluations/s at 720p**; presentation rate is a separate metric. These changes are in the source tree and are not included in the older `v0.1.0-pre.1` binary package. See the [performance and verification report](docs/performance.md) for the resolution rationale, measurements and limitations.
+
+NR Auto Scale separates screen capture and neural evaluation from the target application's process. It captures eligible visible windows through Windows Graphics Capture without injecting the bridge into the source application. Compatibility with protected content and individual games still needs testing.
 
 ---
 
 ## 🌟 Key Highlights
 
-- 🚫 **Zero In-Process Game Injection**: Captures games non-intrusively via Windows Graphics Capture (`wgc`). Anti-cheats and protected game binaries remain 100% untouched.
-- 🎯 **Native 1:1 Scale Fidelity**: Operates at bit-for-bit native display resolution. No forced spatial upscaling or geometry resampling—the visible clarity comes purely from neural reconstruction.
-- ⚡ **Seamless Lossless Scaling Workflow**: Initiated directly from Lossless Scaling's standard **Scale** button. The proxy forwarder handles child process orchestration, synchronization, and window swapping automatically.
+- 🚫 **No In-Process Game Injection**: Captures the selected source through Windows Graphics Capture (`wgc`).
+- 🎯 **720p Processing, Optional Native Mode**: Defaults to 1280×720 bounds with aspect ratio preserved, followed by the selected Lossless Scaling upscaler. `NativeResolution=1` processes the source at its captured dimensions and requests 1:1 presentation.
+- ⚡ **Automatic Lossless Scaling Workflow**: The proxy handles bridge startup, readiness and window selection. Activation through the configured **Ctrl+Alt+S** shortcut is verified; direct Scale-button click verification remains pending.
 - 🎛️ **Live Hotkeys & Dynamic Blending**: Toggle between original and neural output on the fly (`Ctrl+Alt+F6`) and fine-tune effect strength in 10% increments (`Ctrl+Alt+F7` / `Ctrl+Alt+F8`) via real-time software alpha blending.
 - 🛡️ **Automated Health Gating & Safety**: Pre-flight warmup verification monitors runtime logs for completed neural jobs, blank frame detection guards, and graceful fallbacks.
 - 🔴 **Engineered for AMD RDNA4**: Evaluated on the **AMD Radeon RX 9070 XT** utilizing the AMD HIP runtime (`amdhip64_7.dll`) and `HIP_VISIBLE_DEVICES=1`.
@@ -26,7 +28,7 @@ By completely decoupling screen capture and neural evaluation from the target ap
 
 ## 🔍 Visual Comparison
 
-The crops below represent verified analytical captures from the same frozen source frame in Counter-Strike 2. Both images depict the identical pixel rectangle with **zero resizing, zero artificial sharpening, and zero post-process color manipulation**.
+The crops below come from an earlier native-resolution test using the same frozen source frame in Counter-Strike 2. They show identical pixel rectangles without resizing or post-capture processing. **They are not examples of the new 720p default.**
 
 | Original Native Source | DLSS Neural Rendering Enabled |
 | :---: | :---: |
@@ -80,12 +82,12 @@ NR Auto Scale utilizes a decoupled two-tier architecture that bridges Direct3D 1
 │  2. Forwards unchanged functions to Lossless_original.dll   │
 │  3. Intercepts Activate(targetHWND) on "Scale" button click │
 │  4. Spawns DlssNrBridge.exe and awaits ready marker         │
-│  5. Overrides settings to 1:1 Native Resolution             │
-│     (Custom Mode, Factor 1.0, Scaling Off, Multi-Display 1) │
+│  5. Keeps selected scaler for fixed-size processing         │
+│     (LS1 if Off); optional native mode requests 1:1         │
 │  6. Forwards Activate(bridgeHWND) to Lossless Scaling       │
 └──────────────────────────────┬──────────────────────────────┘
                                │
-                               │ Native 1:1 Presentation
+                               │ Upscaling, or optional native 1:1
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │             Lossless Scaling Fullscreen Output              │
@@ -118,13 +120,13 @@ Enabled=1
 BridgeExe=nr-bridge\runtime\DlssNrBridge.exe
 RuntimeDirectory=nr-bridge\runtime
 HipVisibleDevices=1
-NativeResolution=1
-Width=960
-Height=540
+NativeResolution=0
+Width=1280
+Height=720
 StartupDelayMs=2000
 WarmupFrames=320
 ReadyTimeoutMs=180000
-DefaultScalingTypeIfOff=0
+DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 ```
 
@@ -134,7 +136,9 @@ ForceCaptureApi=1
 | `BridgeExe` | `path` | `...` | Relative or absolute path to `DlssNrBridge.exe`. |
 | `RuntimeDirectory` | `path` | `...` | Directory containing runtime DLLs and logs. |
 | `HipVisibleDevices` | `string` | `1` | Passed to the bridge environment to select the AMD GPU device for HIP execution. |
-| `NativeResolution` | `int` | `1` | When `1`, operates at native 1:1 resolution, ignoring width/height overrides. |
+| `NativeResolution` | `int` | `0` | Uses fixed processing bounds. Set to `1` for native source resolution and 1:1 presentation; width/height are then ignored. |
+| `Width`, `Height` | `int` | `1280`, `720` | Processing/output bounds; the source is fitted with its aspect ratio preserved. |
+| `DefaultScalingTypeIfOff` | `int` | `1` | Selects LS1 only when the profile's scaler is Off in fixed-size mode. A selected scaler is preserved. |
 | `StartupDelayMs` | `int` | `2000` | Delay after loading `version.dll` before creating D3D12 swapchain. |
 | `WarmupFrames` | `int` | `320` | Frames evaluated in the private D3D12 feed before health verification. |
 | `ReadyTimeoutMs` | `int` | `180000`| Maximum milliseconds to wait for the bridge ready file before aborting. |
@@ -159,9 +163,11 @@ ForceCaptureApi=1
    ```
 4. Select your Lossless Scaling install path when prompted. The installer backs up your original `Lossless.dll` to `Lossless_original.dll`.
 5. Supply your private AMD proxy and NVIDIA runtime files as instructed.
-6. Launch Lossless Scaling and click **Scale** on any active application.
+6. Launch Lossless Scaling, focus a capturable source window and use the configured scaling shortcut (Ctrl+Alt+S in the verified setup).
 
 For advanced or developer installation workflows, see [docs/install.md](docs/install.md).
+
+For the new 720p default and performance changes, build from the current source. Existing installations keep their saved INI settings; updating source alone does not migrate them. Stop scaling, back up `NrAutoScale.ini`, set `NativeResolution=0`, `Width=1280`, `Height=720`, and restart Lossless Scaling. Keep your neural runtime settings and chosen scaler unchanged.
 
 ---
 
@@ -189,7 +195,7 @@ dotnet build .\controls\DlssNrControl\DlssNrControl.csproj -c Release
 ### Running Test Harness & Probes
 
 ```powershell
-# Run the automated native proxy integration suite (9 tests)
+# Run 12 proxy lifecycle/default cases and 4 isolated installer cases
 .\auto-scale\tests\Run-AutoScaleTests.ps1
 
 # Execute standalone D3D12 hardware probe
@@ -198,17 +204,20 @@ dotnet build .\controls\DlssNrControl\DlssNrControl.csproj -c Release
 
 ---
 
-## 📊 Performance & Latency Profile
+## 📊 Measured Performance
 
 Benchmarks recorded on an **AMD Radeon RX 9070 XT** (16GB VRAM, RDNA4, `gfx1201`):
 
-| Resolution | Neural Job Time | Neural Frame Rate | Use Case Profile |
-| :--- | :---: | :---: | :--- |
-| **960 × 540** (Diagnostic) | ~15–16 ms | ~60–65 FPS | Fast diagnostic proof & menu testing |
-| **2560 × 1440** (Native 1440p) | ~63 ms | ~16 FPS | High-fidelity desktop, video, & slow-paced rendering |
+| Processing resolution | Observed neural evaluations/s | Bridge presents/s | Measurement |
+| :--- | ---: | ---: | :--- |
+| **640 × 360** | 106.96 | 343.63 | Resolution comparison, moving synthetic source |
+| **1280 × 720 (default)** | **52.98** | **269.19** | Same source and unchanged neural settings |
+| **2560 × 1440 (native)** | 14.20 | 155.68 | Earlier separate native-source test |
+
+720p has four times the pixels of the former installed 360p preset and about half its measured neural throughput. Community reports support trying 720p-class processing, but do **not** establish a universal recommended AMD resolution. Source links and full methodology are in [docs/performance.md](docs/performance.md). These are synthetic bridge measurements, not game FPS; presented frames can repeat older neural results.
 
 > [!NOTE]
-> **Latency & Display Pipeline**: The current bridge transfers rendered frames from the D3D12 neural swapchain to D3D11 via CPU staging readback. While optimal for visual fidelity on video playback, desktop applications, and slow-paced games, it introduces multi-frame asynchronous latency. Direct GPU-to-GPU shared texture handles (`D3D11_RESOURCE_MISC_SHARED_NTHANDLE`) are planned for future zero-copy low-latency revisions.
+> **Latency & Display Pipeline**: The bridge transfers neural output to the visible D3D11 presenter through CPU staging readback and uses asynchronous inference. End-to-end input latency was not measured, and concurrent game load can reduce throughput. The runtime's own zero-copy interop does not make the entire host capture/presentation path zero-copy.
 
 ---
 

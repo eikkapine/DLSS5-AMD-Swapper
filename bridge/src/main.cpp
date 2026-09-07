@@ -14,8 +14,10 @@
 #include <winrt/base.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -64,12 +66,26 @@ struct Options {
     std::wstring stopEventName;
     DWORD parentPid = 0;
     UINT warmupFrames = 301;
+    UINT maxFps = 0;
 };
 
 struct FramePixels {
     UINT width = 0;
     UINT height = 0;
     std::vector<uint8_t> rgba;
+};
+
+struct PerformanceStats {
+    using Clock = std::chrono::steady_clock;
+    std::array<double, 6> stageMs{};
+    uint64_t frames = 0;
+
+    void Record(const std::array<Clock::time_point, 7>& boundaries) {
+        for (size_t i = 0; i < stageMs.size(); ++i) {
+            stageMs[i] += std::chrono::duration<double, std::milli>(boundaries[i + 1] - boundaries[i]).count();
+        }
+        ++frames;
+    }
 };
 
 std::string NarrowAscii(const std::wstring& value) {
@@ -305,6 +321,12 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.nativeResolution = true;
         } else if (arg == L"--warmup-frames") {
             options.warmupFrames = std::stoul(needValue(L"--warmup-frames"));
+        } else if (arg == L"--max-fps") {
+            const auto value = std::stoul(needValue(L"--max-fps"));
+            if (value > 1000) {
+                throw std::runtime_error("--max-fps must be between 0 (display-paced) and 1000");
+            }
+            options.maxFps = static_cast<UINT>(value);
         } else {
             std::wstringstream ws;
             ws << L"Unknown argument: " << arg;
@@ -466,6 +488,12 @@ public:
         if (!frame) {
             return std::nullopt;
         }
+        // The capture pool has two slots. Prefer the newest complete frame rather
+        // than displaying a queued older frame after a slow neural evaluation.
+        if (auto newer = framePool_.TryGetNextFrame()) {
+            frame.Close();
+            frame = std::move(newer);
+        }
         const auto size = frame.ContentSize();
         if (size.Width <= 0 || size.Height <= 0) {
             return std::nullopt;
@@ -559,6 +587,9 @@ private:
 };
 
 FramePixels ScaleToFit(const FramePixels& src, UINT outWidth, UINT outHeight) {
+    if (src.width == outWidth && src.height == outHeight) {
+        return src;
+    }
     FramePixels out;
     out.width = outWidth;
     out.height = outHeight;
@@ -610,7 +641,13 @@ public:
 
     ~D3D12Presenter() {
         if (fenceEvent_) {
-            WaitForGpu(5000);
+            try {
+                WaitForGpu(5000);
+            } catch (const std::exception& ex) {
+                // Destruction must not terminate the process while unwinding a
+                // GPU error; the original exception is reported by wmain.
+                std::cerr << "D3D12 cleanup: " << ex.what() << "\n";
+            }
             CloseHandle(fenceEvent_);
         }
         if (upload_ && uploadMapped_) {
@@ -640,7 +677,9 @@ public:
         commandList_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
         ExecuteCommands(5000);
-        HRESULT present = swapChain_->Present(1, 0);
+        // This private feed is hidden after warmup. Only the visible presenter
+        // should pace to the monitor; a second vblank wait adds latency.
+        HRESULT present = swapChain_->Present(0, 0);
         if (FAILED(present)) {
             Check(present, "Present");
         }
@@ -649,6 +688,11 @@ public:
 
     FramePixels CaptureBackBuffer() {
         FramePixels out;
+        CaptureBackBuffer(out);
+        return out;
+    }
+
+    void CaptureBackBuffer(FramePixels& out) {
         out.width = width_;
         out.height = height_;
         out.rgba.resize(static_cast<size_t>(width_) * height_ * 4);
@@ -685,7 +729,6 @@ public:
         }
         D3D12_RANGE writeRange{0, 0};
         readback_->Unmap(0, &writeRange);
-        return out;
     }
 
     uint64_t presentCount() const {
@@ -865,7 +908,21 @@ FrameStats AnalyzeFrame(const FramePixels& frame) {
 }
 
 bool SourceMeaningfullyNonBlack(const FramePixels& frame) {
-    return AnalyzeFrame(frame).meanLuma >= 2.0;
+    if (frame.rgba.empty() || frame.width == 0 || frame.height == 0) {
+        return false;
+    }
+    // mean RGB >= 2 is exactly sum RGB >= 6 * pixel count. Since all
+    // contributions are nonnegative, normal bright frames can return early
+    // without scanning every pixel or changing the black-frame threshold.
+    const uint64_t threshold = 6ULL * (frame.rgba.size() / 4);
+    uint64_t sum = 0;
+    for (size_t i = 0; i + 2 < frame.rgba.size(); i += 4) {
+        sum += static_cast<uint64_t>(frame.rgba[i]) + frame.rgba[i + 1] + frame.rgba[i + 2];
+        if (sum >= threshold) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool FrameHasNonBlackPixels(const FramePixels& frame) {
@@ -1218,7 +1275,9 @@ void WriteReport(const std::filesystem::path& path,
                  float strength,
                  uint64_t warmupPresented,
                  UINT sourceActualWidth,
-                 UINT sourceActualHeight) {
+                 UINT sourceActualHeight,
+                 double visibleSeconds,
+                 const PerformanceStats& performance) {
     std::ofstream report(path, std::ios::binary);
     report << "source_hwnd=0x" << std::hex << reinterpret_cast<uintptr_t>(source) << std::dec << "\n";
     report << "source_title=" << NarrowAscii(WindowTitle(source)) << "\n";
@@ -1230,6 +1289,16 @@ void WriteReport(const std::filesystem::path& path,
     report << "frames_captured=" << captured << "\n";
     report << "nr_frames_presented=" << nrPresented << "\n";
     report << "visible_frames_presented=" << visiblePresented << "\n";
+    report << std::fixed << std::setprecision(4);
+    report << "visible_elapsed_seconds=" << visibleSeconds << "\n";
+    report << "bridge_present_fps=" << (visibleSeconds > 0 ? visiblePresented / visibleSeconds : 0) << "\n";
+    report << "max_fps=" << options.maxFps << "\n";
+    report << "fps_note=bridge presents are not unique neural jobs or game FPS\n";
+    constexpr const char* stageNames[] = {"capture", "prepare", "nr_present", "readback", "guard_blend", "visible_present"};
+    for (size_t i = 0; i < performance.stageMs.size(); ++i) {
+        report << "mean_" << stageNames[i] << "_ms="
+               << (performance.frames ? performance.stageMs[i] / performance.frames : 0) << "\n";
+    }
     report << "warmup_frames_requested=" << options.warmupFrames << "\n";
     report << "warmup_frames_presented=" << warmupPresented << "\n";
     report << "freeze_source=" << (options.freezeSource ? 1 : 0) << "\n";
@@ -1313,7 +1382,11 @@ int wmain(int argc, wchar_t** argv) {
         HINSTANCE instance = GetModuleHandleW(nullptr);
         WindowCapture capture(source);
         const auto start = std::chrono::steady_clock::now();
-        const auto frameInterval = std::chrono::milliseconds(33);
+        // A limit is a start-to-start budget, never a delay added after work.
+        // Default pacing comes from the visible swapchain's single vblank wait.
+        const auto frameInterval = options.maxFps > 0
+            ? std::chrono::nanoseconds(1000000000ULL / options.maxFps)
+            : std::chrono::nanoseconds::zero();
         auto nextFrameAt = std::chrono::steady_clock::now();
         uint64_t capturedFrames = 0;
         uint64_t warmupFrames = 0;
@@ -1417,13 +1490,14 @@ int wmain(int argc, wchar_t** argv) {
             lastOriginalFrame = original;
             nrPresenter.Present(original);
             ++warmupFrames;
-            nextFrameAt = std::chrono::steady_clock::now() + frameInterval;
+            nextFrameAt = now + frameInterval;
         }
 
         if (!options.noProxy) {
             bool healthy = false;
             std::string lastHealthDetail;
-            for (UINT attempt = 0; attempt < 120 && !healthy; ++attempt) {
+            const auto healthDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (!healthy && std::chrono::steady_clock::now() < healthDeadline) {
                 if (shouldStop()) {
                     return 0;
                 }
@@ -1432,6 +1506,9 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 if (capture.closed()) {
                     throw std::runtime_error("Source window closed before DLSS-NR runtime health was verified");
+                }
+                if (options.seconds > 0 && std::chrono::steady_clock::now() - start >= std::chrono::seconds(options.seconds)) {
+                    throw std::runtime_error("Timed out before DLSS-NR runtime health was verified");
                 }
                 auto maybeFrame = capture.TryCapture();
                 if (maybeFrame) {
@@ -1494,6 +1571,9 @@ int wmain(int argc, wchar_t** argv) {
 
         bool readyWritten = false;
         bool running = true;
+        FramePixels reusableNrFrame;
+        PerformanceStats performance;
+        const auto visibleStart = std::chrono::steady_clock::now();
         while (running) {
             if (shouldStop()) {
                 break;
@@ -1545,6 +1625,8 @@ int wmain(int argc, wchar_t** argv) {
                 std::this_thread::sleep_for(std::min(std::chrono::duration_cast<std::chrono::milliseconds>(nextFrameAt - now), std::chrono::milliseconds(5)));
                 continue;
             }
+            std::array<PerformanceStats::Clock::time_point, 7> stageTimes;
+            stageTimes[0] = PerformanceStats::Clock::now();
             auto maybeFrame = capture.TryCapture();
             if (maybeFrame) {
                 if (options.nativeResolution) {
@@ -1561,12 +1643,19 @@ int wmain(int argc, wchar_t** argv) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 continue;
             }
-            FramePixels original = PrepareInputFrame(*lastInputFrame, options);
-            if (options.saveCaptures) {
-                lastOriginalFrame = original;
+            stageTimes[1] = PerformanceStats::Clock::now();
+            if (!lastOriginalFrame || (maybeFrame && !options.freezeSource)) {
+                lastOriginalFrame = PrepareInputFrame(*lastInputFrame, options);
             }
+            const FramePixels& original = *lastOriginalFrame;
+            stageTimes[2] = PerformanceStats::Clock::now();
             nrPresenter.Present(original);
-            FramePixels nrFrame = options.noProxy ? original : nrPresenter.CaptureBackBuffer();
+            stageTimes[3] = PerformanceStats::Clock::now();
+            if (!options.noProxy) {
+                nrPresenter.CaptureBackBuffer(reusableNrFrame);
+            }
+            const FramePixels& nrFrame = options.noProxy ? original : reusableNrFrame;
+            stageTimes[4] = PerformanceStats::Clock::now();
             if (options.saveCaptures) {
                 lastNrFrame = nrFrame;
             }
@@ -1580,16 +1669,28 @@ int wmain(int argc, wchar_t** argv) {
             } else if (FrameHasNonBlackPixels(nrFrame) || !SourceMeaningfullyNonBlack(original)) {
                 consecutiveBrokenNrFrames = 0;
             }
-            FramePixels display = BlendFrames(original, nrFrame, strength, effectEnabled);
-            if (options.saveCaptures) {
-                lastDisplayFrame = display;
+            // Full-strength NR and bypass need no extra full-frame copy. The
+            // visible upload still forces opaque alpha, exactly as before.
+            FramePixels blended;
+            const FramePixels* display = &original;
+            if (effectEnabled && strength >= 1.0f) {
+                display = &nrFrame;
+            } else if (effectEnabled && strength > 0.0f) {
+                blended = BlendFrames(original, nrFrame, strength, true);
+                display = &blended;
             }
-            visiblePresenter.Present(display);
+            if (options.saveCaptures) {
+                lastDisplayFrame = *display;
+            }
+            stageTimes[5] = PerformanceStats::Clock::now();
+            visiblePresenter.Present(*display);
+            stageTimes[6] = PerformanceStats::Clock::now();
+            performance.Record(stageTimes);
             if (!readyWritten) {
                 WriteReadyFileAtomic(options.readyFile, bridge);
                 readyWritten = true;
             }
-            nextFrameAt = std::chrono::steady_clock::now() + frameInterval;
+            nextFrameAt = now + frameInterval;
 
             if (pendingHotkeySnapshot) {
                 saveSnapshot("hotkey", transitionSnapshots++);
@@ -1612,7 +1713,9 @@ int wmain(int argc, wchar_t** argv) {
                         strength,
                         warmupFrames,
                         sourceActualWidth,
-                        sourceActualHeight);
+                        sourceActualHeight,
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - visibleStart).count(),
+                        performance);
             saveSnapshot("final", 0);
         }
         return 0;

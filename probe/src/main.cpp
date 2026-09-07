@@ -194,7 +194,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     return DefWindowProcW(hwnd, msg, wparam, lparam);
 }
 
-HWND CreateProbeWindow(HINSTANCE instance, UINT width, UINT height) {
+HWND CreateProbeWindow(HINSTANCE instance, UINT width, UINT height, bool visible) {
     const wchar_t* className = L"DlssNrAmdD3D12ProbeWindow";
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -204,7 +204,7 @@ HWND CreateProbeWindow(HINSTANCE instance, UINT width, UINT height) {
     RegisterClassExW(&wc);
 
     HWND hwnd = CreateWindowExW(
-        WS_EX_TOOLWINDOW,
+        visible ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW,
         className,
         L"DLSS-NR AMD D3D12 probe",
         WS_OVERLAPPEDWINDOW,
@@ -236,7 +236,7 @@ class Probe {
 public:
     explicit Probe(const Options& options)
         : options_(options),
-          hwnd_(CreateProbeWindow(GetModuleHandleW(nullptr), options.width, options.height)),
+          hwnd_(CreateProbeWindow(GetModuleHandleW(nullptr), options.width, options.height, options.visible)),
           expected_(MakePattern(options.width, options.height)) {
         std::filesystem::create_directories(options.out);
         SavePpm(options.out / "expected.ppm", expected_, options.width, options.height);

@@ -9,7 +9,7 @@ Complete this checklist before publishing a public GitHub repository.
 - [ ] Temporary-INI smoke tests prove `--toggle`, `--increase`, and `--decrease`.
 - [ ] `.\controls\DlssNrControl\bin\Release\net8.0-windows\DlssNrControl.exe --listener-smoke` succeeds.
 - [ ] `.\auto-scale\build.ps1` succeeds and produces the project-authored proxy `Lossless.dll`.
-- [ ] `.\auto-scale\tests\Run-AutoScaleTests.ps1` succeeds. The current fake integration harness has passed all 9 cases.
+- [ ] `.\auto-scale\tests\Run-AutoScaleTests.ps1` succeeds. The current suite has passed all 12 proxy cases and four isolated installer checks.
 - [ ] `.\bridge\build.ps1` succeeds.
 - [ ] `.\probe\run_probe.ps1 -Frames 700 -Seconds 25 -Width 640 -Height 360 -HipVisibleDevices 1` succeeds in a private local development folder.
 - [ ] Optional visible probe run `.\probe\run_probe.ps1 -Visible -Frames 700 -Seconds 25 -Width 640 -Height 360 -HipVisibleDevices 1` succeeds.
@@ -55,7 +55,9 @@ Complete this checklist before publishing a public GitHub repository.
 - [ ] Confirm release wording does not imply blanket legal clearance from a source-only audit.
 - [ ] Preserve FidelityFX notices, include the upstream third-party notice, and record the pinned source revision if FidelityFX headers are published.
 
-## Release Claim
+## Current Source Update and Release Claim
+
+The 7 September source update defaults to 1280×720 fixed-size processing, with native mode optional. Its performance, default-forwarding and installer evidence is in [performance.md](performance.md). The older binary preview is unchanged. The native-specific checks above remain requirements for a future native 1:1 release claim; they do not describe the fixed-size default.
 
 Use release wording only after verification passes:
 
@@ -66,7 +68,7 @@ Experimental AMD DLSS NR native Lossless Scaling integration with verified Scale
 Before verification passes, use this wording:
 
 ```text
-Experimental AMD DLSS NR native Lossless Scaling integration tooling. Real Scale-button verification and deterministic native-resolution static-image comparison are not yet complete.
+Experimental AMD DLSS NR Lossless Scaling integration tooling with 720p processing by default and optional native mode. Direct Scale-button verification and a full native-mode app comparison are not yet complete.
 ```
 
 Prepare any public outreach message, including an Ancient Gameplays copyable note, only after the public repo URL exists. Do not send outreach automatically.

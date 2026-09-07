@@ -82,6 +82,7 @@ $readme = Resolve-RequiredFile -Path (Join-Path $repoRoot "README.md") -Name "re
 $installDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "install.md") -Name "install.md"
 $licensingDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "licensing.md") -Name "licensing.md"
 $verificationDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "verification.md") -Name "verification.md"
+$performanceDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "performance.md") -Name "performance.md"
 $comparisonOffImage = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\cs2-native-off.png") -Name "cs2-native-off.png"
 $comparisonOnImage = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\cs2-native-on.png") -Name "cs2-native-on.png"
 $comparisonJson = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\comparison.json") -Name "comparison.json"
@@ -114,6 +115,7 @@ Add-PackageFile -Source $readme -RelativePath "README.md" -Entries $entries
 Add-PackageFile -Source $installDoc -RelativePath "docs\install.md" -Entries $entries
 Add-PackageFile -Source $licensingDoc -RelativePath "docs\licensing.md" -Entries $entries
 Add-PackageFile -Source $verificationDoc -RelativePath "docs\verification.md" -Entries $entries
+Add-PackageFile -Source $performanceDoc -RelativePath "docs\performance.md" -Entries $entries
 Add-PackageFile -Source $comparisonOffImage -RelativePath "docs\images\cs2-native-off.png" -Entries $entries
 Add-PackageFile -Source $comparisonOnImage -RelativePath "docs\images\cs2-native-on.png" -Entries $entries
 Add-PackageFile -Source $comparisonJson -RelativePath "docs\images\comparison.json" -Entries $entries

@@ -4,7 +4,7 @@ Use this page to decide whether the project can honestly claim that DLSS neural 
 
 ## Current Evidence
 
-The project has partial positive evidence, but public-release verification is not complete.
+The current source defaults to 1280×720 processing with native mode optional. It has positive bridge, proxy and installer evidence; a fully verified native-mode binary release is a separate, unfinished goal. The older `v0.1.0-pre.1` package does not contain the latest source update.
 
 Verified:
 
@@ -14,14 +14,17 @@ Verified:
 - The standalone D3D12 probe has produced a real nonblack on/off image difference after engine initialization and completed neural jobs.
 - The bridge developer path has produced matched off/on/blended output from a 960x540 source.
 - The live bridge hotkeys `Ctrl+Alt+F6`, `Ctrl+Alt+F7`, and `Ctrl+Alt+F8` work in the tested bridge path.
-- The native auto-scale wrapper fake integration harness passes all 9 current cases.
+- The proxy integration harness passes 12 lifecycle/default cases, including absent configuration, missing resolution keys, scaler preservation and explicit native mode.
+- Four isolated direct-installer/setup tests pass with project-built stub dependencies.
+- The optimized bridge pixel tests pass, and 720p synthetic runtime testing produces healthy neural output at full strength. See [performance.md](performance.md) for the measured resolution tradeoff.
+- The actual app's configured Ctrl+Alt+S activation shortcut, live effect/strength hotkeys and Unscale shutdown passed in the earlier 360p synthetic-source session.
 
 Pending:
 
-- The actual Lossless Scaling app must start the path automatically when the user presses Scale.
+- Direct Scale-button click activation and a new actual-app test after loading the saved 720p preset remain unverified. The running app was not restarted during this update.
 - The deterministic full Lossless Scaling comparison must pass on a static desktop image at native WGC resolution.
 - The native path must avoid geometry resizing.
-- The full native-resolution Lossless Scaling app path still needs verification. The latest stopped test did not produce the expected proxy activation log before testing was halted.
+- The full native-resolution Lossless Scaling app path still needs separate verification; the successful shortcut test does not establish direct button or native-mode success.
 - Public release contents must pass the source, license, and asset review.
 
 ## Controls Helper Evidence
@@ -120,15 +123,15 @@ Max delta: 49
 
 These runs verify bridge behavior for tested menu scenarios. They do not prove competitive gameplay suitability.
 
-Lossless Scaling captured the bridge output through WGC and LS1 in the tested bridge path. That older 960-to-1440 test verified automatic Scale/Unscale only as a diagnostic. The requested native integration must not rely on geometry resizing.
+Lossless Scaling captured the bridge output through WGC and LS1 in an older 960-to-1440 diagnostic test. Current fixed-size mode intentionally allows upscaling; a native 1:1 claim must be verified separately without geometry resizing.
 
 Native 2560x1440 bridge proof showed same-frame input matching the original with max error `0`; NR output changed the image with mean absolute difference `2.87` and max channel delta `55`; neural jobs took about `63 ms/job`. That is bridge/runtime timing, not full Lossless Scaling end-to-end latency. Do not make a competitive-play claim from this evidence.
 
 ## Native Auto-Scale Evidence
 
-The native wrapper is implemented and the fake integration harness passes all 9 current cases. This verifies wrapper control flow in a harness, including the shape of the automatic path.
+The native wrapper is implemented and the fake integration harness passes all 12 current cases. This verifies wrapper control flow and default forwarding, including the shape of the automatic path. Four installer checks verify the generated configuration and caller overrides.
 
-Public release still requires a real app proof:
+A fully verified native-mode release still requires a real app proof:
 
 - Press Scale in the actual Lossless Scaling app.
 - Confirm the auto-scale wrapper starts the bridge without a separate launcher or source picker.
@@ -141,7 +144,7 @@ Public release still requires a real app proof:
 
 ## Release Acceptance
 
-Release acceptance requires all of these:
+A native 1:1 release claim requires all of these, beyond the current fixed-size source update:
 
 - The real Lossless Scaling Scale button starts the integration automatically.
 - Off and on captures use the same deterministic source content.

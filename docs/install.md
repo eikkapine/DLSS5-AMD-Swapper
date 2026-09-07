@@ -1,6 +1,6 @@
 # Install And Build
 
-This project currently provides `v0.1.0-pre.1` experimental preview tooling for an AMD DLSS Neural Rendering compatibility runtime with Lossless Scaling. It is not a proven native-resolution automatic release until the real Lossless Scaling Scale-button test and deterministic static-image comparison pass at native resolution.
+This project provides experimental tooling for an AMD DLSS Neural Rendering compatibility runtime with Lossless Scaling. Current source defaults to **1280×720 processing** with optional native mode. The older `v0.1.0-pre.1` binary preview predates this default and the performance update; build from source for those changes. Direct Scale-button and full native-mode app verification remain incomplete.
 
 ## Install The Preview
 
@@ -19,9 +19,11 @@ This project currently provides `v0.1.0-pre.1` experimental preview tooling for 
 
 The release ZIP does not include NVIDIA DLLs, AMD proxy binaries, model files, HIP runtime installers, or paid Lossless Scaling files.
 
-The setup flow is still experimental. Previous automatic Scale/Unscale testing passed for the diagnostic 960-to-1440 path, but the full native-resolution Lossless Scaling app path is not verified yet.
+The setup flow is still experimental. Automatic activation through the configured Ctrl+Alt+S shortcut and Unscale shutdown passed in a synthetic-source 360p app test. The new 720p preset has isolated runtime/default-forwarding verification; it is not yet a verified full native-resolution app path. See [performance.md](performance.md) for the exact evidence.
 
-The intended native path is not an upscaler. The wrapper is responsible for keeping WGC capture at native resolution without Lossless Scaling geometry resizing.
+Current setup uses `NativeResolution=0`, `Width=1280`, `Height=720`. Lossless Scaling upscales that feed with the selected scaler, or LS1 if the profile's scaler is Off. To choose 1:1 native processing instead, pass `-NativeResolution 1` or set that value in `NrAutoScale.ini`; width/height are then ignored.
+
+Existing INIs are not migrated automatically. Stop scaling, back up `NrAutoScale.ini`, set those three values to the desired preset, and restart Lossless Scaling. Do not rerun the full installer over an existing installation just to change resolution; keep the neural runtime INI and app profile unchanged.
 
 ## Runtime Requirements
 
@@ -181,9 +183,9 @@ A public source package must not include:
 
 The approved analytical comparison crops under `docs/images/` may be published on the GitHub page. Do not add extra screenshots, comparison images, user files, browser captures, movie frames, or wallpaper images to the public package.
 
-## Current Deployment Boundary
+## Additional Native-Mode Release Verification
 
-Do not document or ship this as a completed Lossless Scaling deployment path until the project proves all of the following:
+The current 720p source update does not establish a completed native-mode release. Before making that separate claim, prove all of the following:
 
 - The native auto-scale wrapper starts from the actual Lossless Scaling Scale button with no separate launcher or source picker.
 - Native WGC resolution is used.

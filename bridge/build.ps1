@@ -9,7 +9,9 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $buildDir = Join-Path $scriptDir 'build'
 
 cmake -S $scriptDir -B $buildDir -A x64
+if ($LASTEXITCODE -ne 0) { throw "Bridge CMake configuration failed" }
 cmake --build $buildDir --config $Configuration
+if ($LASTEXITCODE -ne 0) { throw "Bridge $Configuration build failed" }
 
 $exe = Get-ChildItem -Path $buildDir -Recurse -Filter 'DlssNrBridge.exe' |
     Where-Object { $_.FullName -match "\\$Configuration\\" } |

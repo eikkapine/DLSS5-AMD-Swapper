@@ -91,13 +91,13 @@ struct Config {
     std::filesystem::path captureDirectory;
     std::wstring hipVisibleDevices = L"1";
     bool freezeSource = false;
-    bool nativeResolution = true;
-    int width = 960;
-    int height = 540;
+    bool nativeResolution = false;
+    int width = 1280;
+    int height = 720;
     int startupDelayMs = 2000;
     int warmupFrames = 320;
     int readyTimeoutMs = 180000;
-    int defaultScalingTypeIfOff = 0;
+    int defaultScalingTypeIfOff = 1;
     int forceCaptureApi = 1;
 };
 
