@@ -136,8 +136,7 @@ Add-PackageFile -Source $license -RelativePath "LICENSE" -Entries $entries
 Add-PackageFile -Source $license -RelativePath "docs\LICENSE.txt" -Entries $entries
 Add-PackageFile -Source $versionFile -RelativePath "VERSION" -Entries $entries
 Add-PackageFile -Source $releaseManifest -RelativePath "RELEASE.json" -Entries $entries
-foreach ($relative in @('progress.md', 'async-recovery.md', 'fresh-output.md', 'gpu-handoff.md',
-        'neural-inference-plan.md', 'neural-speedup.md', 'neural-host-timing.md', 'inference-feed.md',
+foreach ($relative in @('architecture.md', 'development.md', 'release-checklist.md',
         "releases\v$version.md")) {
     $source = Resolve-RequiredFile -Path (Join-Path $docsRoot $relative) -Name $relative
     Add-PackageFile -Source $source -RelativePath ("docs\" + $relative) -Entries $entries

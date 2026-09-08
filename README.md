@@ -1,241 +1,129 @@
 # NR Auto Scale
 
-[![Release](https://img.shields.io/badge/Release-v0.1.0--pre.2-blue.svg)](https://github.com/eikkapine/NR-Auto-Scale/releases/tag/v0.1.0-pre.2)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2011%2024H2%20(x64)-0078d4.svg?logo=windows)](https://microsoft.com/windows)
-[![Target Architecture](https://img.shields.io/badge/Target%20GPU-AMD%20Radeon%20RX%209070%20XT%20(RDNA4)-ed1c24.svg?logo=amd)](https://www.amd.com)
-[![Graphics APIs](https://img.shields.io/badge/APIs-DirectX%2012%20%7C%20DirectX%2011%20%7C%20WGC-00599c.svg)](https://learn.microsoft.com/en-us/windows/win32/direct3d12/)
-[![Compute Backend](https://img.shields.io/badge/Compute-AMD%20HIP%207.2-purple.svg)](https://rocm.docs.amd.com/)
+[![Release](https://img.shields.io/github/v/release/eikkapine/NR-Auto-Scale?include_prereleases&label=preview)](https://github.com/eikkapine/NR-Auto-Scale/releases)
+[![License](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
+[![Windows](https://img.shields.io/badge/Windows-11-0078d4?logo=windows11)](https://www.microsoft.com/windows/windows-11)
+[![AMD](https://img.shields.io/badge/tested-RX%209070%20XT-ed1c24?logo=amd)](https://www.amd.com/)
 
-**NR Auto Scale** is an open-source bridge and native proxy architecture that brings **NVIDIA DLSS Neural Rendering (DLSS-NR / DLSS 5)** compatibility runtimes to **AMD RDNA4 hardware** through **Lossless Scaling**.
+I built **NR Auto Scale** to make an experimental DLSS Neural Rendering compatibility path usable through **Lossless Scaling on AMD hardware** without having to launch and target a separate bridge by hand every time.
 
-**v0.1.0-pre.2 — native-resolution progress checkpoint (7 September 2026).** This preview publishes the manually exercised GPU-sharing, exact duplicate suppression, HIP timing and inference-aware feeding changes. The latest RX 9070 XT run at **2560×1440** recorded **1,112 changed RGB submissions in 60.238 seconds: 18.46/s**. The user reports about **19 FPS**, or nominally **38 FPS with 2× frame generation**; generated/displayed FPS was not measured by the bridge. **60 FPS remains an unmet target.** See the [progress ledger](docs/progress.md), [release notes](docs/releases/v0.1.0-pre.2.md), and [artifact hashes](RELEASE.json).
+The project starts the bridge when Lossless Scaling starts scaling, captures the source window with Windows Graphics Capture, runs the neural path in a separate process, and feeds the result back to Lossless Scaling. It also adds live hotkeys for bypass and effect strength.
 
-The package contains the same project-built bridge executable as that manual run, not an additional untested performance change. Native mode processes the captured application size at full effect strength; no model, precision or resolution reduction is used by these optimizations. Setup still defaults to fixed **1280×720** unless `NativeResolution=1` is selected. The earlier 720p measurements are [historical results](docs/performance.md), not current native-resolution performance.
+This is still a preview. My current test system is an **RX 9070 XT**, and native 2560×1440 neural rendering is still much slower than I want. The current public checkpoint is about making the integration usable, measurable, and easier to improve.
 
-NR Auto Scale separates screen capture and neural evaluation from the target application's process. It captures eligible visible windows through Windows Graphics Capture without injecting the bridge into the source application. Compatibility with protected content and individual games still needs testing.
+## What it does
 
----
+- Starts with the normal Lossless Scaling workflow instead of a separate source picker.
+- Keeps the bridge outside the source application's process and captures through WGC.
+- Supports fixed-size processing or 1:1 native-resolution processing.
+- Lets me toggle the neural output live with `Ctrl+Alt+F6`.
+- Lets me decrease/increase the live blend with `Ctrl+Alt+F7` / `Ctrl+Alt+F8`.
+- Keeps paid Lossless Scaling files, NVIDIA runtime files, AMD proxy binaries, models, logs, and private machine files out of this repository.
 
-## 🌟 Key Highlights
+## Quick start
 
-- 🚫 **No In-Process Game Injection**: Captures the selected source through Windows Graphics Capture (`wgc`).
-- 🎯 **720p Processing, Optional Native Mode**: Defaults to 1280×720 bounds with aspect ratio preserved, followed by the selected Lossless Scaling upscaler. `NativeResolution=1` processes the source at its captured dimensions and requests 1:1 presentation.
-- ⚡ **Automatic Lossless Scaling Workflow**: The proxy handles bridge startup, readiness and window selection. Activation through the configured **Ctrl+Alt+S** shortcut is verified; direct Scale-button click verification remains pending.
-- 🎛️ **Live Hotkeys & Dynamic Blending**: Toggle between original and neural output on the fly (`Ctrl+Alt+F6`) and fine-tune effect strength in 10% increments (`Ctrl+Alt+F7` / `Ctrl+Alt+F8`) via real-time software alpha blending.
-- 🛡️ **Automated Health Gating & Safety**: Pre-flight warmup verification monitors runtime logs for completed neural jobs, blank frame detection guards, and graceful fallbacks.
-- 🔴 **Engineered for AMD RDNA4**: Evaluated on the **AMD Radeon RX 9070 XT** utilizing the AMD HIP runtime (`amdhip64_7.dll`) and `HIP_VISIBLE_DEVICES=1`.
+1. Install Lossless Scaling normally.
+2. Download the latest preview ZIP from [Releases](https://github.com/eikkapine/NR-Auto-Scale/releases).
+3. Extract it somewhere **outside** the Lossless Scaling install folder.
+4. Run `Setup.cmd`.
+5. Select your Lossless Scaling install when prompted.
+6. Supply the external runtime files requested by setup from your own legally obtained copies.
+7. Open the game, browser, video, or other window you want to process and press **Scale** in Lossless Scaling.
 
----
+The release does **not** bundle Lossless Scaling files, NVIDIA DLLs, the AMD compatibility proxy, model files, or HIP installers. See [Installation](docs/install.md) for the full setup and uninstall flow.
 
-## 🔍 Visual Comparison
+## Controls
 
-The crops below come from an earlier native-resolution test using the same frozen source frame in Counter-Strike 2. They show identical pixel rectangles without resizing or post-capture processing. **They are historical examples, not a new visual-equivalence test of v0.1.0-pre.2.**
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Alt+F6` | Toggle between original and processed output |
+| `Ctrl+Alt+F7` | Reduce the live effect blend by 10% |
+| `Ctrl+Alt+F8` | Increase the live effect blend by 10% |
 
-| Original Native Source | DLSS Neural Rendering Enabled |
+The live blend is clamped from `0.0` to `1.0`.
+
+## Before / after
+
+These are matching 1:1 crops from the same frozen 2560×1440 CS2 frame. I did not resize, sharpen, recolor, or otherwise modify the crops after capture.
+
+| Original | Neural output |
 | :---: | :---: |
-| ![Original native-resolution crop](docs/images/cs2-native-off.png) | ![NR enabled native-resolution crop](docs/images/cs2-native-on.png) |
+| ![Original native-resolution crop](docs/images/cs2-native-off.png) | ![Neural output crop](docs/images/cs2-native-on.png) |
 
-### Analytical Proof Metrics
+For that frame, source-to-original max error was `0`. The neural output changed about 97.7% of pixels, with a mean absolute RGB difference of about `2.87/255` and a maximum channel difference of `55/255`. The raw comparison values are in [comparison.json](docs/images/comparison.json).
 
-Captured on 2560x1440 native SDR source (`docs/images/comparison.json`):
+## How it works
 
-| Metric | Measured Value | Verification Interpretation |
-| :--- | :--- | :--- |
-| **Source Dimensions** | 2560 × 1440 | Bit-exact native SDR capture |
-| **Analytical Crop Box** | [1080, 100] to [1720, 850] (640 × 750) | 1:1 pixel crop, no geometry scaling |
-| **Input vs. Original Max Delta** | **0** | Perfect, uncorrupted source frame capture |
-| **Full-Frame Mean RGB Delta ($\Delta$)** | **2.8709** | Proven neural reconstruction difference across surfaces |
-| **Full-Frame Max Channel Delta** | **55** | Significant neural refinement on high-frequency edges |
-| **Runtime Zero-Output Rate** | **< 0.13%** | Healthy neural inference pipeline, zero blank frames |
-
----
-
-## 📐 System Architecture
-
-NR Auto Scale utilizes a decoupled two-tier architecture that bridges Direct3D 11 host environments with Direct3D 12 neural compute pipelines:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│             Target Window (Game / Video / Browser)          │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               │ Windows Graphics Capture (WGC)
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ DlssNrBridge.exe (Decoupled Background Bridge Process)       │
-│                                                             │
-│  1. Ingests source frames non-intrusively via WGC API       │
-│  2. Feeds frames to private D3D12 swapchain (D3D12Presenter)│
-│  3. Invokes AMD DLSS-NR compatibility runtime (version.dll) │
-│  4. Runs neural evaluation on AMD HIP (HIP_VISIBLE_DEVICES=1│
-│  5. Reads back buffer & verifies non-black neural luma gate │
-│  6. Blends frames live based on active strength modifier    │
-│  7. Presents to D3D11 bridge window ("DLSS NR Bridge")      │
-│  8. Publishes HWND via atomic marker: auto-ready-<pid>.txt  │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               │ Atomic HWND handshake
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Lossless.dll (Native Proxy Forwarder)                       │
-│                                                             │
-│  1. Drop-in proxy intercepting Lossless Scaling interop     │
-│  2. Forwards unchanged functions to Lossless_original.dll   │
-│  3. Intercepts Activate(targetHWND) on "Scale" button click │
-│  4. Spawns DlssNrBridge.exe and awaits ready marker         │
-│  5. Keeps selected scaler for fixed-size processing         │
-│     (LS1 if Off); optional native mode requests 1:1         │
-│  6. Forwards Activate(bridgeHWND) to Lossless Scaling       │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-                               │ Upscaling, or optional native 1:1
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│             Lossless Scaling Fullscreen Output              │
-└─────────────────────────────────────────────────────────────┘
+```text
+source window
+    │
+    │ Windows Graphics Capture
+    ▼
+DlssNrBridge.exe
+    │
+    ├─ D3D11 capture / presentation
+    ├─ D3D12 neural runtime feed
+    ├─ AMD HIP backend
+    └─ live original ↔ neural blend
+    │
+    ▼
+Lossless Scaling
+    │
+    ▼
+display
 ```
 
----
+`Lossless.dll` in this project is my own proxy wrapper. During local setup it forwards to the original paid Lossless Scaling DLL kept privately on the installed machine. The original application DLL is never part of this repository or release package.
 
-## 🎮 Runtime Hotkeys & Controls
+See [Architecture](docs/architecture.md) for the process and resource flow.
 
-Global hotkeys allow interactive evaluation without needing to restart applications or reconfigure files:
+## Current status
 
-| Hotkey | Function | Details | HUD Indication |
-| :--- | :--- | :--- | :--- |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>F6</kbd> | **Toggle NR** | Instantly switches between bypass and neural processed blend | `[on X.X]` / `[off X.X]` |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>F7</kbd> | **Decrease Strength** | Lowers neural effect intensity by 10% (`-0.1`, clamped at `0.0`) | Step decrement |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>F8</kbd> | **Increase Strength** | Raises neural effect intensity by 10% (`+0.1`, clamped at `1.0`) | Step increment |
+The latest published checkpoint is **v0.1.0-pre.2**. On my RX 9070 XT at native 2560×1440, the recorded run produced **1,112 changed RGB submissions over 60.238 seconds (18.46/s)** and I observed roughly **19 FPS** base output. A 2× frame-generation setting would make `38 FPS` a nominal multiplier, but the bridge did not independently measure generated/displayed FPS.
 
-> **Live HUD Feedback**: The bridge window title updates in real-time to reflect the active engine state, e.g. `DLSS NR Bridge [on 1.0]` or `DLSS NR Bridge [off 0.5]`.
+The project is not at a native 60 FPS target yet. I am keeping image resolution, model/weights, neural precision, full effect strength, and the asynchronous inference path intact while working on transport and scheduling overhead.
 
----
+See [Performance](docs/performance.md) for the measurements and [Verification](docs/verification.md) for exactly what has and has not been checked.
 
-## ⚙️ Configuration Reference (`NrAutoScale.ini`)
+## Processing modes
 
-The configuration file resides beside `Lossless.dll` in the Lossless Scaling installation folder:
+The preview currently defaults to fixed **1280×720** processing with source aspect ratio preserved. Lossless Scaling can then apply the scaler selected in its profile.
 
-```ini
-[AutoScale]
-Enabled=1
-BridgeExe=nr-bridge\runtime\DlssNrBridge.exe
-RuntimeDirectory=nr-bridge\runtime
-HipVisibleDevices=1
-NativeResolution=0
-Width=1280
-Height=720
-StartupDelayMs=2000
-WarmupFrames=320
-ReadyTimeoutMs=180000
-DefaultScalingTypeIfOff=1
-ForceCaptureApi=1
-```
+Set `NativeResolution=1` in `NrAutoScale.ini` for 1:1 source-size processing. Native mode uses the captured source dimensions and requests a 1.0 scale path. The bridge currently rejects source sizes above 3840×2160 and stops if the source dimensions change during a native session.
 
-| Parameter | Type | Default | Description |
-| :--- | :---: | :---: | :--- |
-| `Enabled` | `int` | `1` | Master toggle for the automatic proxy bridge. |
-| `BridgeExe` | `path` | `...` | Relative or absolute path to `DlssNrBridge.exe`. |
-| `RuntimeDirectory` | `path` | `...` | Directory containing runtime DLLs and logs. |
-| `HipVisibleDevices` | `string` | `1` | Passed to the bridge environment to select the AMD GPU device for HIP execution. |
-| `NativeResolution` | `int` | `0` | Uses fixed processing bounds. Set to `1` for native source resolution and 1:1 presentation; width/height are then ignored. |
-| `Width`, `Height` | `int` | `1280`, `720` | Processing/output bounds; the source is fitted with its aspect ratio preserved. |
-| `DefaultScalingTypeIfOff` | `int` | `1` | Selects LS1 only when the profile's scaler is Off in fixed-size mode. A selected scaler is preserved. |
-| `StartupDelayMs` | `int` | `2000` | Delay after loading `version.dll` before creating D3D12 swapchain. |
-| `WarmupFrames` | `int` | `320` | Frames evaluated in the private D3D12 feed before health verification. |
-| `ReadyTimeoutMs` | `int` | `180000`| Maximum milliseconds to wait for the bridge ready file before aborting. |
-| `ForceCaptureApi` | `int` | `1` | Forces WGC capture mode (`1`) within Lossless Scaling. |
+## Requirements
 
----
+- Windows 11
+- Lossless Scaling installed from an official source
+- AMD Radeon GPU; development has focused on RDNA4 / RX 9070 XT
+- AMD HIP 7.2 runtime for the current compute path
+- User-supplied compatibility/runtime files described in [Installation](docs/install.md)
 
-## 🚀 Installation & Quick Start
+## Documentation
 
-### Prerequisites
-1. **Operating System**: Windows 11 (build 24H2 or newer recommended for WGC API).
-2. **GPU & Driver**: AMD Radeon RX 9000-series GPU (tested on RX 9070 XT) with modern AMD Adrenalin drivers.
-3. **Lossless Scaling**: Installed via [Steam](https://store.steampowered.com/app/993090/Lossless_Scaling/).
-4. **User-Supplied Runtimes**: Users must provide their own legally acquired AMD compatibility proxy (`version.dll`), `nvngx_dlssnr.dll`, and HIP 7.2 runtime files.
+| Page | What it covers |
+| --- | --- |
+| [Installation](docs/install.md) | Setup, uninstall, runtime files, native mode |
+| [Architecture](docs/architecture.md) | Capture, proxy, bridge, GPU handoff |
+| [Performance](docs/performance.md) | Current measurements and bottlenecks |
+| [Verification](docs/verification.md) | What I have actually tested |
+| [Development](docs/development.md) | Current optimization direction and release discipline |
+| [Licensing](docs/licensing.md) | Project license and third-party boundaries |
 
-### Automated Setup
-1. Download the preview package (`v0.1.0-pre.2`) from the [Releases](https://github.com/eikkapine/NR-Auto-Scale/releases) page.
-2. Extract the archive outside of the Lossless Scaling folder.
-3. Run:
-   ```cmd
-   Setup.cmd
-   ```
-4. Select your Lossless Scaling install path when prompted. The installer backs up your original `Lossless.dll` to `Lossless_original.dll`.
-5. Supply your private AMD proxy and NVIDIA runtime files as instructed.
-6. Launch Lossless Scaling, focus a capturable source window and use the configured scaling shortcut (Ctrl+Alt+S in the verified setup).
+Component-level notes are also available in [bridge/README.md](bridge/README.md), [auto-scale/README.md](auto-scale/README.md), and [controls/README.md](controls/README.md).
 
-For advanced or developer installation workflows, see [docs/install.md](docs/install.md).
+## License and third-party files
 
-To select native application resolution during setup, run `Setup.cmd -NativeResolution 1`. An existing native installation already has `NativeResolution=1`; its width/height fallbacks are ignored. Updating source alone does not migrate settings. Keep existing runtime files and profiles, and do not rerun setup just to replace the bridge executable. Stop scaling before replacing `nr-bridge/runtime/DlssNrBridge.exe`; compare its SHA-256 with [RELEASE.json](RELEASE.json). No vendor runtime, model, weights, app profile or private configuration is included in the package.
+My original project code is released under the [MIT License](LICENSE). Third-party projects and runtime files keep their own licenses and terms.
 
-Each manual run can be recorded using [Analyze-Run.py](bridge/scripts/Analyze-Run.py). It reads settled logs, creates an append-only summary, and separates reported base FPS, changed images, HIP waits and nominal frame-generation output. The [iteration workflow](docs/progress.md#manual-iteration-workflow) describes the process. No automated tests or playback were run for this checkpoint.
+I intentionally do not redistribute paid Lossless Scaling files, NVIDIA runtime/model files, or the AMD compatibility proxy. The current AMD DLSS-NR route also has unresolved third-party licensing questions for redistribution/use outside the terms of those upstream components, so check [Licensing](docs/licensing.md) before packaging or sharing anything beyond this repository's original code and release artifacts.
 
----
+## Credits
 
-## 🛠️ Building From Source
+This project builds on ideas and compatibility work from:
 
-### Requirements
-- Visual Studio 2022 (MSVC C++ toolset)
-- CMake 3.20+
-- .NET 8.0 SDK (for the optional controls helper)
-- Windows 11 SDK (10.0.26100.0 or newer for WGC interop headers)
+- [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)
+- [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
+- [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
 
-### Compilation Commands
-
-```powershell
-# 1. Build the .NET control helper
-dotnet build .\controls\DlssNrControl\DlssNrControl.csproj -c Release
-
-# 2. Build the native Lossless.dll proxy forwarder
-.\auto-scale\build.ps1
-
-# 3. Build the DlssNrBridge executable
-.\bridge\build.ps1
-```
-
-### Running Test Harness & Probes
-
-```powershell
-# Run 12 proxy lifecycle/default cases and 4 isolated installer cases
-.\auto-scale\tests\Run-AutoScaleTests.ps1
-
-# Execute standalone D3D12 hardware probe
-.\probe\run_probe.ps1 -Frames 700 -Seconds 25 -Width 640 -Height 360 -HipVisibleDevices 1
-```
-
----
-
-## 📊 Measured Performance
-
-Benchmarks recorded on an **AMD Radeon RX 9070 XT** (16GB VRAM, RDNA4, `gfx1201`):
-
-| Processing resolution | Observed neural evaluations/s | Bridge presents/s | Measurement |
-| :--- | ---: | ---: | :--- |
-| **640 × 360** | 106.96 | 343.63 | Resolution comparison, moving synthetic source |
-| **1280 × 720 (default)** | **52.98** | **269.19** | Same source and unchanged neural settings |
-| **2560 × 1440 (native)** | 14.20 | 155.68 | Earlier separate native-source test |
-
-720p has four times the pixels of the former installed 360p preset and about half its measured neural throughput. Community reports support trying 720p-class processing, but do **not** establish a universal recommended AMD resolution. Source links and full methodology are in [docs/performance.md](docs/performance.md). These are synthetic bridge measurements, not game FPS; presented frames can repeat older neural results.
-
-> [!NOTE]
-> **Latency & Display Pipeline**: The bridge transfers neural output to the visible D3D11 presenter through CPU staging readback and uses asynchronous inference. End-to-end input latency was not measured, and concurrent game load can reduce throughput. The runtime's own zero-copy interop does not make the entire host capture/presentation path zero-copy.
-
----
-
-## 📜 Repository Guidelines & Legal Compliance
-
-To respect software licensing and distribution agreements:
-- **Clean Room Open Source**: This repository contains original source code, scripts, and documentation under the MIT License.
-- **No Proprietary Binaries**: This repository **does not** bundle or distribute paid Lossless Scaling binaries, NVIDIA proprietary SDKs/DLLs, model neural weights, or AMD redistributable packages.
-- **Privacy First**: Test assets and verification suites use synthetic deterministic images or approved, sanitized analytical crops. No user wallpapers, personal browser data, or copyrighted films are stored.
-
-See [docs/licensing.md](docs/licensing.md) and [docs/release-checklist.md](docs/release-checklist.md) for full compliance details.
-
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
+The repository contains attribution/notices where source or ABI references require them.

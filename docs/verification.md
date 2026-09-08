@@ -1,180 +1,67 @@
 # Verification
 
-Use this page to decide whether the project can honestly claim that DLSS neural rendering works on AMD through the Lossless Scaling path.
+This page is the line between what I have actually checked and what still needs work.
 
-## Current Evidence
+## Verified
 
-The current source defaults to 1280×720 processing with native mode optional. It has positive bridge, proxy and installer evidence; a fully verified native-mode binary release is a separate, unfinished goal. The older `v0.1.0-pre.1` package does not contain the latest source update.
+- The bridge can capture a normal visible source window through Windows Graphics Capture.
+- The neural runtime can produce non-black output on the tested RX 9070 XT path.
+- The bridge can show original, neural, and blended output.
+- `Ctrl+Alt+F6` toggles original/processed output live.
+- `Ctrl+Alt+F7` and `Ctrl+Alt+F8` change the live blend in `0.1` steps.
+- The auto-scale wrapper can start the bridge, wait for readiness, and activate Lossless Scaling through the configured scaling shortcut path.
+- Unscale can stop the bridge cleanly in the exercised app integration path.
+- Native bridge capture at 2560×1440 can preserve the source frame exactly before neural processing (`max error = 0`).
+- The approved native comparison shows a real neural image difference with no geometry resize in the crop.
+- The `v0.1.0-pre.2` production binaries match the hashes recorded in `RELEASE.json`.
+- The public release/package boundary excludes paid Lossless Scaling files and external vendor/runtime files.
 
-Verified:
+## Partially verified
 
-- The controls helper builds and passes its self-test.
-- Startup INI commands update only the intended values.
-- The listener smoke test confirms hotkey registration and message handling against a temporary INI.
-- The standalone D3D12 probe has produced a real nonblack on/off image difference after engine initialization and completed neural jobs.
-- The bridge developer path has produced matched off/on/blended output from a 960x540 source.
-- The live bridge hotkeys `Ctrl+Alt+F6`, `Ctrl+Alt+F7`, and `Ctrl+Alt+F8` work in the tested bridge path.
-- The proxy integration harness passes 12 lifecycle/default cases, including absent configuration, missing resolution keys, scaler preservation and explicit native mode.
-- Four isolated direct-installer/setup tests pass with project-built stub dependencies.
-- The optimized bridge pixel tests pass, and 720p synthetic runtime testing produces healthy neural output at full strength. See [performance.md](performance.md) for the measured resolution tradeoff.
-- The actual app's configured Ctrl+Alt+S activation shortcut, live effect/strength hotkeys and Unscale shutdown passed in the earlier 360p synthetic-source session.
+### Automatic Scale workflow
 
-Pending:
+Automatic activation through the configured Lossless Scaling scaling shortcut has been exercised. Direct mouse-click testing of every current Scale-button/profile combination has not been completed for the published checkpoint.
 
-- Direct Scale-button click activation and a new actual-app test after loading the saved 720p preset remain unverified. The running app was not restarted during this update.
-- The deterministic full Lossless Scaling comparison must pass on a static desktop image at native WGC resolution.
-- The native path must avoid geometry resizing.
-- The full native-resolution Lossless Scaling app path still needs separate verification; the successful shortcut test does not establish direct button or native-mode success.
-- Public release contents must pass the source, license, and asset review.
+### Native mode
 
-## Controls Helper Evidence
+Native-resolution bridge behavior has been checked independently, and the auto-scale proxy contains the native 1:1 forwarding path. The final native path through every real Lossless Scaling UI/profile combination has not been exhaustively exercised.
 
-Run from the repository root:
+### GPU transport
 
-```powershell
-dotnet build .\controls\DlssNrControl\DlssNrControl.csproj -c Release
-.\controls\DlssNrControl\bin\Release\net8.0-windows\DlssNrControl.exe --self-test
-```
+The shared GPU path was observed in the native performance checkpoint. This does not establish pixel equivalence on every AMD driver/GPU combination.
 
-Expected result:
+## Not established
 
-```text
-Build succeeded.
-Self-tests passed.
-```
+- 60 FPS native neural rendering
+- broad AMD GPU compatibility outside the hardware I have tested
+- competitive-game latency suitability
+- compatibility with every protected-content/game capture scenario
+- independently measured LSFG/display FPS for the quoted 2× multiplier
+- legal permission for every possible third-party runtime use case
 
-Run one-shot commands against a temporary INI before using a real config:
+## Approved image comparison
 
-```powershell
-$config = Join-Path $env:TEMP "dlssnr-doc-test.ini"
-Set-Content -LiteralPath $config -Encoding ASCII -Value "[DlssNrOnAmd]`r`nEnabled=0`r`nLocalStructure=1.0`r`nUseFsrInputs=0`r`n"
-.\controls\DlssNrControl\bin\Release\net8.0-windows\DlssNrControl.exe --config $config --toggle
-.\controls\DlssNrControl\bin\Release\net8.0-windows\DlssNrControl.exe --config $config --increase
-Get-Content -Raw -LiteralPath $config
-Remove-Item -LiteralPath $config
-```
+The only public gameplay images are:
 
-Expected INI state:
+- `docs/images/cs2-native-off.png`
+- `docs/images/cs2-native-on.png`
 
-```ini
-[DlssNrOnAmd]
-Enabled=1
-LocalStructure=1.1
-UseFsrInputs=0
-```
+They are matching 640×750 crops from the same frozen 2560×1440 frame. The crop was not resized, sharpened, color-adjusted, or fabricated. PNG metadata was cleared and the crop excludes account details, usernames, chat, and desktop/browser UI.
 
-This proves config control only. The controls helper is not the main runtime route and does not prove a visible image change.
+The full private captures are intentionally not part of GitHub.
 
-## Standalone Probe Evidence
+## Reading the numbers correctly
 
-Run from the repository root:
+I keep these measurements separate:
 
-```powershell
-.\probe\run_probe.ps1 -Frames 700 -Seconds 25 -Width 640 -Height 360 -HipVisibleDevices 1
-```
+- game/source FPS
+- changed RGB submissions
+- bridge presentation rate
+- neural job duration
+- HIP waits
+- LSFG output
+- displayed FPS
 
-The probe writes private test output under `probe\runs\`, including reports, comparison summaries, and captured buffers.
+One cannot be substituted for another. A faster presentation loop does not prove faster neural inference, and multiplying a base rate by a frame-generation setting is not the same as measuring displayed FPS.
 
-Accepted standalone probe evidence currently available showed:
-
-```text
-HIP_VISIBLE_DEVICES=1 was set only in the child process.
-Startup delay after proxy load was long enough for hook initialization.
-Engine initialization was observed.
-About 400 neural jobs completed.
-Approximate job time was 15-16 ms/job.
-Self-check zero-output rate was 0.132%, accepted as healthy.
-Off image matched the generated source exactly.
-On image was nonblack.
-On RGB mean absolute difference was 8.89.
-On max channel delta was 55.
-```
-
-A passing standalone probe is a prerequisite. It does not prove the full Lossless Scaling path by itself.
-
-Reject a probe result if completed-job logs are paired with invalid kernel errors, black output, mismatched source sizes, missing captures, or no visible on/off difference.
-
-## Bridge Evidence
-
-The bridge captures a selected source window, feeds a private D3D12 NR swapchain, and shows a visible D3D11 output window that Lossless Scaling can capture. It is currently a developer diagnostic route and an integration component, not proof of final end-user release by itself.
-
-Accepted bridge evidence currently available showed:
-
-```text
-Source scenario: game menu, 960x540 bridge output
-Off output max error: 0
-Full-strength on output vs NR max error: 0
-0.9 blend max error: <= 1
-Runtime self-check zero-output rate: 0.116%, accepted as healthy
-Runtime jobs: about 15-16 ms/job
-Hotkeys: Ctrl+Alt+F6/F7/F8 verified for bridge output
-```
-
-Accepted frozen-source bridge evidence currently available showed:
-
-```text
-Runtime health: healthy
-LocalTone: enabled
-SkinStructure: enabled
-Frozen proof images: saved locally
-Mean difference: 3.40
-Max delta: 49
-```
-
-These runs verify bridge behavior for tested menu scenarios. They do not prove competitive gameplay suitability.
-
-Lossless Scaling captured the bridge output through WGC and LS1 in an older 960-to-1440 diagnostic test. Current fixed-size mode intentionally allows upscaling; a native 1:1 claim must be verified separately without geometry resizing.
-
-Native 2560x1440 bridge proof showed same-frame input matching the original with max error `0`; NR output changed the image with mean absolute difference `2.87` and max channel delta `55`; neural jobs took about `63 ms/job`. That is bridge/runtime timing, not full Lossless Scaling end-to-end latency. Do not make a competitive-play claim from this evidence.
-
-## Native Auto-Scale Evidence
-
-The native wrapper is implemented and the fake integration harness passes all 12 current cases. This verifies wrapper control flow and default forwarding, including the shape of the automatic path. Four installer checks verify the generated configuration and caller overrides.
-
-A fully verified native-mode release still requires a real app proof:
-
-- Press Scale in the actual Lossless Scaling app.
-- Confirm the auto-scale wrapper starts the bridge without a separate launcher or source picker.
-- Confirm Lossless Scaling captures the bridge output window.
-- Confirm native WGC resolution is used.
-- Confirm the wrapper keeps the Lossless Scaling path at native resolution with no geometry resizing.
-- Confirm `Ctrl+Alt+F6` toggles the live output.
-- Confirm `Ctrl+Alt+F7` and `Ctrl+Alt+F8` adjust live blend.
-- Compare off/on frames against a static desktop image.
-
-## Release Acceptance
-
-A native 1:1 release claim requires all of these, beyond the current fixed-size source update:
-
-- The real Lossless Scaling Scale button starts the integration automatically.
-- Off and on captures use the same deterministic source content.
-- Native WGC resolution is used.
-- No geometry resampling or upscaling is part of the claim.
-- The on path loads the intended private runtime.
-- Runtime logs or counters show completed neural work.
-- Captured on buffers differ from the deterministic source pattern.
-- Captured off/on buffers differ in a way that matches the enabled setting.
-- The final comparison uses ordinary static desktop content, such as a browser image.
-- Only approved analytical comparison crops are uploaded.
-- No paid Lossless Scaling files, vendor runtime files, model files, logs, captures, or user-specific files are required in the public repository.
-
-Reject the release claim if the only evidence is:
-
-- An INI value changed.
-- A DLL loaded.
-- A hotkey notification appeared.
-- Startup INI values changed without a runtime path that polls them.
-- A ReShade or ordinary post-processing filter changed the image.
-- A log exists without completed neural work.
-- Completed-job logs are paired with invalid kernel errors or black output.
-- A dynamic scene changed between off/on captures and was not frozen or otherwise matched.
-
-## Test Assets
-
-Use generated deterministic patterns for public fixtures. Do not publish:
-
-- Screenshots from the user desktop unless the user explicitly approves that exact image.
-- Windows wallpaper images.
-- Movie frames.
-- Browser captures containing private data.
-- Logs with usernames, machine paths, GPU serials, or hardware identifiers.
+See [Performance](performance.md) for the current numbers and [Licensing](licensing.md) for the release boundary.

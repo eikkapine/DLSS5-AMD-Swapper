@@ -82,7 +82,8 @@ LosslessProxy/
 Thumbs.db
 Desktop.ini
 
-# Internal development acceptance notes
+# Local workspace notes
+/AGENTS.md
 /PLAN.md
 /nr-bridge/
 

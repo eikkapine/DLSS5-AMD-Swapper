@@ -1,79 +1,54 @@
-# Licensing And Attribution
+# Licensing and third-party boundary
 
-This page records what can be published and what still needs care. It is not legal advice, and it is not blanket authorization that the whole runtime path is allowed.
+My original NR Auto Scale source, scripts, and documentation are released under the repository's [MIT License](../LICENSE). That license only covers work I can license myself.
 
-## Project License
+It does not automatically cover Lossless Scaling, NVIDIA runtime/model files, the AMD compatibility proxy, copied upstream code, or other third-party material.
 
-Original source code, scripts, and documentation authored in this development workspace are MIT licensed under [LICENSE](../LICENSE).
+## Referenced projects
 
-That license does not cover third-party projects, runtime DLLs, model files, paid Lossless Scaling files, Windows assets, screenshots, logs, copied upstream source, or the user's local files.
-
-GitHub's licensing guide explains that repositories without a license do not grant broad reuse rights by default: <https://docs.github.com/articles/licensing-a-repository>.
-
-The current probe, bridge, auto-scale wrapper, setup scripts, and control sources are project-authored code and do not include NVIDIA SDK material.
-
-## Source References
-
-| Source | Observed license status | Public repo action |
+| Project | What I use it for | Public-repo rule |
 | --- | --- | --- |
-| <https://github.com/danielblnc/DLSS-NR-on-AMD> | License added in commit `057c87324bfd8131c45c6b7e7de7d22ab46844d5` on 2026-09-06. The audited terms allow personal, non-commercial use and do not permit redistributing the proxy, installer, or config. | Link as a reference only. Do not redistribute its `version.dll`, setup executable, binaries, config, or copied source without separate permission. |
-| <https://github.com/FrankBarretta/LSP-ReShade> | MIT, copyright 2025 FrankBarretta | If source is copied or adapted, keep the MIT notice and attribution. If only referenced, link upstream. |
-| Local `LosslessProxy` clone | MIT, copyright 2025 FrankBarretta | Do not claim ownership. Exclude the local clone from the public repo unless imported as an audited third-party component with notices. |
-| <https://github.com/jlrouzies-fr/DLSS5-Feeder> | MIT, copyright 2026 Jean-Laurent ROUZIES | If source is copied or adapted, keep the MIT notice and attribution. If only referenced, link upstream. |
-| <https://github.com/NVIDIA/DLSS/blob/main/LICENSE.txt> | NVIDIA DLSS SDK proprietary terms. The RTX Supplement says the public license permits DLSS/NGX SDK use only on systems that include NVIDIA GPUs. | Do not redistribute user-provided NVIDIA DLLs, SDK files, or models in this repo. No NVIDIA permission has been found for an AMD runtime path; separate permission may be required before claiming that path is allowed. |
-| <https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK> | Vendored headers include AMD permission notices and an upstream third-party notice file in the local snapshot. | If FidelityFX headers are published, preserve the license headers, keep `3rdpartynotice.md`, and record the pinned upstream revision. |
+| [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD) | AMD DLSS-NR compatibility runtime reference | Link/reference only. Do not redistribute its proxy, installer, config, or copied source unless its terms allow it. |
+| [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade) | ABI/proxy reference | MIT; preserve its notice if source is copied/adapted. |
+| [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | Feeding/integration reference | MIT; preserve its notice if source is copied/adapted. |
+| [NVIDIA/DLSS](https://github.com/NVIDIA/DLSS) | NVIDIA SDK/runtime terms reference | Do not redistribute NVIDIA DLLs, SDK files, or models from this repo. |
+| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | Small vendored header subset | Keep the upstream notices and third-party notice file with any published vendored headers. |
 
-## Runtime Permission Boundary
+The audited AMD compatibility project currently has restrictive personal/non-commercial terms for its own distributed proxy materials. I therefore keep those binaries/config/installers out of NR Auto Scale releases.
 
-The source-only audit does not clear runtime permissions.
+NVIDIA's DLSS/NGX terms also do not give me a clear basis to claim that every AMD runtime path is authorized. Because of that, I do not describe the complete third-party runtime chain as legally cleared. Anyone packaging or distributing additional runtime material should review the current upstream terms and obtain permission where needed.
 
-- User-provided NVIDIA DLLs or SDK materials do not create clear permission to use DLSS/NGX through an AMD runtime path.
-- The AMD proxy reference has restrictive personal, non-commercial terms, so its binaries, installer, config, and copied source must not be redistributed from this project.
-- MIT-licensed reference projects solve only their own source-notice requirements. They do not authorize NVIDIA SDK use, AMD proxy redistribution, Lossless Scaling file redistribution, or a claim that the full project is legally permitted.
-- Public release wording must avoid saying the project is "all allowed" unless separate runtime permissions are resolved.
+## Lossless Scaling
 
-## Lossless Scaling File Boundary
+The project builds its own wrapper named `Lossless.dll`. That filename is required for the local forwarding setup; the project-built file is not the paid Lossless Scaling DLL.
 
-Do not publish paid Lossless Scaling files.
+During a private local install, the original Lossless Scaling DLL can be preserved as `Lossless_original.dll` so my wrapper can forward to it. Neither the original DLL nor that private backup belongs in GitHub or a release ZIP.
 
-The project may build an original proxy artifact named `Lossless.dll`. That project-built file is distinct from the paid Lossless Scaling original DLL. A local private install may preserve the user's original DLL as `Lossless_original.dll` so the proxy can forward calls to it.
+Do not publish:
 
-The public repo and public release package must not include:
+- the paid Lossless Scaling `Lossless.dll`
+- `Lossless_original.dll`
+- Lossless Scaling executables or app assets
+- copied private Lossless Scaling configuration
+- local backups made by setup/uninstall
 
-- The paid Lossless Scaling original `Lossless.dll`.
-- `Lossless_original.dll`.
-- Lossless Scaling executables, app assets, configuration files copied from the paid app, or local backups.
-- Any file copied from the user's installed Lossless Scaling directory unless it is an original project file.
+## Public release allowlist
 
-## Public Package Allowlist
+A normal NR Auto Scale release may contain:
 
-A public package may contain:
+- original project source
+- the project-built wrapper and bridge binaries
+- project build/setup/uninstall scripts
+- documentation and license/notices
+- the two already-approved comparison crops
+- sanitized release/measurement metadata
 
-- Original project source.
-- Build scripts.
-- Documentation and license files.
-- The project-built proxy `Lossless.dll`.
-- The project-built bridge executable.
-- Setup and uninstall scripts.
+It must not contain:
 
-Everything outside this allowlist needs a fresh license and contents review before upload.
+- AMD proxy/runtime binaries or installers
+- NVIDIA runtime/model/SDK files
+- paid Lossless Scaling files
+- private logs, crash dumps, traces, backups, or machine-specific paths
+- unreviewed screenshots, movie/browser captures, wallpapers, or personal files
 
-## Files To Exclude From Public Releases
-
-- Paid Lossless Scaling application files.
-- AMD runtime binaries and setup executables.
-- NVIDIA DLSS DLLs, SDK files, and model files.
-- Full upstream repository clones unless added through a deliberate audited import.
-- Local backups from active installations.
-- Logs, crash dumps, traces, and machine-specific reports.
-- Screenshots, movie frames, browser captures, Windows wallpaper images, and comparison images from local testing, except for the approved analytical crops under `docs/images/`.
-- Private environment files.
-- FidelityFX headers without their license notices, third-party notice file, and pinned upstream revision.
-
-The approved analytical comparison crops under `docs/images/` may be published on the GitHub page. Do not add additional screenshots, personal images, browser captures, movie frames, or wallpaper images without a fresh contents review.
-
-## Attribution Rule
-
-If future development copies or adapts upstream source, add a notice that names the upstream project, copyright holder, license, and source URL before publishing.
-
-If the project only uses an upstream repository as a reference, keep it as a link in documentation and do not include its files in this repository.
+This page records the project's release boundary; it is not legal advice or permission from any third-party rights holder.

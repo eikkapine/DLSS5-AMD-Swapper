@@ -2,7 +2,7 @@
   "schema_version": 1,
   "version": "0.1.0-pre.2",
   "tag": "v0.1.0-pre.2",
-  "status": "experimental-manual-progress-checkpoint",
+  "status": "experimental-preview",
   "date": "2026-09-07",
   "artifacts": [
     {
@@ -38,7 +38,7 @@
     "manual_gpu_sharing_observed": true,
     "manual_worker_wait_pacing_observed": true,
     "automated_tests_run_for_release": false,
-    "agent_playback_run_for_release": false,
+    "automated_playback_run_for_release": false,
     "hardware_pixel_equivalence_verified": false,
     "achieved_60_fps_verified": false,
     "new_performance_change_in_publication_pass": false
