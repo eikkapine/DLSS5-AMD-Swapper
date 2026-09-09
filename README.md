@@ -1,10 +1,10 @@
-# NR Auto Scale — experimental soft-cheat branch
+# NR Auto Scale — experimental visual-clarity branch
 
-This branch preserves the earlier **dev.5 high-frequency Neural Rendering compositor** that I tested before moving the main project toward broader DLSS-NR reconstruction.
+This is the `experimental-soft-cheat` branch, currently **v0.1.0-pre.3-soft-cheat.2**. It now carries the same dev.14 transport, pacing and anti-flicker work as the main branch, but uses a different whole-frame compositor aimed at stronger visual clarity.
 
-The visible image stays at the captured application's native resolution. Only the expensive neural branch is capped to **480 pixels high** by default. The neural result is then used as a high-frequency detail layer over the native frame.
+The visible image stays at the captured application's native resolution while only the expensive neural branch is capped to **480 pixels high** by default. A 2560×1440 source therefore remains 2560×1440 for presentation while Neural Rendering works at about 854×480.
 
-That produces a different look from the main branch: it is mostly perceived as extra sharpness and distant-detail separation. In my testing it could also make distant fog or haze look weaker in some scenes, which is why I keep this as a separate **experimental soft-cheat** branch instead of mixing it into the normal visual-quality path.
+The experimental compositor keeps stable neural structure and luminance/shading information, rejects broad unstable chroma, boosts local luminance separation from the current source frame, and applies a mild neutral-veil reduction. The filter is uniform across the image; it does not classify or target players, characters or any other object type.
 
 The branch keeps the existing automatic Lossless Scaling integration and hotkeys:
 
@@ -22,24 +22,27 @@ Strength starts at `1.0` and can be pushed to `4.0`. Above `1.0`, F7/F8 use 0.25
 - Captures the selected window with Windows Graphics Capture.
 - Keeps the visible output at the source resolution.
 - Caps only the neural working image with `NeuralMaxHeight=480` by default.
-- Keeps the normal D3D11/D3D12 shared-resource path.
-- Extracts high-frequency structure from the neural result with a five-sample cross filter.
-- Adds that detail back to the untouched native source instead of using the low-resolution neural image as the visible base.
+- Keeps the dev.14 D3D11/D3D12 shared-resource, asynchronous pacing and high-rate visible-presentation path.
+- Keeps the dev.14 motion rejection and exact-static correction reuse that removed most flicker from the main branch.
+- Preserves stable neural detail plus bounded luminance/shading changes while rejecting broad unstable color shifts.
+- Adds current-frame local-contrast enhancement and a small neutral-veil reduction for a stronger clarity/dehaze-style look.
+- Adds the result to the untouched native source instead of using the low-resolution neural image as the visible base.
 - Keeps the bridge outside the target application's process.
 
 For a 2560×1440 source, the visible bridge remains 2560×1440 while the neural branch is approximately 854×480.
 
-## Why this branch exists
+## How the experimental compositor differs
 
-The dev.5 compositor deliberately discards the neural result's low-frequency image base. The GPU path computes a small blur from the neural output and applies only:
+The main dev.14 branch is tuned for balanced Neural Rendering reconstruction. This branch biases the same stable residual path toward clarity:
 
 ```text
-native + (neural - neural_blur) * strength
+native
+  + motion-gated neural structure/luminance residual
+  + current-frame local luminance contrast
+  - small bright-neutral veil term
 ```
 
-This makes the result behave more like a neural detail filter. It also avoids depending on the exact input frame that produced an asynchronously published neural frame, which is useful for this experiment.
-
-This branch was reconstructed from the exact dev.5 implementation edits preserved in my previous development session and checked against the preserved dev.5 behavior. I do not claim the newly compiled executable is byte-for-byte identical to the old binary.
+The source-derived clarity term always comes from the frame being displayed, so it does not inherit stale-frame chromatic trails. Neural color information is reduced as motion rises, while the current source detail remains active.
 
 ## Install from this branch
 
@@ -86,9 +89,9 @@ When you press **Scale** in Lossless Scaling, the proxy launches the bridge auto
 
 ## Verification for this branch
 
-The reconstructed branch builds successfully in Release mode and the existing bridge pixel tests pass. No gameplay automation or computer-use test was run for this branch.
+The soft-cheat.2 Release bridge and proxy build successfully, the bridge pixel tests pass, and the full auto-scale/setup harness passes on a clean rerun. The local validation build includes the same HIP 7 timing/pacing support used by the accepted dev.14 main build.
 
-The main visual evidence for this mode comes from the earlier manual testing where the effect was seen primarily as sharpening/detail separation and reduced distant fog/haze. That observation is the reason this code is preserved separately.
+I have not yet done a new manual visual acceptance pass for soft-cheat.2, so the stronger clarity/haze behavior remains an experimental target rather than a measured claim. No new screenshots were added.
 
 ## Public-file boundary
 
@@ -100,9 +103,9 @@ This repository contains project source code and documentation. It does not incl
 - private INI files, logs, backups or machine-specific runtime files
 - personal files or secrets
 
-The project-built proxy is also named `Lossless.dll`, but it is my own forwarding wrapper. The paid original remains private on the user's installed machine.
+The project-built proxy is also named `Lossless.dll`, but it is my own forwarding wrapper. The paid original stays in the local Lossless Scaling installation and is never included here.
 
-Use external filters only where the software or game rules you are using allow them. This branch does not contain anti-cheat bypasses or in-process game injection.
+This branch does not contain anti-cheat bypasses or in-process game injection.
 
 ## Documentation
 

@@ -5,6 +5,8 @@ Texture2D<float4> neuralImage : register(t1);
 Texture2D<float4> sourceImage : register(t2);
 Texture2D<float4> previousImage : register(t3);
 ByteAddressBuffer tileStatistics : register(t4);
+Texture2D<float4> previousInputImage : register(t5);
+Texture2D<float4> previousSourceImage : register(t6);
 RWTexture2D<unorm float4> composedImage : register(u0);
 RWByteAddressBuffer counters : register(u1);
 RWByteAddressBuffer tileStatisticsOutput : register(u2);
@@ -17,7 +19,7 @@ cbuffer FrameParameters : register(b0)
     uint imageWidth;
     uint imageHeight;
     uint blendAlpha; // 0..256 normally; native-detail mode allows up to 1024 (4x).
-    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native high-frequency detail composite.
+    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native async-residual composite; bit 3: repeated exact source; bit 4: previous source available; bit 5: display history belongs to previous source.
     uint reserved0;
     uint reserved1;
 };
@@ -67,6 +69,9 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
     bool hasHistory = (frameFlags & 1u) != 0;
     bool computeSourceSum = (frameFlags & 2u) != 0;
     bool nativeResidualComposite = (frameFlags & 4u) != 0;
+    bool repeatedSourceCorrection = (frameFlags & 8u) != 0;
+    bool hasPreviousSource = (frameFlags & 16u) != 0;
+    bool historyMatchesPreviousSource = (frameFlags & 32u) != 0;
     uint laneChanged = 0;
     uint laneNonblack = 0;
     uint laneSourceSum = 0;
@@ -83,24 +88,147 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
             uint3 neural = uint3(0, 0, 0);
             uint3 result = uint3(0, 0, 0);
 
+            float3 previousVisible = hasHistory ? previousImage.Load(location).rgb : 0.0;
             if (nativeResidualComposite)
             {
-                // Experimental soft-cheat path: keep every native source texel and
-                // use only the neural output's high-frequency component as detail.
-                // Discarding the low-frequency neural base avoids coupling this
-                // compositor to the asynchronous input/output publication delay.
+                // The AMD runtime reports this path as "async (residual from an
+                // earlier frame)": it applies the most recently completed neural
+                // residual to the backbuffer being presented now. Therefore the
+                // correction is the async backbuffer minus THIS feed's low-res
+                // input. Subtracting an older captured frame injects ordinary
+                // camera/exposure changes into the correction and shows up as
+                // brightness pulses and movement flicker.
                 float3 originalNative = sourceImage.Load(location).rgb;
                 float2 uv = (float2(position) + 0.5) / float2(imageWidth, imageHeight);
-                float2 texel = 1.0 / float2(neuralWidth, neuralHeight);
                 float3 neuralLow = neuralImage.SampleLevel(resizeSampler, uv, 0.0).rgb;
-                float3 neuralBlur = neuralLow * 4.0;
-                neuralBlur += neuralImage.SampleLevel(resizeSampler, uv + float2(texel.x, 0.0), 0.0).rgb;
-                neuralBlur += neuralImage.SampleLevel(resizeSampler, uv - float2(texel.x, 0.0), 0.0).rgb;
-                neuralBlur += neuralImage.SampleLevel(resizeSampler, uv + float2(0.0, texel.y), 0.0).rgb;
-                neuralBlur += neuralImage.SampleLevel(resizeSampler, uv - float2(0.0, texel.y), 0.0).rgb;
-                neuralBlur *= 0.125;
+                float3 currentInput = inputImage.SampleLevel(resizeSampler, uv, 0.0).rgb;
+
                 float amount = (float)blendAlpha / 256.0;
-                float3 nativeResult = saturate(originalNative + (neuralLow - neuralBlur) * amount);
+                const float3 lumaWeights = float3(0.2126, 0.7152, 0.0722);
+                float3 correction = 0.0;
+
+                // A repeated evaluation of the exact same captured frame can reuse
+                // its accepted correction. No motion has occurred in this case.
+                if (repeatedSourceCorrection && hasHistory)
+                {
+                    correction = previousVisible - originalNative;
+                }
+                else
+                {
+                    // The AMD compatibility runtime exposes only colour here: no
+                    // game depth, motion vectors or exposure. Its asynchronous
+                    // backbuffer can therefore contain a neural residual generated
+                    // for an older image. Remove the low-frequency part of that
+                    // residual spatially so old exposure/colour decisions cannot
+                    // make the whole scene pulse between frames. The high-frequency
+                    // neural detail is retained.
+                    float2 texel = 1.0 / float2(neuralWidth, neuralHeight);
+                    float3 inputLeft = inputImage.SampleLevel(
+                        resizeSampler, uv - float2(texel.x, 0.0), 0.0).rgb;
+                    float3 inputRight = inputImage.SampleLevel(
+                        resizeSampler, uv + float2(texel.x, 0.0), 0.0).rgb;
+                    float3 inputUp = inputImage.SampleLevel(
+                        resizeSampler, uv - float2(0.0, texel.y), 0.0).rgb;
+                    float3 inputDown = inputImage.SampleLevel(
+                        resizeSampler, uv + float2(0.0, texel.y), 0.0).rgb;
+                    float3 residualCenter = neuralLow - currentInput;
+                    float3 residualLeft =
+                        neuralImage.SampleLevel(resizeSampler, uv - float2(texel.x, 0.0), 0.0).rgb - inputLeft;
+                    float3 residualRight =
+                        neuralImage.SampleLevel(resizeSampler, uv + float2(texel.x, 0.0), 0.0).rgb - inputRight;
+                    float3 residualUp =
+                        neuralImage.SampleLevel(resizeSampler, uv - float2(0.0, texel.y), 0.0).rgb - inputUp;
+                    float3 residualDown =
+                        neuralImage.SampleLevel(resizeSampler, uv + float2(0.0, texel.y), 0.0).rgb - inputDown;
+                    float3 lowResidual =
+                        (residualCenter * 4.0 + residualLeft + residualRight + residualUp + residualDown) / 8.0;
+                    float3 detailResidual = residualCenter - lowResidual;
+
+                    // Experimental clarity branch: keep the stable dev.14 residual
+                    // treatment, but bias the retained neural signal toward local
+                    // structure and luminance/shading. Broad chroma remains rejected
+                    // because it is the least stable part of the colour-only async
+                    // path and was responsible for most visible flicker.
+                    float sourceLuma = dot(originalNative, lumaWeights);
+                    float lowLuma = dot(lowResidual, lumaWeights);
+                    float maxBroadLuma = 0.016 + 0.032 * sourceLuma;
+                    float safeBroadLuma = clamp(lowLuma, -maxBroadLuma, maxBroadLuma);
+                    float3 filteredResidual = detailResidual * 1.30 + safeBroadLuma.xxx * 1.15;
+
+                    // Add a current-frame-only clarity term. This is deliberately
+                    // derived from the source being presented, so it cannot trail an
+                    // older neural frame. It increases local luminance separation and
+                    // mildly suppresses bright neutral veiling, which can make haze
+                    // easier to see through without changing geometry or targeting
+                    // any object class.
+                    float3 inputBlur =
+                        (currentInput * 4.0 + inputLeft + inputRight + inputUp + inputDown) / 8.0;
+                    float localLuma = dot(currentInput - inputBlur, lumaWeights);
+                    float localClarity = clamp(localLuma * 0.70, -0.024, 0.024);
+                    float maxChannel = max(originalNative.r, max(originalNative.g, originalNative.b));
+                    float minChannel = min(originalNative.r, min(originalNative.g, originalNative.b));
+                    float saturation = maxChannel - minChannel;
+                    float neutralMask = 1.0 - smoothstep(0.045, 0.20, saturation);
+                    float brightMask = smoothstep(0.36, 0.82, sourceLuma);
+                    float veilReduction = neutralMask * brightMask *
+                        (0.004 + 0.010 * smoothstep(0.50, 0.90, sourceLuma));
+                    float sourceClarityLuma = localClarity - veilReduction;
+
+                    float motion = 0.0;
+                    bool reusedExactStaticCorrection = false;
+                    if (hasPreviousSource)
+                    {
+                        float3 previousInput = previousInputImage.SampleLevel(resizeSampler, uv, 0.0).rgb;
+                        float3 frameDelta = abs(currentInput - previousInput);
+                        float absoluteMotion = max(frameDelta.r, max(frameDelta.g, frameDelta.b));
+                        float3 relativeDelta = frameDelta /
+                            (max(abs(currentInput), abs(previousInput)) + 0.02);
+                        float relativeMotion = max(relativeDelta.r, max(relativeDelta.g, relativeDelta.b));
+                        motion = max(
+                            smoothstep(1.5 / 255.0, 10.0 / 255.0, absoluteMotion),
+                            smoothstep(0.025, 0.12, relativeMotion));
+
+                        // Cross-frame reuse is permitted only for a literally
+                        // unchanged native pixel. Near matches are deliberately not
+                        // accepted: those were enough to leave colour fringes and
+                        // ghost silhouettes during camera movement.
+                        if (historyMatchesPreviousSource && hasHistory)
+                        {
+                            float3 previousNative = previousSourceImage.Load(location).rgb;
+                            float nativeDelta = max(abs(originalNative.r - previousNative.r),
+                                max(abs(originalNative.g - previousNative.g),
+                                    abs(originalNative.b - previousNative.b)));
+                            if (nativeDelta < (0.5 / 255.0))
+                            {
+                                correction = previousVisible - previousNative;
+                                reusedExactStaticCorrection = true;
+                            }
+                        }
+                    }
+
+                    if (!reusedExactStaticCorrection)
+                    {
+                        // Stale colour residuals are the source of the weak
+                        // chromatic-aberration trail. As motion rises, keep only
+                        // luminance detail and rapidly reduce stale correction
+                        // magnitude. Static pixels retain the complete filtered
+                        // neural detail.
+                        float filteredLuma = dot(filteredResidual, lumaWeights);
+                        filteredResidual = lerp(filteredResidual, filteredLuma.xxx, motion);
+                        filteredResidual *= lerp(1.0, 0.12, motion);
+
+                        // Neural correction is motion-gated; the source-derived
+                        // clarity component stays active because it belongs to the
+                        // current frame. Strength scales both, with a clamp keeping
+                        // the clarity tone adjustment bounded even at 4x.
+                        float clarityAmount = min(amount, 4.0);
+                        float boundedSourceClarity = clamp(
+                            sourceClarityLuma * clarityAmount, -0.055, 0.055);
+                        correction = filteredResidual * amount + boundedSourceClarity.xxx;
+                    }
+                }
+
+                float3 nativeResult = saturate(originalNative + correction);
                 original = (uint3)round(originalNative * 255.0);
                 neural = (uint3)round(neuralLow * 255.0);
                 result = (uint3)round(nativeResult * 255.0);
@@ -127,7 +255,7 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
             bool changed = !hasHistory;
             if (hasHistory)
             {
-                uint3 previous = (uint3)round(previousImage.Load(location).rgb * 255.0);
+                uint3 previous = (uint3)round(previousVisible * 255.0);
                 changed = any(previous != result);
             }
             laneChanged |= changed ? 1u : 0u;

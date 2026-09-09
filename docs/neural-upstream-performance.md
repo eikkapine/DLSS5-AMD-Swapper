@@ -39,4 +39,4 @@ Kernel timing diagnostics are now opt-in with `--hip-kernel-timing` so normal pe
 
 ## Validation boundary
 
-Production compilation and static inspection are permitted for this candidate. No automated GPU test, synthetic scene, benchmark or gameplay is run by the agent. The user manually checks image quality, base FPS and normal Lossless Scaling behavior after deployment.
+Production compilation and static inspection are used for this candidate. Automated gameplay or synthetic visual acceptance is not part of this workflow; image quality, base FPS and normal Lossless Scaling behavior are checked manually after deployment.

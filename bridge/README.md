@@ -2,11 +2,9 @@
 
 `DlssNrBridge.exe` captures one selected window with Windows Graphics Capture, feeds a reduced color image to the AMD DLSS-NR compatibility runtime, and presents a native-resolution D3D11 bridge window for Lossless Scaling.
 
-This branch is **v0.1.0-pre.3-soft-cheat.1**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
+This branch is **v0.1.0-pre.3-soft-cheat.2**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
 
-The experimental compositor keeps only the neural output's high-frequency structure. It samples the neural result in a five-point cross, subtracts that local blur from the neural center sample, and adds the remaining detail to the untouched native source.
-
-This is the preserved dev.5-style path. It intentionally discards most low/mid-frequency neural reconstruction, so its visible effect is much closer to detail sharpening and distant-structure separation.
+The experimental compositor uses the dev.14 spatial residual filter and motion rejection, retains extra local neural structure/luminance, then adds a current-frame local-contrast and neutral-veil adjustment. Broad unstable chroma is still rejected to preserve the anti-flicker behavior.
 
 ## Keyboard shortcuts
 
@@ -14,7 +12,7 @@ This is the preserved dev.5-style path. It intentionally discards most low/mid-f
 - `Ctrl+Alt+F7` decreases strength.
 - `Ctrl+Alt+F8` increases strength.
 
-Native high-frequency mode starts at `1.0` and supports up to `4.0`. Above `1.0`, strength changes in 0.25 steps; from `0..1`, it changes in 0.1 steps. Legacy modes remain capped at `1.0`.
+Native clarity mode starts at `1.0` and supports up to `4.0`. Above `1.0`, strength changes in 0.25 steps; from `0..1`, it changes in 0.1 steps. Legacy modes remain capped at `1.0`.
 
 ## Main options
 
@@ -40,7 +38,7 @@ The bridge still uses `UseFsrInputs=0` for the Lossless Scaling color-only path.
 
 ## Runtime files
 
-Proxy mode expects user-supplied runtime files beside the private bridge installation, including the AMD proxy and the user's legally obtained NVIDIA DLSS-NR DLL. Those files are not part of this repository or release package.
+Proxy mode expects locally supplied runtime files beside the private bridge installation, including the AMD proxy and a legally obtained NVIDIA DLSS-NR DLL. Those files are not part of this repository or release package.
 
 The exercised runtime configuration keeps:
 
@@ -63,4 +61,4 @@ The Windows SDK shader compiler embeds the transport shaders into the production
 
 ## Verification boundary
 
-The reconstructed soft-cheat bridge compiles successfully and the existing bridge pixel tests pass. No automated gameplay, GPU benchmark or screenshot capture was run for this branch. Its intended visual behavior comes from the earlier manual dev.5 testing that motivated preserving this compositor.
+The soft-cheat.2 bridge compiles successfully with HIP 7 pacing support, the bridge pixel tests pass, and the auto-scale/setup harness passes on a clean rerun. No automated gameplay/computer-use visual test or new screenshot capture was run for this branch.

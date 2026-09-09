@@ -1,6 +1,6 @@
 # Install and build
 
-NR Auto Scale is experimental tooling for using an AMD DLSS Neural Rendering compatibility runtime through Lossless Scaling. On the `experimental-soft-cheat` branch, the visible output stays at the captured source resolution, the neural branch is capped to **480 pixels high** by default, and only high-frequency neural detail is added back to the native frame.
+NR Auto Scale is experimental tooling for using an AMD DLSS Neural Rendering compatibility runtime through Lossless Scaling. On the `experimental-soft-cheat` branch, the visible output stays at the captured source resolution, the neural branch is capped to **480 pixels high** by default, and the dev.14 stable neural residual is combined with a uniform local-clarity/dehaze-style image filter.
 
 ## Install the preview
 
@@ -71,7 +71,7 @@ If you already have an installation, stop scaling before changing `NrAutoScale.i
 | `Ctrl+Alt+F7` | Decrease strength |
 | `Ctrl+Alt+F8` | Increase strength |
 
-The experimental high-frequency mode supports `0.0..4.0` strength. The baseline is `1.0`.
+The experimental clarity mode supports `0.0..4.0` strength. The baseline is `1.0`.
 
 ## Runtime requirements
 
@@ -120,7 +120,7 @@ For explicit private paths:
   -WorkingScale 0
 ```
 
-The installer privately preserves the user's original Lossless Scaling DLL as `Lossless_original.dll` so the project proxy can forward to it. That paid original must never be copied into the public repository or release ZIP.
+The installer privately preserves the original Lossless Scaling DLL as `Lossless_original.dll` so the project proxy can forward to it. That paid original must never be copied into the public repository or release ZIP.
 
 ## Uninstall
 

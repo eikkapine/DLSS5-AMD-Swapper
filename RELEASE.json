@@ -1,19 +1,19 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-soft-cheat.1",
+  "version": "0.1.0-pre.3-soft-cheat.2",
   "tag": null,
   "status": "experimental-branch",
   "date": "2026-09-09",
   "published": false,
   "branch": "experimental-soft-cheat",
   "branch_public": true,
-  "based_on_public_version": "0.1.0-pre.3-dev.6",
+  "based_on_public_version": "0.1.0-pre.3-dev.14",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "c30a0937f5d4c19a75249d3f6c0e54d77bc987d57e64db9096ff198784cd9e62",
-      "bytes": 264704,
+      "sha256": "05f43c47b0bec363d52a6683a09621b84057f07bb2b9a3f947dff74025480bf0",
+      "bytes": 295936,
       "local_validation_build": true,
       "published_binary": false
     },
@@ -29,9 +29,9 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "df4b2bcfc5a4f01e3ca36d0826b56b7cef92aa07f85d9e93494435f51ae6d99e",
-      "bridge/src/gpu_transport.h": "cbc26b256d723ad70703ba6334d695b2fb9f74975aa9b119a4c6e80fe352fde5",
-      "bridge/shaders/gpu_transport.hlsl": "f20bb7883fc8e63126f9a4230bade217e25d91b3aa9a5ba454a808b293bb7ef3",
+      "bridge/src/main.cpp": "5130cbb8295065040d52a82dcfca5bf32523ee2f76f12b288f96b6051eb7acca",
+      "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
+      "bridge/shaders/gpu_transport.hlsl": "f89c2b9087acc4c2c8a5268b879d25a0f1cfe3e6b5c5c579bde59418c5f5bfe1",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
@@ -39,23 +39,21 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "c8f75e4a939ad0e94d411ac93c50aaa0f6b7ea7243617d71ecbcb8fb913259e2"
+      "VERSION": "96e253f7fb5ec205db69527f9a5e368ea2512774d992fdb020127f1bad43ae6b"
     }
   },
   "implementation": {
     "visible_output": "native captured source resolution",
     "neural_max_height": 480,
-    "composition": "native source + high-frequency neural detail",
-    "gpu_filter": "five-sample cross high-pass",
+    "composition": "native source + motion-gated neural structure/luminance residual + current-frame local clarity",
+    "gpu_filter": "dev.14 async residual spatial filter with uniform clarity and bounded neutral-veil reduction",
     "strength_baseline": 1.0,
     "strength_max": 4.0,
     "hotkeys": "Ctrl+Alt+F6 toggle, Ctrl+Alt+F7 decrease, Ctrl+Alt+F8 increase"
   },
   "provenance": {
-    "reconstruction": "Exact dev.5 implementation edits recovered from the previous local Codex development session and reapplied to the accepted dev.6 source base.",
-    "preserved_dev5_binary_sha256": "e8b40a181abfbede17f9fc85a8190f4deffcbb87f289deaa26ee1096d4946434",
-    "preserved_dev5_binary_bytes": 275968,
-    "byte_identical_rebuild_claimed": false
+    "foundation": "Accepted v0.1.0-pre.3-dev.14 transport, pacing and anti-flicker implementation.",
+    "experimental_layer": "Uniform whole-frame clarity/dehaze compositor derived from the earlier soft-cheat experiment without object classification or targeting."
   },
   "verification": {
     "production_bridge_build_passed": true,
@@ -63,11 +61,13 @@
     "bridge_pixel_tests_passed": true,
     "auto_scale_harness_passed": true,
     "installer_setup_tests_passed": true,
-    "manual_visual_behavior_source": "earlier dev.5 user testing",
+    "manual_visual_acceptance": "pending for soft-cheat.2",
     "new_gameplay_automation_run": false,
     "new_computer_use_test_run": false,
     "new_screenshots_added": false,
-    "optional_hip_host_timing_available_in_local_bridge_build": false
+    "player_or_object_specific_logic_added": false,
+    "optional_hip_host_timing_available_in_local_bridge_build": true,
+    "clean_rerun_note": "The first auto-scale harness run hit the known cold-start activation flake; the clean rerun passed the harness plus installer-default, setup-default, setup-custom and setup-native cases."
   },
   "public_boundary": {
     "redistributes_lossless_scaling_files": false,
