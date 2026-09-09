@@ -2136,7 +2136,8 @@ int wmain(int argc, wchar_t** argv) {
 
         const bool completionPacingAvailable = options.completionPacing && gpuTransport &&
             suppressIdenticalRgb && ReadHipWorkProgress().available;
-        bool asyncBackbufferRuntime = completionPacingAvailable && UsesAsyncBackbufferRuntime();
+        bool asyncOutputUsesPreviousInput = gpuTransport && UsesAsyncBackbufferRuntime();
+        bool asyncBackbufferRuntime = completionPacingAvailable && asyncOutputUsesPreviousInput;
         uint64_t seenReturnedWaits = ReadHipWorkProgress().returnedWaits;
         uint64_t busyFeedDeferrals = 0;
         uint64_t completionHintFeeds = 0;
@@ -2191,7 +2192,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=native_source_temporally_matched_neural_delta\n"
+                   << "gpu_transport_revision=native_source_stable_neural_delta\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2315,7 +2316,8 @@ int wmain(int argc, wchar_t** argv) {
                     throw std::runtime_error("DLSS-NR runtime became unhealthy: " + health.detail);
                 }
                 nextRuntimeLogCheck = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-                asyncBackbufferRuntime = completionPacingAvailable && UsesAsyncBackbufferRuntime();
+                asyncOutputUsesPreviousInput = gpuTransport && UsesAsyncBackbufferRuntime();
+                asyncBackbufferRuntime = completionPacingAvailable && asyncOutputUsesPreviousInput;
             }
 
             const auto now = std::chrono::steady_clock::now();
@@ -2377,7 +2379,7 @@ int wmain(int argc, wchar_t** argv) {
                         : std::clamp(strength, 0.0f, 1.0f);
                     const UINT alpha = effectEnabled
                         ? static_cast<UINT>(std::lround(gpuStrength * 256.0f)) : 0;
-                    auto stats = gpuTransport->Compose(alpha);
+                    auto stats = gpuTransport->Compose(alpha, asyncOutputUsesPreviousInput);
                     // Compose's bounded D3D11 consumer fence follows its wait
                     // on the D3D12 output copy. That copy follows the feed and
                     // input-ready wait, so all reads of this WGC surface have
@@ -2391,7 +2393,7 @@ int wmain(int argc, wchar_t** argv) {
                     const bool wasEnabled = effectEnabled;
                     guardBlackOutput(stats.sourceMeaningfullyNonblack, stats.neuralNonblack);
                     if (wasEnabled && !effectEnabled) {
-                        stats = gpuTransport->Compose(0);
+                        stats = gpuTransport->Compose(0, asyncOutputUsesPreviousInput);
                     }
                     stageTimes[5] = PerformanceStats::Clock::now();
                     const bool visibleSubmitted = visiblePresenter.PresentGpu(

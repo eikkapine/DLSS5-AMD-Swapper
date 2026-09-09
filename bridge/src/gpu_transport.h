@@ -308,7 +308,7 @@ public:
         Require(context_->Wait(outputReady11_.Get(), value), "D3D11 wait for neural output copy");
     }
 
-    FrameStatistics Compose(UINT alpha) {
+    FrameStatistics Compose(UINT alpha, bool preferPreviousNeuralInput = false) {
         const UINT maxAlpha = nativeResidualComposite_ ? 1024u : 256u;
         if (alpha > maxAlpha) {
             throw std::runtime_error("GPU transport blend alpha is out of range");
@@ -316,9 +316,12 @@ public:
         // Input statistics depend only on this exact input upload, not on
         // neural progress or strength. Keep them until SignalInput changes it.
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
+        const bool sameStrengthHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u) |
                                 (nativeResidualComposite_ ? 4u : 0u) |
-                                (previousNeuralInputValid_ ? 8u : 0u);
+                                (previousNeuralInputValid_ ? 8u : 0u) |
+                                (preferPreviousNeuralInput ? 16u : 0u) |
+                                (sameStrengthHistory ? 32u : 0u);
         const std::array<UINT, 8> parameters = {
             width_, height_, displayWidth_, displayHeight_, alpha, frameFlags, 0u, 0u
         };
@@ -408,6 +411,7 @@ public:
             ID3D11Texture2D* image = displayAlpha_ == 0 ? sourceTexture_.Get() : composedTexture_.Get();
             context_->CopyResource(historyTexture_.Get(), image);
             ++historyCopies_;
+            historyAlpha_ = displayAlpha_;
             historyValid_ = true;
             return;
         }
@@ -425,6 +429,7 @@ public:
             ++historyCopies_;
         }
         historyOutputIndex_ = outputIndex_;
+        historyAlpha_ = displayAlpha_;
         historyValid_ = true;
     }
 
@@ -691,6 +696,7 @@ private:
     bool inputInitialized_ = false;
     bool previousNeuralInputValid_ = false;
     UINT displayAlpha_ = 256;
+    UINT historyAlpha_ = 256;
     bool sourceStatisticsValid_ = false;
     bool sourceMeaningfullyNonblack_ = false;
     UINT64 sourceStatisticsInput_ = 0;
