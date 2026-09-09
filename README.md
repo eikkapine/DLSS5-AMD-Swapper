@@ -14,6 +14,13 @@ DLSS5 AMD Swapper puts the two ways I use the project into one app. **Direct Gam
 
 > Experimental community project. Not affiliated with NVIDIA, AMD, Lossless Scaling, or the upstream compatibility projects listed below.
 
+> [!IMPORTANT]
+> **Why Direct Game can look much stronger**
+>
+> The **Lossless Scaling** route starts after the game has already produced a finished colour frame. It does not receive the engine's true motion vectors, depth, jitter, exposure state, or render-resolution colour buffer. Keeping large temporal neural corrections from that limited input can cause flicker, smearing, or stale-frame artifacts, so the bridge intentionally rejects unstable broad changes.
+>
+> The **Direct Game** route moves Neural Rendering into the game's FSR/DX12 path. When the upstream runtime exposes real colour, motion, depth, and temporal state, the model has much better guidance and can retain stronger material, shading, skin, and local-structure changes while keeping them aligned across frames. See [Neural Rendering upstream research](docs/neural-upstream-performance.md).
+
 ## Two routes, one app
 
 | | **Direct Game** | **Lossless Scaling** |
@@ -56,12 +63,6 @@ No installer is required for the manager itself. See the full [installation guid
 | `Ctrl + Alt + F8` | Increase strength |
 
 Lossless Scaling owns these keys while its bridge is active. The Swapper registers the same keys for a running managed direct-game target. The Lossless Scaling route supports effect strength up to `4.0`.
-
-## Why Direct Game can look stronger
-
-The Lossless Scaling route only receives a completed frame. Large temporal neural changes from colour alone can become unstable, so the bridge deliberately filters the residual to control flicker, smearing, and stale afterimages.
-
-The Direct Game route sits inside the game's FSR/DX12 path. When the game exposes real colour, motion, depth, jitter, and exposure information, the neural runtime has much better guidance for structure, materials, lighting, skin, and distant detail. The implementation is described in [Neural Rendering upstream of the upscaler](docs/neural-upstream-performance.md).
 
 ## Before / after
 
