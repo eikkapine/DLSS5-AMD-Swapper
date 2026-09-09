@@ -1,4 +1,4 @@
-# NR Auto Scale proxy
+# DLSS5 AMD Swapper — Lossless Scaling proxy
 
 This folder builds the project-owned `Lossless.dll` proxy that makes the bridge start automatically when Lossless Scaling activates a source.
 

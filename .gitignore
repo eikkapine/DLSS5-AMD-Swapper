@@ -65,6 +65,7 @@ wallpaper-tests/
 *.pth
 *.safetensors
 *.engine
+.dlss5-amd-swapper.json
 .nr-auto-scale-direct.json
 
 # Upstream/local clones
@@ -99,3 +100,4 @@ docs/images/*
 !docs/images/cs2-native-off.png
 !docs/images/cs2-native-on.png
 !docs/images/comparison.json
+!docs/images/dlss5-amd-swapper-header.svg

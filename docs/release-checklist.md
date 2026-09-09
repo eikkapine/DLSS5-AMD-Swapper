@@ -1,43 +1,41 @@
 # Release checklist
 
-I use this checklist before publishing a preview.
+I run this before publishing a DLSS5 AMD Swapper update.
 
-## Build and version
+## Build
 
-- [ ] `VERSION`, tag, and release title match.
+- [ ] `VERSION`, release title and tag match.
+- [ ] `dotnet build` for the WPF manager passes with no warnings/errors I am accepting knowingly.
+- [ ] Native Lossless Scaling wrapper and bridge builds pass.
+- [ ] App smoke tests pass.
 - [ ] `py .\tools\Check-Publication.py` passes.
-- [ ] Production bridge and proxy builds complete successfully.
-- [ ] `RELEASE.json` contains the final binary hashes.
-- [ ] Packaged binaries match the hashes in the release metadata.
+- [ ] `app\Build-Package.ps1` completes and the ZIP opens normally.
 
-## Runtime boundary
+## Package contents
 
-- [ ] No paid Lossless Scaling file is staged.
-- [ ] No `Lossless_original.dll` is staged.
-- [ ] No AMD proxy/runtime binary or installer is staged.
-- [ ] No `dlssnr_on_amd_setup.exe` or local direct-game manifest is staged.
-- [ ] No NVIDIA DLL, model, or SDK payload is staged.
-- [ ] No private logs, backups, config, machine paths, or secrets are staged.
+- [ ] `Dlss5AmdSwapper.exe` is present.
+- [ ] `SHA256SUMS.txt` matches every packaged file.
+- [ ] Only project-owned bridge/wrapper/scripts are under `payload\`.
+- [ ] `README.md`, `INSTALL.md`, `THIRD-PARTY.md` and `LICENSE` are included.
+- [ ] No paid Lossless Scaling file or `Lossless_original.dll` is present.
+- [ ] No `dlssnr_on_amd_setup.exe`, `nvngx_dlssnr.dll`, generated weights or third-party AMD runtime/proxy is present.
+- [ ] No private INI, local direct-game manifest, raw log, backup, crash dump or machine-specific path is present.
+
+## Repository
+
+- [ ] Git diff/status contains no personal files, secrets, local settings or runtime artifacts.
+- [ ] New direct installs use `.dlss5-amd-swapper.json`; the legacy manifest remains compatibility-only.
+- [ ] Documentation reads from my project/owner perspective and does not describe manual reports as measured evidence.
+- [ ] Numeric performance claims come only from hash-backed measurement JSON.
 
 ## Images
 
-- [ ] Only reviewed/approved images are included.
-- [ ] Image metadata is empty or intentionally public.
-- [ ] No usernames, account details, chat, desktop UI, or unrelated personal content is visible.
+- [ ] Only screenshots I reviewed and approved are included.
+- [ ] No username/account/chat/desktop/private information is visible.
+- [ ] No new screenshot is added just because it was used for local QA.
 
-## Claims
+## Publish
 
-- [ ] README status matches the exact path exercised for this version.
-- [ ] Bridge-only measurements are not described as end-to-end app results.
-- [ ] Numeric game/display frame-rate claims come only from hashed PresentMon logs.
-- [ ] Measurement JSON contains no hand-entered/manual performance fields.
-- [ ] Performance claims keep source resolution, strength, model/weights, and precision clear.
-- [ ] Unverified GPU/game/driver combinations are not presented as supported facts.
-
-## Package
-
-- [ ] `Setup.cmd` is at the package root.
-- [ ] Install and uninstall docs are included.
-- [ ] `CHECKSUMS.json` contains the allowlisted package files.
-- [ ] ZIP contents are inspected after packaging.
-- [ ] Release notes link to the matching tag/version.
+- [ ] Third-party licence/redistribution boundaries are still accurate for the current upstream versions.
+- [ ] Public repo name, README title and release package name match **DLSS5 AMD Swapper**.
+- [ ] Final release notes describe the exact build that passed verification.

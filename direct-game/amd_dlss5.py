@@ -28,7 +28,8 @@ import urllib.request
 UPSTREAM_API = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/latest"
 UPSTREAM_RELEASES = "https://github.com/danielblnc/DLSS-NR-on-AMD/releases"
 UPSTREAM_ASSET = "dlssnr_on_amd_setup.exe"
-MANIFEST_NAME = ".nr-auto-scale-direct.json"
+MANIFEST_NAME = ".dlss5-amd-swapper.json"
+LEGACY_MANIFEST_NAME = ".nr-auto-scale-direct.json"
 
 KNOWN_PROXY_NAMES = ("version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll", "dxgi.dll")
 KNOWN_RUNTIME_FILES = (
@@ -56,6 +57,15 @@ ANTI_CHEAT_MARKERS = {
     "ace-base",
     "ace-guard",
     "equ8",
+    "eaanticheat",
+    "javelinanticheat",
+    "ricochet",
+    "xigncode",
+    "gameguard",
+    "nprotect",
+    "punkbuster",
+    "pbsvc",
+    "blackcipher",
 }
 
 
@@ -154,7 +164,7 @@ def dx12_evidence(exe: Path, fsr_markers: list[str]) -> list[str]:
 
 
 def fetch_latest_release() -> dict[str, Any]:
-    request = urllib.request.Request(UPSTREAM_API, headers={"User-Agent": "NR-Auto-Scale direct-game helper"})
+    request = urllib.request.Request(UPSTREAM_API, headers={"User-Agent": "DLSS5-AMD-Swapper direct-game helper"})
     with urllib.request.urlopen(request, timeout=15) as response:
         data = json.load(response)
     for asset in data.get("assets", []):
@@ -218,6 +228,16 @@ def check_game(exe: Path) -> dict[str, Any]:
 def managed_paths(folder: Path) -> dict[str, Path]:
     names = list(KNOWN_PROXY_NAMES) + list(KNOWN_RUNTIME_FILES) + [UPSTREAM_ASSET, "nvngx_dlssnr.dll"]
     return {name: folder / name for name in names}
+
+
+def find_manifest(folder: Path) -> Path | None:
+    current = folder / MANIFEST_NAME
+    if current.is_file():
+        return current
+    legacy = folder / LEGACY_MANIFEST_NAME
+    if legacy.is_file():
+        return legacy
+    return None
 
 
 def read_runtime_config(path: Path) -> dict[str, str]:
@@ -311,10 +331,11 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
     nr_meta = validate_nr_dll(nr_source)
     folder = game.parent
     manifest_path = folder / MANIFEST_NAME
-    if args.update and not manifest_path.is_file():
+    existing_manifest_path = find_manifest(folder)
+    if args.update and existing_manifest_path is None:
         raise RuntimeError("--update requires an existing managed direct-game manifest")
-    if manifest_path.exists() and not args.update:
-        raise RuntimeError(f"A managed install already exists: {manifest_path}. Use --update")
+    if existing_manifest_path is not None and not args.update:
+        raise RuntimeError(f"A managed install already exists: {existing_manifest_path}. Use --update")
 
     before = snapshot(folder)
     if not args.update:
@@ -325,7 +346,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
                 + ", ".join(existing_proxy)
             )
 
-    previous_manifest = manifest_path.read_bytes() if manifest_path.is_file() else None
+    previous_manifest = existing_manifest_path.read_bytes() if existing_manifest_path is not None else None
     local_setup = folder / UPSTREAM_ASSET
     if local_setup.exists() and sha256(local_setup) != release["sha256"]:
         raise RuntimeError(f"A different {UPSTREAM_ASSET} already exists in the game folder")
@@ -333,7 +354,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
     if local_nr.exists() and sha256(local_nr) != nr_meta["sha256"]:
         raise RuntimeError("A different nvngx_dlssnr.dll already exists in the game folder")
 
-    with tempfile.TemporaryDirectory(prefix="nr-auto-scale-direct-backup-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="dlss5-amd-swapper-direct-backup-") as temp_name:
         backup = Path(temp_name)
         for name in before:
             source = folder / name
@@ -381,6 +402,8 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
                 "model_was_copied": "nvngx_dlssnr.dll" not in before,
             }
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            if existing_manifest_path is not None and existing_manifest_path != manifest_path and existing_manifest_path.exists():
+                existing_manifest_path.unlink()
             return manifest
         except Exception:
             # Restore the exact pre-install state for every file this helper or
@@ -393,8 +416,10 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
                         shutil.copy2(backup_path, path)
                 elif path.exists():
                     path.unlink()
-            if previous_manifest is not None:
-                manifest_path.write_bytes(previous_manifest)
+            if previous_manifest is not None and existing_manifest_path is not None:
+                existing_manifest_path.write_bytes(previous_manifest)
+                if existing_manifest_path != manifest_path and manifest_path.exists():
+                    manifest_path.unlink()
             elif manifest_path.exists():
                 manifest_path.unlink()
             raise
@@ -403,8 +428,8 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
 def remove(args: argparse.Namespace) -> dict[str, Any]:
     game = Path(args.game).resolve()
     folder = game.parent
-    manifest_path = folder / MANIFEST_NAME
-    if not manifest_path.is_file():
+    manifest_path = find_manifest(folder)
+    if manifest_path is None:
         raise RuntimeError("No managed direct-game manifest was found")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     after = manifest.get("after", {})
@@ -563,8 +588,8 @@ def summarize_runtime_log(path: Path) -> dict[str, Any] | None:
 def diagnose(args: argparse.Namespace) -> dict[str, Any]:
     game = Path(args.game).resolve()
     folder = game.parent
-    manifest_path = folder / MANIFEST_NAME
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None
+    manifest_path = find_manifest(folder)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path is not None else None
     config_path = folder / "dlssnr_on_amd.ini"
     config_values = read_runtime_config(config_path)
     safe_config_keys = ("Enabled", "UseFsrInputs", "UseDepth", "Temporal", "Interop", "Inline")

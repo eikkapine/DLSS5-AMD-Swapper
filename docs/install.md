@@ -1,61 +1,53 @@
-# Install and build
+# Installation
 
-NR Auto Scale has two separate integration paths: a direct-game AMD route for supported DX12/FSR games and a Lossless Scaling bridge for arbitrary capturable windows.
+The easiest way to use DLSS5 AMD Swapper is the portable Windows manager. The command-line and source-build paths are still available for development and troubleshooting.
 
-## Direct-game AMD route
+## Portable manager
 
-Use this path first for a supported single-player/offline game.
+1. Download the release ZIP.
+2. Extract it to any normal writable folder. Do not extract it inside the Lossless Scaling install directory.
+3. Run `Dlss5AmdSwapper.exe`.
+4. The app stores only its own settings under `%LOCALAPPDATA%\DLSS5 AMD Swapper`.
 
-Download `dlssnr_on_amd_setup.exe` yourself from the official [DLSS-NR-on-AMD releases](https://github.com/danielblnc/DLSS-NR-on-AMD/releases) and provide your own legitimate `nvngx_dlssnr.dll`.
+The ZIP contains the manager and project-owned Lossless Scaling payload only. It does not contain paid Lossless Scaling files, third-party AMD runtimes, `DLSS-NR-on-AMD`, NVIDIA DLLs/models or generated weights.
 
-Check the target before changing anything:
+## Direct-game setup
 
-```powershell
-py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
-```
+Use this route for supported single-player/offline x64 DX12/FSR games.
 
-Install:
+1. Open **Game library** and press **Scan PC** to check Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass and common standalone game folders, or add the game executable manually.
+2. Review the scan summary and select a compatible game. The scanner does not select a target for you.
+3. Click **Set up**. The manager downloads the latest official `dlssnr_on_amd_setup.exe` from the [DLSS-NR-on-AMD releases](https://github.com/danielblnc/DLSS-NR-on-AMD/releases), verifies the GitHub-published size and SHA-256, and automatically selects install or update.
+4. The manager searches for a valid local `nvngx_dlssnr.dll`. If it cannot find one, select your own legitimate local copy when prompted. The project never downloads or redistributes that NVIDIA DLL.
+5. Launch the game and use **Refresh evidence** to inspect the runtime state.
 
-```powershell
-py .\direct-game\amd_dlss5.py `
-  --game "D:\Games\Example\Game.exe" `
-  --install `
-  --upstream-setup "C:\Downloads\dlssnr_on_amd_setup.exe" `
-  --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
-```
+The manager verifies x64, FSR and DX12 evidence, blocks common anti-cheat markers, verifies the official upstream installer against GitHub release metadata, checks the generated rich-input configuration and records a hash-backed local manifest for safe update/remove behavior.
 
-The helper requires x64, FSR evidence and DirectX 12 evidence, blocks common anti-cheat markers, verifies the upstream setup file against the SHA-256 digest published by GitHub, invokes the unchanged upstream installer, verifies the generated proxy/config/weights state, and keeps a reversible local hash manifest.
+New installs use `.dlss5-amd-swapper.json`. Older `.nr-auto-scale-direct.json` manifests are still recognized and are migrated on update.
 
-The rich path is accepted only when the generated upstream configuration enables FSR inputs, depth, temporal history, zero-copy interop, and inline gameplay mode. Use `--diagnose` after launching the game to confirm that FidelityFX dispatches and real color/motion/depth staging actually appeared in the runtime log.
+The generated rich path must enable FSR inputs, depth, temporal history, interop and inline gameplay mode. The manager then looks for FidelityFX dispatches and real colour/motion/depth staging in the runtime log before calling the rich path observed.
 
-For the current upstream route, use **AMD Software: Adrenalin Edition 26.1.1 or newer**. A separate ROCm/HIP installation is not required for normal use. The compatibility runtime uses the HIP runtime delivered with the AMD driver.
+For the currently tested upstream route, use **AMD Software: Adrenalin Edition 26.1.1 or newer**. A separate ROCm install is not required for normal use.
 
-See [direct-game/README.md](../direct-game/README.md) for diagnose, update, remove and rollback commands.
+### Native output with lower neural cost
 
-## Lossless Scaling route
+Keep the game's final output at your normal/native resolution. If the game offers FSR quality modes, the hidden neural workload can follow the lower FSR input/render resolution while the game still reconstructs the native final output.
 
-The main branch keeps the accepted dev.14 compositor while adding the direct-game tooling. The Lossless Scaling path keeps the visible output at the captured source resolution and caps only the neural branch at **480 pixels high** by default.
+The runtime diagnostics show both FSR input size and swapchain/output size. If they are equal, the neural pass is running at full output resolution.
 
-### Install the preview
+## Lossless Scaling setup
 
-1. Install Lossless Scaling from its official store page.
-2. Download the latest preview ZIP from <https://github.com/eikkapine/NR-Auto-Scale/releases>.
-3. Extract the ZIP somewhere outside the Lossless Scaling folder.
-4. Run:
+1. Install Lossless Scaling from an official source.
+2. Open the **Lossless Scaling** page in DLSS5 AMD Swapper.
+3. Select your local AMD compatibility proxy named `version.dll`.
+4. Select your own `nvngx_dlssnr.dll`.
+5. Choose the HIP device index if your system has more than one AMD-visible device.
+6. Click **Install / Update bridge**.
+7. Focus any capturable window and press **Scale** in Lossless Scaling normally.
 
-   ```powershell
-   .\Setup.cmd
-   ```
+The manager detects the Lossless Scaling installation, installs my project-built proxy/bridge and preserves the existing bridge resolution/runtime choices when updating an already managed install.
 
-5. Pick the Lossless Scaling install folder when prompted.
-6. Supply your own local AMD compatibility proxy and NVIDIA DLSS-NR DLL when prompted. Use the AMD driver/runtime version required by that upstream compatibility runtime.
-7. Focus a capturable game, browser, video, or other window and press **Scale** in Lossless Scaling.
-
-The release ZIP does not contain NVIDIA DLLs, AMD proxy binaries, third-party installers, model files, paid Lossless Scaling files, raw logs, or local private configuration.
-
-### Default processing mode
-
-Fresh setup writes:
+The current default is:
 
 ```ini
 NativeResolution=0
@@ -63,105 +55,57 @@ WorkingScale=0
 NeuralMaxHeight=480
 ```
 
-`NeuralMaxHeight=480` takes precedence. The bridge captures the source at its real size, creates a reduced neural texture with the same aspect ratio, and keeps the visible bridge at the source size.
+`NeuralMaxHeight=480` caps only the neural branch. The captured source remains the visible output size.
 
-| Source | Neural branch | Visible bridge |
+| Captured source | Neural branch | Visible output |
 | ---: | ---: | ---: |
 | 2560×1440 | ~854×480 | 2560×1440 |
 | 1920×1080 | ~854×480 | 1920×1080 |
 | 1440×1080 | 640×480 | 1440×1080 |
 
-Sources below the cap are not enlarged for neural processing.
+Sources below the cap are not enlarged for the neural pass.
 
-Legacy modes remain available:
+## Hotkeys
 
-```ini
-# Reduced source-relative mode
-NeuralMaxHeight=0
-WorkingScale=0.75
-
-# Full 1:1 neural processing
-NeuralMaxHeight=0
-WorkingScale=0
-NativeResolution=1
-
-# Fixed fallback
-NeuralMaxHeight=0
-WorkingScale=0
-NativeResolution=0
-Width=1280
-Height=720
-```
-
-If you already have an installation, stop scaling before changing `NrAutoScale.ini` or replacing the bridge executable. Do not overwrite the Lossless Scaling profile or neural runtime INI unless the update specifically requires it.
-
-### Runtime controls
-
-| Hotkey | Action |
+| Shortcut | Action |
 | --- | --- |
-| `Ctrl+Alt+F6` | Toggle processed output on/off |
+| `Ctrl+Alt+F6` | Toggle effect |
 | `Ctrl+Alt+F7` | Decrease strength |
 | `Ctrl+Alt+F8` | Increase strength |
 
-Native neural-residual mode supports `0.0..4.0` strength with `1.0` as the baseline.
+Lossless Scaling owns these keys while its bridge is active. The manager registers the same keys for a running managed direct-game target.
+
+## Restore / uninstall
+
+For a direct-game install, select the game and click **Restore**. Hash checks prevent the manager from silently deleting files that changed after installation.
+
+For Lossless Scaling, open the **Lossless Scaling** page and click **Uninstall**. The installer restores the privately preserved original Lossless Scaling DLL when the managed state is valid.
 
 ## Build from source
 
-Source builds require CMake 3.20+, MSVC C++ build tools and a Windows SDK with the required WGC/D3D headers.
+Source builds require the .NET 8 SDK, CMake 3.20+, MSVC C++ build tools and the Windows SDK.
 
-Build the proxy:
+Build the native wrapper and bridge, run the app smoke tests, publish the self-contained manager and create the local ZIP with:
+
+```powershell
+.\app\Build-Package.ps1
+```
+
+The package script also checks that forbidden third-party/private filenames are absent before it writes `SHA256SUMS.txt` and the ZIP.
+
+For individual native builds:
 
 ```powershell
 .\auto-scale\build.ps1
-```
-
-Build the bridge:
-
-```powershell
 .\bridge\build.ps1
 ```
 
-The project-built proxy artifact is also named `Lossless.dll`; it is separate from the paid application's original DLL.
+## Advanced CLI
 
-For explicit private Lossless Scaling paths:
-
-```powershell
-.\auto-scale\scripts\Install-AutoScale.ps1 `
-  -LsDir "<Lossless Scaling install folder>" `
-  -ProxyVersionSource "<private AMD proxy version.dll>" `
-  -NrSource "<private nvngx_dlssnr.dll>" `
-  -NeuralMaxHeight 480 `
-  -WorkingScale 0
-```
-
-The installer privately preserves the original paid Lossless Scaling DLL as `Lossless_original.dll` so the project proxy can forward to it. That file must never be copied into the public repository or release ZIP.
-
-## Uninstall
-
-For the Lossless Scaling route, stop scaling and run:
+The Python direct-game helper remains available:
 
 ```powershell
-.\scripts\Uninstall-AutoScale.ps1
+py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
 ```
 
-or from the source tree:
-
-```powershell
-.\auto-scale\scripts\Uninstall-AutoScale.ps1
-```
-
-For the direct-game route, use the hash-safe remove command documented in `direct-game/README.md`.
-
-## Public release boundary
-
-Do not publish:
-
-- paid Lossless Scaling binaries or app assets
-- `Lossless_original.dll`
-- AMD compatibility proxy/runtime binaries or third-party installers
-- `dlssnr_on_amd_setup.exe`
-- NVIDIA DLLs, models, or weights
-- private INIs, logs, manifests, backups, captures, or machine-specific paths
-- unreviewed screenshots or personal files
-
-The public ZIP contains only project-built artifacts, project scripts, approved existing comparison images, documentation, and sanitized measurement metadata.
+See [Direct-game route](../direct-game/README.md) for install/update/diagnose/remove commands.

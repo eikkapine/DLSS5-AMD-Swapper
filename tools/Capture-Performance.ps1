@@ -18,7 +18,7 @@ function Get-Sha256([string]$Path) {
 }
 
 function Get-PresentMon {
-    $headers = @{ 'User-Agent' = 'NR-Auto-Scale performance logger' }
+    $headers = @{ 'User-Agent' = 'DLSS5-AMD-Swapper performance logger' }
     $release = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/GameTechDev/PresentMon/releases/latest'
     $asset = $release.assets | Where-Object { $_.name -match '^PresentMon-[0-9.]+-x64\.exe$' } | Select-Object -First 1
     if (-not $asset) { throw 'The latest PresentMon release has no x64 console executable.' }
@@ -26,7 +26,7 @@ function Get-PresentMon {
         throw 'GitHub did not return a SHA-256 digest for the PresentMon release asset.'
     }
 
-    $cacheRoot = Join-Path $env:LOCALAPPDATA 'NR-Auto-Scale\tools\PresentMon'
+    $cacheRoot = Join-Path $env:LOCALAPPDATA 'DLSS5 AMD Swapper\tools\PresentMon'
     $cacheDir = Join-Path $cacheRoot $release.tag_name
     $exe = Join-Path $cacheDir $asset.name
     New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null

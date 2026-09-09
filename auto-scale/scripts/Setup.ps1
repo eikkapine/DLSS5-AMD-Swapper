@@ -116,7 +116,7 @@ function Prompt-HipVisibleDevices {
     param([string]$DefaultValue)
     Add-Type -AssemblyName Microsoft.VisualBasic
     $message = "HIP_VISIBLE_DEVICES is machine-specific because HIP device indexes depend on GPU enumeration. 0 is typical on a single-GPU system; choose the AMD GPU index for your machine."
-    return [Microsoft.VisualBasic.Interaction]::InputBox($message, "NR Auto Scale HIP device selection", $DefaultValue)
+    return [Microsoft.VisualBasic.Interaction]::InputBox($message, "DLSS5 AMD Swapper HIP device selection", $DefaultValue)
 }
 
 function Require-ExistingFile {

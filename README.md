@@ -1,144 +1,145 @@
-# NR Auto Scale
+<p align="center">
+  <img src="docs/images/dlss5-amd-swapper-header.svg" width="100%" alt="DLSS5 AMD Swapper" />
+</p>
 
-[![Release](https://img.shields.io/github/v/release/eikkapine/NR-Auto-Scale?include_prereleases&label=preview)](https://github.com/eikkapine/NR-Auto-Scale/releases)
-[![License](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
-[![Windows](https://img.shields.io/badge/Windows-11-0078d4?logo=windows11)](https://www.microsoft.com/windows/windows-11)
-[![AMD](https://img.shields.io/badge/tested-RX%209070%20XT-ed1c24?logo=amd)](https://www.amd.com/)
+<p align="center">
+  <a href="https://github.com/eikkapine/DLSS5-AMD-Swapper/releases"><img alt="Download" src="https://img.shields.io/badge/Download-preview-ff604b?style=for-the-badge&logo=github"></a>
+  <a href="docs/install.md"><img alt="Install guide" src="https://img.shields.io/badge/Install-guide-1c2430?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/License-MIT-2f9e62?style=for-the-badge"></a>
+</p>
 
-NR Auto Scale is my AMD Neural Rendering experiment. It has two separate paths:
+<p align="center"><strong>A Windows manager for running experimental DLSS Neural Rendering paths on AMD Radeon GPUs.</strong></p>
 
-- **Direct game** — preferred for supported 64-bit DirectX 12 games with FSR, where Neural Rendering can use the game's temporal/upscaler data.
-- **Lossless Scaling bridge** — compatibility path for arbitrary capturable windows, with automatic Scale integration and live strength hotkeys.
+DLSS5 AMD Swapper puts the two ways I use the project into one app. **Direct Game** targets supported x64 DX12/FSR games and can feed the neural runtime real render data. **Lossless Scaling** gives me a universal desktop route that starts automatically when I press **Scale**.
 
-The current main checkpoint is **v0.1.0-pre.3-dev.15**. It keeps the accepted dev.14 Lossless Scaling compositor and adds the verified direct-game AMD route, log-backed performance capture, publication provenance checks, and stricter package safeguards.
+> Experimental community project. Not affiliated with NVIDIA, AMD, Lossless Scaling, or the upstream compatibility projects listed below.
 
-## Direct-game AMD route
+## Two routes, one app
 
-Use this path first for a supported single-player/offline game. The helper checks the target before installation, blocks common anti-cheat markers, verifies the upstream installer, verifies the generated Neural Rendering configuration, and keeps a hash-backed local manifest for safe removal or rollback.
+| | **Direct Game** | **Lossless Scaling** |
+| --- | --- | --- |
+| Best for | Supported single-player/offline games | Almost any capturable game, video, browser, or app |
+| Input | Game FSR colour + motion + depth when available | Finished desktop frame |
+| Output | Game keeps control of final resolution | Captured source stays at native visible resolution |
+| Setup | Scan → select game → **Set up** | Configure once → press **Scale** normally |
+| Runtime status | Log-backed rich-input checks | Automatic bridge status |
 
-```powershell
-py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
+The scanner covers **Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass, Rockstar, and standalone installs**. A scan ends with a verification summary and intentionally leaves every game unselected.
 
-py .\direct-game\amd_dlss5.py `
-  --game "D:\Games\Example\Game.exe" `
-  --install `
-  --upstream-setup "C:\Downloads\dlssnr_on_amd_setup.exe" `
-  --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
-```
+## Get started
 
-The helper requires the user to supply their own official `DLSS-NR-on-AMD` setup file and legitimate `nvngx_dlssnr.dll`. I do not bundle, download, patch, or redistribute those third-party files. See [Direct-game AMD route](direct-game/README.md) for update, diagnose, rollback and uninstall commands.
+1. Open [Releases](https://github.com/eikkapine/DLSS5-AMD-Swapper/releases) and download the newest **DLSS5-AMD-Swapper** portable ZIP.
+2. Extract it somewhere writable and run `Dlss5AmdSwapper.exe`.
+3. For a game install, open **Game library → Scan PC**, select a compatible target, then click **Set up**.
+4. For the desktop route, open **Lossless Scaling** in the app, configure your local runtime files once, then use Lossless Scaling normally.
 
-For the current upstream route, use **AMD Software: Adrenalin Edition 26.1.1 or newer**. A separate ROCm/HIP installation is not required for normal use; the compatibility runtime uses the HIP runtime supplied with the AMD driver.
+No installer is required for the manager itself. See the full [installation guide](docs/install.md) for runtime requirements, restore behavior, and source builds.
 
-## Lossless Scaling route
+## What the manager handles
 
-The Lossless Scaling path keeps the visible image at the captured application's native resolution while capping only the neural branch with `NeuralMaxHeight=480` by default. A 2560×1440 source therefore stays 2560×1440 for presentation while Neural Rendering works at about 854×480.
+- Universal installed-game discovery and deduplication.
+- x64, DX12, FSR, and common anti-cheat compatibility checks.
+- Automatic install-vs-update handling for the direct-game route.
+- Official upstream installer download with size + SHA-256 verification.
+- Local discovery of a legitimate `nvngx_dlssnr.dll`; it is never bundled or downloaded by this project.
+- Reversible per-game setup with hash-backed manifests.
+- Runtime diagnostics for colour, motion, depth, output size, and zero-copy state.
+- Automatic Lossless Scaling bridge activation when **Scale** is pressed.
+- Global strength and toggle hotkeys.
 
-Dev.15 keeps dev.14's accepted motion handling: the native source remains the image base, broad unstable residual color/luminance is filtered, stale chroma is reduced as motion rises, and correction history is reused only where the source is effectively unchanged. This avoids the earlier long-lived trails and wet-paint smearing while preserving the stronger neural detail that remains stable from final-frame color alone.
-
-Pressing **Scale** in Lossless Scaling launches the bridge automatically.
+## Controls
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Alt+F6` | Toggle processed output on/off |
-| `Ctrl+Alt+F7` | Reduce effect strength |
-| `Ctrl+Alt+F8` | Increase effect strength |
+| `Ctrl + Alt + F6` | Toggle the effect |
+| `Ctrl + Alt + F7` | Decrease strength |
+| `Ctrl + Alt + F8` | Increase strength |
 
-Strength starts at `1.0` and can be increased up to `4.0`. Above `1.0`, F7/F8 use 0.25 steps; from `0.0` to `1.0` they use 0.1 steps.
+Lossless Scaling owns these keys while its bridge is active. The Swapper registers the same keys for a running managed direct-game target. The Lossless Scaling route supports effect strength up to `4.0`.
 
-Fresh setup uses:
+## Why Direct Game can look stronger
 
-```ini
-NativeResolution=0
-WorkingScale=0
-NeuralMaxHeight=480
-```
+The Lossless Scaling route only receives a completed frame. Large temporal neural changes from colour alone can become unstable, so the bridge deliberately filters the residual to control flicker, smearing, and stale afterimages.
+
+The Direct Game route sits inside the game's FSR/DX12 path. When the game exposes real colour, motion, depth, jitter, and exposure information, the neural runtime has much better guidance for structure, materials, lighting, skin, and distant detail. The implementation is described in [Neural Rendering upstream of the upscaler](docs/neural-upstream-performance.md).
 
 ## Before / after
 
-These are the two previously reviewed 1:1 CS2 crops already approved for the public repository. No new screenshot was added for dev.15.
+These are the two comparison crops approved for the public repository.
 
 | Original | Neural output |
 | :---: | :---: |
 | ![Original native-resolution crop](docs/images/cs2-native-off.png) | ![Neural output crop](docs/images/cs2-native-on.png) |
 
-## Why direct-game can look much stronger
+## Requirements
 
-The Lossless Scaling bridge starts after the game has already produced a finished color frame. It does not receive true engine motion vectors, depth, jitter, exposure, or the render-resolution color buffer. Preserving large temporal neural changes from that limited input causes flicker or stale-frame artifacts, so the bridge intentionally rejects unstable broad corrections.
+### Direct Game
 
-The direct-game route moves Neural Rendering into the game's FSR/DX12 path. When the upstream runtime exposes real color, motion, depth and temporal state, the model can keep much stronger material, shading and local-structure changes while staying aligned across frames. See [Neural Rendering upstream research](docs/neural-upstream-performance.md).
+- Windows 11
+- Supported AMD Radeon GPU
+- x64 DX12 game with FSR evidence
+- AMD Software: Adrenalin Edition 26.1.1 or newer for the currently tested upstream path
+- Your own legitimate `nvngx_dlssnr.dll`
 
-## Performance measurements
+### Lossless Scaling
 
-I do not publish hand-entered FPS claims. Public performance numbers must come from hashed logs.
+- Windows 11
+- Lossless Scaling installed from an official source
+- Supported AMD Radeon GPU
+- User-supplied compatibility/runtime files described in [Installation](docs/install.md)
 
-Capture actual game/display frame timing with PresentMon:
+A separate ROCm install is not required for the normal direct-game route currently tested here. The compatibility runtime uses the HIP runtime supplied with the AMD driver.
+
+## Performance evidence
+
+I only publish concrete performance numbers when they come from hashed capture logs. The capture helper keeps game/display timing separate from bridge/runtime timing:
 
 ```powershell
 .\tools\Capture-Performance.ps1 -ProcessName Game.exe -Seconds 30
 ```
 
-Then analyze the capture with `bridge/scripts/Analyze-Run.py`. The analyzer keeps bridge cadence, HIP/runtime timing, and actual game/display timing as separate metrics and emits sanitized JSON with SHA-256 hashes of the raw sources. Raw logs and machine-specific paths stay private.
-
-Before publishing, I run:
+`bridge/scripts/Analyze-Run.py` writes sanitized measurement JSON with SHA-256 references to the raw inputs. Raw logs and machine paths stay private. Before publishing I also run:
 
 ```powershell
 py .\tools\Check-Publication.py
 ```
 
-## Requirements
+## Public package boundary
 
-### Direct-game route
+The repository and release package do **not** contain:
 
-- Windows 11
-- supported AMD Radeon GPU
-- 64-bit DirectX 12 game with FSR evidence
-- AMD Software: Adrenalin Edition 26.1.1 or newer for the current upstream
-- user-downloaded official `dlssnr_on_amd_setup.exe`
-- user-supplied legitimate `nvngx_dlssnr.dll`
-
-Targets with common anti-cheat markers are blocked by default. This route is intended mainly for single-player/offline games.
-
-### Lossless Scaling route
-
-- Windows 11
-- Lossless Scaling installed from an official source
-- AMD Radeon GPU
-- user-supplied compatibility/runtime files described in [Installation](docs/install.md)
-
-Source builds additionally need CMake, MSVC C++ build tools, and the Windows SDK.
-
-## Repository boundary
-
-This repository contains my source code, scripts, documentation, project-built binaries, and sanitized measurement metadata. It does **not** contain:
-
-- paid Lossless Scaling binaries or `Lossless_original.dll`
-- `DLSS-NR-on-AMD` binaries or installers
+- paid Lossless Scaling files or `Lossless_original.dll`
+- `DLSS-NR-on-AMD` installers/binaries or generated weights
 - NVIDIA DLSS-NR DLLs, models, or weights
-- AMD third-party runtime/proxy binaries
-- raw logs, private INIs, manifests, backups, or machine-specific paths
+- third-party AMD proxy/runtime binaries
+- private INIs, manifests, backups, logs, captures, or machine-specific paths
 - personal files, secrets, or unreviewed screenshots
 
-## Documentation
+The release contains my manager plus project-built bridge/wrapper files and scripts. External runtime files remain local to the person using the tool.
 
-- [Direct-game AMD route](direct-game/README.md)
-- [Installation](docs/install.md)
-- [Architecture](docs/architecture.md)
-- [Performance](docs/performance.md)
-- [Verification](docs/verification.md)
-- [Development](docs/development.md)
-- [Licensing](docs/licensing.md)
-- [Bridge internals](bridge/README.md)
+## Docs
+
+| Guide | What it covers |
+| --- | --- |
+| [Installation](docs/install.md) | Portable app, Direct Game, Lossless Scaling, restore, source build |
+| [Direct Game](direct-game/README.md) | Compatibility, install/update flow, diagnostics, CLI |
+| [Architecture](docs/architecture.md) | Manager, scanner, bridge, direct-game path, trust boundaries |
+| [Performance](docs/performance.md) | Measurement policy and analyzer output |
+| [Verification](docs/verification.md) | Runtime evidence and publication checks |
+| [Development](docs/development.md) | Building and working on the project |
+| [Licensing](docs/licensing.md) | Third-party boundary and redistribution rules |
 
 ## Credits
 
 This project builds on public research and compatibility work from:
 
 - [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)
+- [rakanki911/DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper) — workflow/UI reference; this AMD manager is a separate implementation
+- [LastSkywalkerER/GameSaver](https://github.com/LastSkywalkerER/GameSaver) — game-discovery architecture reference; this scanner is a separate C# implementation
 - [matiasLombo/neural-upstream](https://github.com/matiasLombo/neural-upstream)
 - [Kizzuwatnaa/DLSS5-Autopilot](https://github.com/Kizzuwatnaa/DLSS5-Autopilot)
 - [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR)
 - [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
 - [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
 
-My original project code is released under the [MIT License](LICENSE). Third-party components keep their own licenses and terms.
+My original project code is released under the [MIT License](LICENSE). Third-party software keeps its own license and terms.

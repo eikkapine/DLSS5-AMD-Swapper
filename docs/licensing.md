@@ -1,57 +1,60 @@
 # Licensing and third-party boundary
 
-My original NR Auto Scale source, scripts, and documentation are released under the repository's [MIT License](../LICENSE). That license only covers work I can license myself.
+My original DLSS5 AMD Swapper source, scripts and documentation are released under the repository's [MIT License](../LICENSE). That licence covers only work I can license myself.
 
-It does not automatically cover Lossless Scaling, NVIDIA runtime/model files, the AMD compatibility proxy, copied upstream code, or other third-party material.
+It does not grant rights to Lossless Scaling, NVIDIA runtime/model files, `DLSS-NR-on-AMD`, third-party AMD compatibility binaries or other projects I reference.
 
-## Referenced projects
+## Third-party projects
 
-| Project | What I use it for | Public-repo rule |
+| Project | How I use it | Repository rule |
 | --- | --- | --- |
-| [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD) | AMD DLSS-NR compatibility runtime used by the first direct-game route | Personal/non-commercial use only under its current licence. Do not redistribute, bundle, modify, patch, repackage or reverse engineer it. Link to its official release page instead. |
-| [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade) | ABI/proxy reference | MIT; preserve its notice if source is copied/adapted. |
-| [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | Feeding/integration reference | MIT; preserve its notice if source is copied/adapted. |
-| [NVIDIA/DLSS](https://github.com/NVIDIA/DLSS) | NVIDIA SDK/runtime terms reference | Do not redistribute NVIDIA DLLs, SDK files, or models from this repo. |
-| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | Small vendored header subset | Keep the upstream notices and third-party notice file with any published vendored headers. |
+| [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD) | AMD execution path for the first direct-game route | I do not redistribute, bundle, modify or repackage its installer/runtime. Users supply their own official copy. |
+| [rakanki911/DLSS5-Swapper](https://github.com/rakanki911/DLSS5-Swapper) | Workflow/UI inspiration | My WPF AMD manager is a separate implementation. Preserve upstream notices if any source is ever copied/adapted. |
+| [LastSkywalkerER/GameSaver](https://github.com/LastSkywalkerER/GameSaver) | Installed-game discovery architecture and executable-selection reference | The current upstream README labels the project MIT. My scanner is independently implemented in C#; preserve the upstream notice if source is ever copied/adapted. |
+| [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade) | ABI/proxy reference | Preserve its MIT notice if source is copied/adapted. |
+| [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | Feeding/integration reference | Preserve its MIT notice if source is copied/adapted. |
+| [NVIDIA/DLSS](https://github.com/NVIDIA/DLSS) | NVIDIA SDK/runtime terms reference | Do not redistribute NVIDIA DLLs, SDK files, models or weights from this repository. |
+| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | FidelityFX reference/header material | Keep upstream notices with any published vendored material. |
 
-The audited `DLSS-NR-on-AMD` licence permits personal, non-commercial use but explicitly forbids redistribution, including bundling it inside another mod, tool, launcher, installer, package or download. It also forbids modification/repackaging/reverse engineering except where applicable law overrides that restriction. I therefore keep its binaries, installer and configuration out of NR Auto Scale releases.
+The current `DLSS-NR-on-AMD` licence has restrictions that make bundling it into this project inappropriate, so the direct-game installer requires a local official setup supplied by the person running the tool. The manager verifies that local setup against GitHub release metadata and invokes it unchanged.
 
-The direct-game helper follows that boundary: it requires a copy of `dlssnr_on_amd_setup.exe` that the user downloaded from the [official release page](https://github.com/danielblnc/DLSS-NR-on-AMD/releases), verifies that local file against the SHA-256 digest published by GitHub, and invokes the user's unchanged local copy. It does not download, embed, extract, patch or redistribute the upstream software.
-
-NVIDIA's DLSS/NGX terms also do not give me a clear basis to claim that every AMD runtime path is authorized. Because of that, I do not describe the complete third-party runtime chain as legally cleared. Anyone packaging or distributing additional runtime material should review the current upstream terms and obtain permission where needed.
+I also do not claim that using every combination of third-party NVIDIA/AMD compatibility software is automatically permitted everywhere. Anyone using or redistributing third-party components should review the current upstream licences and the target game's terms.
 
 ## Lossless Scaling
 
-The project builds its own wrapper named `Lossless.dll`. That filename is required for the local forwarding setup; the project-built file is not the paid Lossless Scaling DLL.
+My project builds its own wrapper named `Lossless.dll` because that filename is required by the local forwarding setup. It is not the paid Lossless Scaling DLL.
 
-During a private local install, the original Lossless Scaling DLL can be preserved as `Lossless_original.dll` so my wrapper can forward to it. Neither the original DLL nor that private backup belongs in GitHub or a release ZIP.
+During a private install, the original paid DLL can be preserved locally as `Lossless_original.dll` so my wrapper can forward to it. Neither the original DLL nor that local backup belongs in GitHub or a release ZIP.
 
-Do not publish:
+I do not publish:
 
 - the paid Lossless Scaling `Lossless.dll`
 - `Lossless_original.dll`
-- Lossless Scaling executables or app assets
+- Lossless Scaling executables/assets
 - copied private Lossless Scaling configuration
-- local backups made by setup/uninstall
+- local backups created during install/uninstall
 
-## Public release allowlist
+## Public release boundary
 
-A normal NR Auto Scale release may contain:
+A normal DLSS5 AMD Swapper release may contain:
 
-- original project source
-- the project-built wrapper and bridge binaries
-- project build/setup/uninstall scripts
-- the original direct-game helper and performance/provenance tools
-- documentation and license/notices
+- my source code
+- my WPF manager
+- project-built wrapper and bridge binaries
+- project setup/uninstall scripts
+- direct-game helper and performance/provenance tools
+- documentation/licence notices
 - the two already-approved comparison crops
-- sanitized release/measurement metadata
+- sanitized hash-backed measurement metadata
 
 It must not contain:
 
-- AMD proxy/runtime binaries or third-party installers, including `dlssnr_on_amd_setup.exe`
+- `DLSS-NR-on-AMD` binaries/installers or generated weights
 - NVIDIA runtime/model/SDK files
+- third-party AMD compatibility binaries
 - paid Lossless Scaling files
-- private logs, crash dumps, traces, backups, or machine-specific paths
-- unreviewed screenshots, movie/browser captures, wallpapers, or personal files
+- private logs, manifests, configs, crash dumps, traces or backups
+- machine-specific paths, secrets or personal files
+- unreviewed screenshots/captures
 
-This page records the release rules I follow for this repository. Third-party software remains governed by its own current licence and the target game's terms.
+Third-party software always remains governed by its own current licence and terms.

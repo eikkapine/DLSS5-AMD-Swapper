@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-dev.15",
-  "tag": "v0.1.0-pre.3-dev.15",
+  "version": "0.2.0-pre.1",
+  "tag": "v0.2.0-pre.1",
   "status": "experimental-preview",
   "date": "2026-09-09",
   "published": true,
-  "previous_published_version": "0.1.0-pre.3-dev.14",
+  "previous_published_version": "0.1.0-pre.3-dev.15",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
@@ -33,9 +33,9 @@
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
       "auto-scale/src/auto_scale_proxy.cpp": "49ba93c9570cf87c88eaefb56216bf70de613d75903fa4fe57362641cf222177",
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
-      "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
+      "auto-scale/scripts/Setup.ps1": "99accf04e5aba5d1bd131e210ffbf05e183b03f2f5531358270cba81dda8535e",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "5ebdf764158bd8d96394177b2ab8e90a024dd477b3b54aced74ecef36f0a309c"
+      "VERSION": "a04acc32d4458ce65f2cb8253a671186e7b4a7912eab2614e242b9005a4d5fc9"
     }
   },
   "verification": {
@@ -53,7 +53,12 @@
     "direct_game_rich_fsr_inputs_verified": true,
     "direct_game_presentmon_smoke_capture_logged": true,
     "controlled_direct_game_ab_benchmark_recorded": false,
-    "new_screenshots_added": false
+    "new_screenshots_added": false,
+    "manager_ui_build_passed": true,
+    "manager_ui_minimum_size_verified": true,
+    "in_app_scan_summary_verified": true,
+    "universal_game_scan_verified": true,
+    "portable_manager_package_verified": true
   },
   "working_resolution": {
     "lossless_scaling_mode": "native visible output + capped neural branch",
@@ -95,5 +100,14 @@
     },
     "lossless_scaling_guide_buffer_note": "The color-only Lossless Scaling path does not receive engine motion/depth guide buffers."
   },
-  "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available."
+  "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available.",
+  "manager_release": {
+    "asset": "DLSS5-AMD-Swapper-v0.2.0-pre.1.zip",
+    "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
+    "sha256": "50b95a8a0d3a1571ac751f5b0eb4a803b22193429ea19688d9390aac09c51935",
+    "bytes": 65931422,
+    "self_contained_win_x64": true,
+    "forbidden_file_count": 0,
+    "hash_mismatch_count": 0
+  }
 }

@@ -1,18 +1,37 @@
 # Direct-game AMD route
 
-This route is for 64-bit DirectX 12 games that expose an FSR path. It runs Neural Rendering inside the game integration instead of reconstructing from a finished desktop frame, so the runtime can use the game/upscaler data that the Lossless Scaling bridge cannot see.
+This route places Neural Rendering inside a supported game's FSR/DX12 path so it can use render-resolution colour and temporal guide data that a desktop capture cannot see.
 
-The helper does **not** contain, download, redistribute, extract, patch or modify `DLSS-NR-on-AMD`. Its current licence forbids redistribution/bundling. Download `dlssnr_on_amd_setup.exe` yourself from the [official release page](https://github.com/danielblnc/DLSS-NR-on-AMD/releases), and supply your own legitimately obtained `nvngx_dlssnr.dll`. The helper verifies the setup file against the SHA-256 digest published by GitHub before it will install anything.
+I use it mainly for supported single-player/offline 64-bit games. Common anti-cheat targets are blocked automatically.
 
-## Check a game
+## Manager workflow
+
+The normal workflow is through `Dlss5AmdSwapper.exe`:
+
+1. Select your official `dlssnr_on_amd_setup.exe` and your own `nvngx_dlssnr.dll` under **Settings**.
+2. Scan Steam or add a game executable.
+3. Let the compatibility probe check x64, FSR, DX12 and anti-cheat markers.
+4. Click **Install / Update**.
+5. Launch the game and inspect the runtime evidence from the manager.
+6. Use **Restore** when you want to remove the managed install.
+
+The manager verifies the upstream setup against GitHub release metadata before it modifies the game directory. It then verifies that the setup produced a proxy, config and weights and that the config enables FSR inputs, depth, temporal history, interop and inline gameplay mode.
+
+New managed installs write `.dlss5-amd-swapper.json`. The older `.nr-auto-scale-direct.json` format is still accepted for compatibility and migrates on a successful update.
+
+## Runtime controls
+
+`Ctrl+Alt+F6` toggles the configured effect and `Ctrl+Alt+F7/F8` decrease/increase strength for the active managed game. A setting change is only shown as live when the runtime log acknowledges it. The upstream **End** overlay remains the authoritative in-game live control/status surface.
+
+## Advanced CLI
+
+Check a target:
 
 ```powershell
 py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
 ```
 
-The first route requires an x64 executable plus FSR and DirectX 12 evidence. Targets containing common anti-cheat markers are blocked; this route is intended for single-player/offline use.
-
-## Install
+Install:
 
 ```powershell
 py .\direct-game\amd_dlss5.py `
@@ -22,47 +41,32 @@ py .\direct-game\amd_dlss5.py `
   --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
 ```
 
-The helper:
-
-- validates the game executable and nearby FSR/anti-cheat markers;
-- verifies the upstream setup binary against the latest official GitHub release digest;
-- copies only the user-supplied files into the local game folder;
-- runs the upstream setup from the game folder;
-- verifies that a proxy, config and generated weights were created;
-- verifies that the generated config enabled FSR inputs, depth, temporal history, zero-copy interop support and inline gameplay mode;
-- restores the exact pre-install managed-file state if setup fails;
-- writes `.nr-auto-scale-direct.json` locally so removal is hash-checked and reversible.
-
-The local manifest, model DLL, upstream installer, runtime logs and generated weights are private runtime files and are ignored by Git.
-
-## Update
+Update:
 
 ```powershell
-py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --update `
+py .\direct-game\amd_dlss5.py `
+  --game "D:\Games\Example\Game.exe" `
+  --update `
   --upstream-setup "C:\Downloads\dlssnr_on_amd_setup.exe" `
   --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
 ```
 
-## Diagnose
+Diagnose:
 
 ```powershell
 py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --diagnose
 ```
 
-Diagnostics summarize hashes, the generated rich-input config, FidelityFX dispatch activity, color/motion/depth staging, HIP/runtime timing and fault/error counts without copying raw log text or local paths into the report.
-
-`--diagnose` also compares the logged FSR input size with the swapchain size. If they match, the neural pass is running at full output resolution and the report recommends switching the game from an AA/native FSR mode to an FSR quality/upscaling mode when lower processing cost is the goal.
-
-## AMD driver / HIP requirement
-
-Do not install a separate ROCm stack for this route. `DLSS-NR-on-AMD` currently requires **AMD Software: Adrenalin Edition 26.1.1 or newer** and uses the HIP runtime supplied by the AMD driver. `--diagnose` reports the HIP driver/runtime IDs that were actually loaded.
-
-For performance, the important resolution is the game's **FSR input/render resolution**, not the final display resolution. Keep the display at native resolution and use the game's FSR quality mode when you want the neural network to run on a smaller render-resolution image before FSR reconstructs the native output.
-
-## Remove
+Remove:
 
 ```powershell
 py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --remove
 ```
 
-Removal only deletes files that were absent before the managed install and still match the hashes recorded after installation. The supplied `nvngx_dlssnr.dll` is kept by default. Add `--remove-model` to remove it too when this helper originally copied it and its hash still matches.
+Removal only deletes managed files that were absent before installation and still match the hashes recorded after installation. A changed file is preserved for safety. `nvngx_dlssnr.dll` is kept by default; `--remove-model` removes it only when this helper originally copied it and its hash still matches.
+
+## Third-party boundary
+
+This repository does not contain, download, patch or redistribute `DLSS-NR-on-AMD` or NVIDIA runtime/model files. Download the official setup yourself from [DLSS-NR-on-AMD releases](https://github.com/danielblnc/DLSS-NR-on-AMD/releases) and supply your own legitimate `nvngx_dlssnr.dll`.
+
+For the currently tested route, use AMD Software: Adrenalin Edition 26.1.1 or newer. A separate ROCm installation is not required for normal use; the compatibility runtime uses the HIP runtime supplied with the AMD driver.

@@ -40,7 +40,7 @@ For the intended native-output/low-processing-resolution setup, keep the game's 
 
 ## Performance evidence policy
 
-External articles and upstream README benchmark numbers are research context, not NR Auto Scale benchmark data. I do not copy those FPS claims into this repository as project results.
+External articles and upstream README benchmark numbers are research context, not DLSS5 AMD Swapper benchmark data. I do not copy those FPS claims into this repository as project results.
 
 For this project, actual FPS and frame-time numbers are published only from PresentMon logs captured by `tools/Capture-Performance.ps1` and converted to sanitized JSON by `bridge/scripts/Analyze-Run.py`.
 

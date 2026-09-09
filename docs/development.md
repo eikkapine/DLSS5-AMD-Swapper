@@ -1,58 +1,74 @@
 # Development
 
-NR Auto Scale now has two integration targets:
+DLSS5 AMD Swapper is split into three main pieces:
 
-1. **direct-game AMD Neural Rendering** for supported x64 DX12/FSR games
-2. **Lossless Scaling compatibility bridge** for arbitrary capturable windows
+- `app/` — .NET 8 WPF manager
+- `direct-game/` — advanced Python direct-game helper and diagnostics
+- `auto-scale/` + `bridge/` — Lossless Scaling proxy and neural bridge
 
-The current main checkpoint, **v0.1.0-pre.3-dev.15**, keeps the accepted dev.14 Lossless Scaling compositor and adds the verified direct-game route plus log-backed performance/provenance tooling.
+## Build everything
 
-## Lossless Scaling modes
+The release-candidate loop is:
 
-The bridge keeps three processing modes:
+```powershell
+.\app\Build-Package.ps1
+```
 
-1. **native visible output + capped neural branch** using `NeuralMaxHeight` — current default
-2. **legacy reduced source-relative processing** using `WorkingScale`
-3. **full 1:1 neural processing** for quality/reference work
+That script builds the native Lossless Scaling wrapper, builds the bridge, runs the app smoke tests, publishes a self-contained `win-x64` WPF executable, copies only project-owned payload files, rejects forbidden third-party/private filenames, writes `SHA256SUMS.txt` and creates the local ZIP.
 
-With `NeuralMaxHeight=480`, a 2560×1440 source stays 2560×1440 for visible output while Neural Rendering works at about 854×480. Dev.14's compositor remains the stable base: broad residual color/exposure swings are filtered, stale chroma is reduced during motion, and accepted correction history is reused only where the source is effectively unchanged.
+## App smoke tests
 
-## Direct-game route
+The smoke tests cover the parts most likely to make the manager unsafe or misleading:
 
-`direct-game/amd_dlss5.py` is intentionally an installer/orchestration layer rather than a redistributed compatibility runtime. It verifies the user-supplied upstream setup file, checks the target for x64/FSR/DX12 evidence, blocks common anti-cheat markers, invokes the unchanged upstream installer, verifies the generated rich temporal configuration, and records a hash-safe local manifest for remove/update/rollback.
+- INI edits preserve unrelated sections
+- runtime controls save atomically
+- runtime diagnostics require real rich-path log evidence
+- x64 PE probing works
+- anti-cheat evidence overrides otherwise compatible targets
+- SHA-256 helpers are deterministic
+- an installed Lossless Scaling bridge can be recognized when a real install path is supplied
 
-The direct route is the quality-focused path because it can consume game/upscaler color, motion, depth, jitter/exposure context and render-resolution dimensions that are unavailable after the game has already produced a final desktop frame.
+Run them directly with:
 
-## Invariants
+```powershell
+dotnet run --project .\app\Dlss5AmdSwapper.SmokeTests\Dlss5AmdSwapper.SmokeTests.csproj -c Release
+```
 
-- keep the same neural model/weights and precision/settings unless a change is explicitly being evaluated
-- keep the normal baseline effect at `1.0`
-- keep `Inline=0` for the asynchronous Lossless Scaling path
-- preserve GPU ownership/fence ordering and failure-drain lifetime rules
-- keep the visible source at native resolution in `NeuralMaxHeight` mode
-- keep vendor, paid, private, and machine-specific runtime files outside Git
-- never turn bridge cadence into a game/display FPS claim
-- never publish a performance number unless it comes from a hashed source log
+## Direct-game invariants
 
-The F7/F8 strength control can amplify the already-produced Lossless Scaling correction up to `4.0`; it does not change the neural model or inference settings.
+I keep the direct installer reversible and conservative:
+
+- require x64 plus FSR/DX12 evidence unless an advanced force flag is used
+- never allow force to bypass anti-cheat blocking
+- verify the official upstream setup before install/update
+- validate the generated rich-input configuration
+- snapshot managed files before changing them
+- restore the pre-install managed state on failure/cancel
+- remove only files whose hashes still prove they are managed
+- recognize the legacy manifest while writing the new `.dlss5-amd-swapper.json` format
+
+## Lossless Scaling invariants
+
+- keep the source/native frame as the visible base in the default mode
+- cap only the hidden neural workload with `NeuralMaxHeight`
+- keep the async runtime path independent from visible presentation cadence
+- do not reuse stale full frames as temporal history
+- reject unstable residual colour/luminance that causes trails/flicker
+- preserve the existing managed bridge settings during an update
+- never package the paid Lossless Scaling original DLL
 
 ## Performance work
 
-The Lossless Scaling path already uses shared GPU transport, direct WGC SRV access where available, inference-aware pacing, duplicate visible presents, and a low-resolution neural branch over a native-resolution source base. Future work should preserve the accepted motion behavior while reducing synchronization/composition overhead or improving the quality of the stable neural residual.
+The project already uses shared GPU transport, direct WGC SRV access where available, low-resolution neural work over native visible output and log-backed timing separation.
 
-The direct-game route should keep the final output at the game's native/display target while allowing the game's FSR quality mode to choose a lower render-resolution input for the neural pass. Runtime diagnostics must confirm the actual FSR color/motion/depth dimensions before treating that optimization as active.
+For direct-game performance, the important dimensions are the game's actual FSR input/render resolution versus its final swapchain/output resolution. Diagnostics must prove those dimensions before I describe the lower-resolution neural path as active.
 
-## Validation discipline
+## Publication discipline
 
-I keep each metric tied to the subsystem that produced it:
+Concrete frame-rate claims must come from hashed measurement logs. I run:
 
-- PresentMon game/display frame timing
-- changed RGB submissions
-- bridge feed/presentation cadence
-- HIP/runtime timing
-- neural runtime fault/error state
-- visual acceptance
+```powershell
+py .\tools\Check-Publication.py
+```
 
-`tools/Capture-Performance.ps1` records PresentMon data and `bridge/scripts/Analyze-Run.py` produces sanitized JSON with SHA-256 hashes of every raw source. Raw logs remain private.
-
-Before publishing a checkpoint I build the production bridge/proxy, run the relevant tests, verify release hashes, run `py tools/Check-Publication.py`, inspect staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, third-party runtime/installer, private config/log, personal file, or unreviewed screenshot.
+before a public update, then inspect the Git diff/status and final ZIP for third-party binaries, private config/logs, machine paths, personal files and unreviewed screenshots.

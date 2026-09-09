@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">DLSS5 AMD Swapper</title>
+  <desc id="desc">Dark themed DLSS5 AMD Swapper project header with coral gradient icon and AMD route ready status.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0d13"/>
+      <stop offset="0.62" stop-color="#111722"/>
+      <stop offset="1" stop-color="#151016"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4e43"/>
+      <stop offset="1" stop-color="#ff8a46"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff664d" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ff664d" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="url(#bg)"/>
+  <circle cx="170" cy="180" r="150" fill="url(#glow)"/>
+  <path d="M0 306 C210 254 350 346 570 292 S985 244 1200 296 V360 H0Z" fill="#0c1119" opacity="0.8"/>
+  <path d="M760 0 L1200 0 L1200 200 C1050 160 928 96 760 0Z" fill="#1b222f" opacity="0.35"/>
+  <g transform="translate(76 86)" filter="url(#shadow)">
+    <rect width="156" height="156" rx="36" fill="url(#accent)"/>
+    <path d="M44 40 H116 V62 H67 L63 82 C71 77 81 75 91 75 C113 75 128 89 128 112 C128 138 108 153 80 153 C58 153 40 144 28 129 L45 111 C54 121 64 127 77 127 C89 127 98 121 98 111 C98 101 90 95 79 95 C69 95 61 99 54 105 L34 97Z" fill="#fff" transform="translate(0 -18)"/>
+  </g>
+  <g font-family="Segoe UI, Inter, Arial, sans-serif">
+    <text x="270" y="116" fill="#ff8362" font-size="18" font-weight="700" letter-spacing="3">AMD NEURAL RENDERING</text>
+    <text x="270" y="180" fill="#ffffff" font-size="54" font-weight="760">DLSS5 AMD Swapper</text>
+    <text x="272" y="220" fill="#aab8cc" font-size="20">Direct-game Neural Rendering + Lossless Scaling bridge</text>
+    <g transform="translate(272 254)">
+      <rect x="0" y="0" width="208" height="44" rx="13" fill="#171e29" stroke="#2c3749"/>
+      <circle cx="22" cy="22" r="5" fill="#65e89a"/>
+      <text x="38" y="28" fill="#c8d4e4" font-size="14" font-weight="600">AMD route ready</text>
+      <rect x="224" y="0" width="184" height="44" rx="13" fill="#171e29" stroke="#2c3749"/>
+      <text x="246" y="28" fill="#c8d4e4" font-size="14" font-weight="600">Direct game</text>
+      <rect x="424" y="0" width="216" height="44" rx="13" fill="#171e29" stroke="#2c3749"/>
+      <text x="446" y="28" fill="#c8d4e4" font-size="14" font-weight="600">Lossless Scaling</text>
+    </g>
+  </g>
+  <rect x="1" y="1" width="1198" height="358" rx="27" fill="none" stroke="#273140" stroke-width="2"/>
+</svg>

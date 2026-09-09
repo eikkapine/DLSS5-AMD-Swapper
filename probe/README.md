@@ -47,4 +47,4 @@ It does not verify the full Lossless Scaling integration, frame pacing, end-to-e
 
 ## Optional variants
 
-The runner also exposes controlled interop/inline/startup-delay options for debugging compatibility problems. They are development switches, not required for normal NR Auto Scale setup.
+The runner also exposes controlled interop/inline/startup-delay options for debugging compatibility problems. They are development switches, not required for normal DLSS5 AMD Swapper setup.

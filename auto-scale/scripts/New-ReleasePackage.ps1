@@ -1,6 +1,6 @@
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\runs\packages"),
-    [string]$PackageName = ("nr-auto-scale-" + (Get-Date -Format "yyyyMMdd-HHmmss")),
+    [string]$PackageName = ("dlss5-amd-swapper-" + (Get-Date -Format "yyyyMMdd-HHmmss")),
     [string]$AutoScaleDllPath = (Join-Path $PSScriptRoot "..\build\Release\Lossless.dll"),
     [string]$BridgeExePath = (Join-Path $PSScriptRoot "..\..\bridge\build\Release\DlssNrBridge.exe")
 )
@@ -31,6 +31,7 @@ function Test-ForbiddenPackageEntry {
         '(^|\\)amdhip64[^\\]*\.dll$',
         '(^|\\)nvngx_dlssnr\.dll$',
         '(^|\\)dlssnr_on_amd_weights\.bin$',
+        '(^|\\)\.dlss5-amd-swapper\.json$',
         '(^|\\)\.nr-auto-scale-direct\.json$',
         '(^|\\)NrAutoScale\.ini$',
         '(^|\\)dlssnr_on_amd\.ini$',

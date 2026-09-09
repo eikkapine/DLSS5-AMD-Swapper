@@ -32,7 +32,7 @@ def main() -> int:
         if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
         relative = path.relative_to(ROOT)
-        if any(part in {".git", "runs", "build", "runtime"} for part in relative.parts):
+        if any(part in {".git", ".vs", "runs", "build", "bin", "obj", "runtime", "artifacts"} for part in relative.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         lower = text.lower()
