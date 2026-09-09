@@ -18,7 +18,7 @@ cbuffer FrameParameters : register(b0)
     uint imageWidth;
     uint imageHeight;
     uint blendAlpha; // 0..256 normally; native-detail mode allows up to 1024 (4x).
-    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native neural-delta; bit 3: prior neural input; bit 4: async output uses prior input; bit 5: same-strength history.
+    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native neural-delta; bit 3: prior neural input; bit 4: async output uses prior input; bit 5: feed-matched stable history.
     uint reserved0;
     uint reserved1;
 };
@@ -70,7 +70,7 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
     bool nativeResidualComposite = (frameFlags & 4u) != 0;
     bool hasPreviousNeuralInput = (frameFlags & 8u) != 0;
     bool preferPreviousNeuralInput = (frameFlags & 16u) != 0;
-    bool stabilizeSameStrengthHistory = (frameFlags & 32u) != 0;
+    bool stabilizeMatchedHistory = (frameFlags & 32u) != 0;
     uint laneChanged = 0;
     uint laneNonblack = 0;
     uint laneSourceSum = 0;
@@ -125,7 +125,7 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                 // for changed-RGB detection and clamp its correction contribution to
                 // the current correction before blending. This adds arithmetic only:
                 // no extra texture fetch, neural pass, dispatch, or full-frame copy.
-                if (stabilizeSameStrengthHistory && hasPreviousNeuralInput)
+                if (stabilizeMatchedHistory && hasPreviousNeuralInput)
                 {
                     float stability = 1.0 - smoothstep(0.012, 0.065, motionAmount);
                     float3 previousCorrection = previousVisible - originalNative;

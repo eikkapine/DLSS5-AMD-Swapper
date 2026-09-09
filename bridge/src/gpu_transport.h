@@ -252,12 +252,12 @@ public:
             throw std::runtime_error("Prior direct capture has not completed its consumer fence");
         }
         if (nativeResidualComposite_ && inputInitialized_) {
-            // The asynchronous runtime normally publishes the job started by the
-            // previous feed while this iteration submits the next one. Preserve
-            // that exact low-resolution feed so Compose can recover the network's
-            // correction without assuming the newest capture is its source.
+            // Preserve the input from the immediately preceding feed before a new
+            // capture replaces it. Repeated feeds of the same capture are handled
+            // by CommitSubmittedNeuralInput() after composition.
             context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
             previousNeuralInputValid_ = true;
+            previousNeuralInputValue_ = inputValue_;
         }
         // WGC surfaces which support SRVs can feed the existing exact BGRA
         // conversion directly. Keep this view only while its frame is checked
@@ -308,6 +308,22 @@ public:
         Require(context_->Wait(outputReady11_.Get(), value), "D3D11 wait for neural output copy");
     }
 
+    void CommitSubmittedNeuralInput() {
+        if (!nativeResidualComposite_ || !inputInitialized_) {
+            return;
+        }
+        // Inline=0 is one submitted job ahead of the published backbuffer. The
+        // next Compose must therefore subtract the input used by this exact feed.
+        // A capture may be fed multiple times between WGC updates, so recording
+        // history only when UpdateInput() runs is insufficient and caused the
+        // compositor to subtract an older frame from a newer neural output.
+        if (!previousNeuralInputValid_ || previousNeuralInputValue_ != inputValue_) {
+            context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
+            previousNeuralInputValid_ = true;
+            previousNeuralInputValue_ = inputValue_;
+        }
+    }
+
     FrameStatistics Compose(UINT alpha, bool preferPreviousNeuralInput = false) {
         const UINT maxAlpha = nativeResidualComposite_ ? 1024u : 256u;
         if (alpha > maxAlpha) {
@@ -316,12 +332,16 @@ public:
         // Input statistics depend only on this exact input upload, not on
         // neural progress or strength. Keep them until SignalInput changes it.
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
-        const bool sameStrengthHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha;
+        const UINT64 neuralInputValue = preferPreviousNeuralInput && previousNeuralInputValid_
+            ? previousNeuralInputValue_ : inputValue_;
+        const bool matchedHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
+            lastComposedMappingValid_ && lastComposedSourceInputValue_ == inputValue_ &&
+            lastComposedNeuralInputValue_ == neuralInputValue;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u) |
                                 (nativeResidualComposite_ ? 4u : 0u) |
                                 (previousNeuralInputValid_ ? 8u : 0u) |
                                 (preferPreviousNeuralInput ? 16u : 0u) |
-                                (sameStrengthHistory ? 32u : 0u);
+                                (matchedHistory ? 32u : 0u);
         const std::array<UINT, 8> parameters = {
             width_, height_, displayWidth_, displayHeight_, alpha, frameFlags, 0u, 0u
         };
@@ -388,6 +408,9 @@ public:
         } else {
             ++blendedImageCount_;
         }
+        lastComposedSourceInputValue_ = inputValue_;
+        lastComposedNeuralInputValue_ = neuralInputValue;
+        lastComposedMappingValid_ = true;
         return {values[0] != 0, values[1] != 0, sourceMeaningfullyNonblack_};
     }
 
@@ -695,6 +718,9 @@ private:
     bool historyValid_ = false;
     bool inputInitialized_ = false;
     bool previousNeuralInputValid_ = false;
+    UINT64 previousNeuralInputValue_ = 0;
+    UINT64 lastComposedSourceInputValue_ = 0, lastComposedNeuralInputValue_ = 0;
+    bool lastComposedMappingValid_ = false;
     UINT displayAlpha_ = 256;
     UINT historyAlpha_ = 256;
     bool sourceStatisticsValid_ = false;

@@ -2192,7 +2192,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=native_source_stable_neural_delta\n"
+                   << "gpu_transport_revision=feed_matched_stable_neural_delta\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2395,6 +2395,9 @@ int wmain(int argc, wchar_t** argv) {
                     if (wasEnabled && !effectEnabled) {
                         stats = gpuTransport->Compose(0, asyncOutputUsesPreviousInput);
                     }
+                    // Record the input used by this feed only after Compose has
+                    // consumed the prior-feed texture needed for the current output.
+                    gpuTransport->CommitSubmittedNeuralInput();
                     stageTimes[5] = PerformanceStats::Clock::now();
                     const bool visibleSubmitted = visiblePresenter.PresentGpu(
                         *gpuTransport, stats, !readyWritten || pendingHotkeySnapshot);
