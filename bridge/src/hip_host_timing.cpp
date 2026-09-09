@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -76,6 +77,36 @@ std::atomic<bool> progressAvailable{false};
 std::atomic<uint32_t> activeWorkerWaits{0};
 std::atomic<uint64_t> returnedWorkerWaits{0};
 thread_local bool queuedKernels = false;
+
+// Resolve only exports of the HIP DLL already loaded by the runtime. Event
+// allocation occurs on the normal worker after a successful existing wait.
+// Use timed dispatch, not hipEventRecord(NULL), which can introduce default-
+// stream barriers. Flags remain zero: any-order execution is never requested.
+decltype(&hipExtLaunchKernel) timedLaunch = nullptr;
+decltype(&hipEventCreateWithFlags) createTimingEvent = nullptr;
+decltype(&hipEventElapsedTime) elapsedTimingEvents = nullptr;
+decltype(&hipGetDevice) samplingGetDevice = nullptr;
+decltype(&hipGetFuncBySymbol) samplingGetFunction = nullptr;
+decltype(&hipKernelNameRef) samplingKernelName = nullptr;
+std::atomic<bool> kernelSamplingAvailable{false};
+std::atomic<uint32_t> samplingOwners{0}, samplingAttempts{0}, samplingDropped{0};
+uintptr_t neuralImageBase = 0;
+size_t neuralImageSize = 0;
+
+struct KernelSample {
+    hipEvent_t begin = nullptr, end = nullptr;
+    bool initialized = false, disabled = false, armed = false;
+    bool selected = false, launchSucceeded = false;
+    int device = -1;
+    uint32_t launches = 0, target = 0, nextTarget = 0;
+    uint64_t completedWaits = 0;
+    const void* function = nullptr;
+    dim3 grid{}, block{};
+    size_t sharedBytes = 0;
+};
+// Handles intentionally survive thread exit. At most four workers receive two
+// events each, retained until process teardown even after a failed GPU wait.
+thread_local KernelSample kernelSample;
 
 int64_t Tick() noexcept {
     LARGE_INTEGER value{};
@@ -146,6 +177,172 @@ void Record(Api api, int64_t begin, int64_t end, hipError_t result, bool nondefa
     ReleaseSRWLockExclusive(&traceLock);
 }
 
+template<size_t Capacity>
+void QueueKernelLine(const char (&text)[Capacity], int bytes) noexcept {
+    // snprintf returns the required length on truncation, not the number of
+    // valid source bytes. Check the caller's buffer as well as the queue slot.
+    if (bytes <= 0 || static_cast<size_t>(bytes) >= Capacity ||
+        static_cast<size_t>(bytes) >= sizeof(PendingLine::text)) return;
+    if (!TryAcquireSRWLockExclusive(&traceLock)) {
+        samplingDropped.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    if (pendingCount < pending.size()) {
+        auto& line = pending[(pendingHead + pendingCount) % pending.size()];
+        line.bytes = static_cast<size_t>(bytes);
+        std::memcpy(line.text, text, line.bytes);
+        ++pendingCount;
+    } else {
+        samplingDropped.fetch_add(1, std::memory_order_relaxed);
+    }
+    ReleaseSRWLockExclusive(&traceLock);
+}
+
+void DisableKernelSampling(const char* reason, hipError_t status) noexcept {
+    if (kernelSample.disabled) return;
+    kernelSample.disabled = true;
+    kernelSample.armed = false;
+    kernelSample.selected = false;
+    kernelSample.launchSucceeded = false;
+    char line[256]{};
+    const int bytes = std::snprintf(line, sizeof(line),
+        "gpu_sampling_disabled thread=%lu reason=%s status=%d\n",
+        GetCurrentThreadId(), reason, static_cast<int>(status));
+    QueueKernelLine(line, bytes);
+}
+
+bool SelectKernelSample(const void* function, dim3 grid, dim3 block,
+                        size_t sharedBytes, hipStream_t stream) noexcept {
+    if (!kernelSamplingAvailable.load(std::memory_order_acquire) ||
+        GetCurrentThreadId() == presentationThread) return false;
+    auto& state = kernelSample;
+    if (state.disabled) return false;
+    // Count the unmodified sequence even before sampling starts. Positions
+    // rotate across actual launch counts, not a hard-coded 156-kernel model.
+    const uint32_t ordinal = state.launches++;
+    if (!state.armed || ordinal != state.target || stream != nullptr) return false;
+    state.armed = false;
+    if (!recording.load(std::memory_order_acquire) || Tick() - origin >= frequency * 90) {
+        state.disabled = true;
+        return false;
+    }
+    // Reserve a bounded attempt without incrementing past the limit when
+    // multiple workers reach their selected ordinal concurrently.
+    uint32_t attempts = samplingAttempts.load(std::memory_order_relaxed);
+    while (attempts < 512 && !samplingAttempts.compare_exchange_weak(
+               attempts, attempts + 1, std::memory_order_relaxed)) {}
+    if (attempts >= 512) {
+        state.disabled = true;
+        return false;
+    }
+    int currentDevice = -1;
+    const hipError_t deviceStatus = samplingGetDevice(&currentDevice);
+    if (deviceStatus != hipSuccess || currentDevice != state.device) {
+        DisableKernelSampling("device_changed_or_unavailable", deviceStatus);
+        return false;
+    }
+    state.function = function;
+    state.grid = grid;
+    state.block = block;
+    state.sharedBytes = sharedBytes;
+    state.selected = true;
+    state.launchSucceeded = false;
+    return true;
+}
+
+void FinishKernelSample(hipError_t waitStatus, bool workerWait) noexcept {
+    if (!kernelSamplingAvailable.load(std::memory_order_acquire) ||
+        GetCurrentThreadId() == presentationThread) return;
+    auto& state = kernelSample;
+    if (state.disabled) return;
+    const uint32_t launches = state.launches;
+    state.launches = 0;
+    state.armed = false;
+    if (waitStatus != hipSuccess) {
+        DisableKernelSampling("existing_device_wait_failed", waitStatus);
+        return; // Do not query, reuse, or destroy possibly in-flight events.
+    }
+    if (!workerWait) return;
+    ++state.completedWaits;
+    if (state.selected && state.launchSucceeded) {
+        int currentDevice = -1;
+        const hipError_t deviceStatus = samplingGetDevice(&currentDevice);
+        if (deviceStatus != hipSuccess || currentDevice != state.device) {
+            DisableKernelSampling("completion_device_changed_or_unavailable", deviceStatus);
+            return;
+        }
+        // The original device-wide wait has already completed. ElapsedTime
+        // reads those completed timestamps; no event wait or query loop is added.
+        float milliseconds = 0.0f;
+        const hipError_t timingStatus = elapsedTimingEvents(&milliseconds, state.begin, state.end);
+        if (timingStatus != hipSuccess || !std::isfinite(milliseconds) || milliseconds < 0.0f) {
+            DisableKernelSampling("elapsed_time_unavailable", timingStatus);
+        } else {
+            char name[256] = "unresolved";
+            if (samplingGetFunction && samplingKernelName) {
+                hipFunction_t function = nullptr;
+                const auto status = samplingGetFunction(&function, state.function);
+                if (status == hipSuccess) {
+                    const char* resolved = samplingKernelName(function);
+                    if (resolved && *resolved) {
+                        size_t i = 0;
+                        for (; i + 1 < sizeof(name) && resolved[i]; ++i) {
+                            const unsigned char c = static_cast<unsigned char>(resolved[i]);
+                            name[i] = ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                       (c >= '0' && c <= '9') || c == '_') ? static_cast<char>(c) : '_';
+                        }
+                        name[i] = 0;
+                    }
+                } else {
+                    DisableKernelSampling("symbol_lookup_failed", status);
+                }
+            }
+            const uintptr_t address = reinterpret_cast<uintptr_t>(state.function);
+            const bool inImage = address >= neuralImageBase && address - neuralImageBase < neuralImageSize;
+            char line[1024]{};
+            const int bytes = std::snprintf(line, sizeof(line),
+                "gpu_kernel elapsed_s=%.6f thread=%lu wait_index=%llu ordinal=%u launches_in_wait=%u "
+                "kernel=%s kernel_rva=%llu rva_valid=%u grid_x=%u grid_y=%u grid_z=%u "
+                "block_x=%u block_y=%u block_z=%u shared_bytes=%llu gpu_ms=%.6f "
+                "stream_default=1 sampling_attempts=%u sampling_dropped=%u\n",
+                static_cast<double>(Tick() - origin) / frequency, GetCurrentThreadId(),
+                static_cast<unsigned long long>(state.completedWaits), state.target, launches, name,
+                static_cast<unsigned long long>(inImage ? address - neuralImageBase : 0), inImage ? 1u : 0u,
+                state.grid.x, state.grid.y, state.grid.z, state.block.x, state.block.y, state.block.z,
+                static_cast<unsigned long long>(state.sharedBytes), static_cast<double>(milliseconds),
+                samplingAttempts.load(std::memory_order_relaxed), samplingDropped.load(std::memory_order_relaxed));
+            QueueKernelLine(line, bytes);
+        }
+    }
+    state.selected = false;
+    state.launchSucceeded = false;
+    const int64_t sinceStart = Tick() - origin;
+    if (state.disabled) return;
+    if (!recording.load(std::memory_order_acquire) || sinceStart >= frequency * 90 ||
+        samplingAttempts.load(std::memory_order_relaxed) >= 512) {
+        state.disabled = true; // No more counters, queries or clock reads on this worker.
+        return;
+    }
+    if (sinceStart < frequency * 15 || launches == 0 || launches > 4096) return;
+    if (!state.initialized) {
+        state.initialized = true;
+        if (samplingOwners.fetch_add(1, std::memory_order_relaxed) >= 4) {
+            DisableKernelSampling("worker_limit", hipSuccess);
+            return;
+        }
+        auto status = samplingGetDevice(&state.device);
+        if (status == hipSuccess) status = createTimingEvent(&state.begin, hipEventDefault);
+        if (status == hipSuccess) status = createTimingEvent(&state.end, hipEventDefault);
+        if (status != hipSuccess) {
+            DisableKernelSampling("event_initialization_failed", status);
+            return;
+        }
+    }
+    state.target = state.nextTarget % launches;
+    state.nextTarget = (state.target + 1) % launches;
+    state.armed = true;
+}
+
 template<Api api, typename Function, typename... Args>
 hipError_t Measure(Function function, bool nondefault, Args&&... args) {
     if (!recording.load(std::memory_order_acquire)) return function(std::forward<Args>(args)...);
@@ -162,9 +359,22 @@ hipError_t Measure(Function function, bool nondefault, Args&&... args) {
 
 hipError_t ObservedLaunch(const void* function, dim3 grid, dim3 block, void** arguments,
                           size_t sharedBytes, hipStream_t stream) {
-    const auto result = Measure<Launch>(originalLaunch, stream != nullptr,
-                                       function, grid, block, arguments, sharedBytes, stream);
+    const DWORD incomingError = GetLastError();
+    const bool sampled = SelectKernelSample(function, grid, block, sharedBytes, stream);
+    SetLastError(incomingError);
+    // Exactly one dispatch. Never retry a failed timed launch through the
+    // ordinary API: a failure is not proof the device submitted no work.
+    const auto result = sampled
+        ? Measure<Launch>(timedLaunch, false, function, grid, block, arguments, sharedBytes, stream,
+                          kernelSample.begin, kernelSample.end, 0)
+        : Measure<Launch>(originalLaunch, stream != nullptr, function, grid, block, arguments, sharedBytes, stream);
+    const DWORD returnedError = GetLastError();
+    if (sampled) {
+        kernelSample.launchSucceeded = result == hipSuccess;
+        if (result != hipSuccess) DisableKernelSampling("timed_launch_failed", result);
+    }
     if (result == hipSuccess) queuedKernels = true;
+    SetLastError(returnedError);
     return result;
 }
 hipError_t ObservedDeviceWait() {
@@ -176,6 +386,7 @@ hipError_t ObservedDeviceWait() {
     SetLastError(incomingError);
     const auto result = Measure<DeviceWait>(originalDeviceWait, false);
     const DWORD returnedError = GetLastError();
+    FinishKernelSample(result, announce);
     if (announce) {
         // Also wake on failure, so the bridge can use its existing error path.
         // The runtime may not have published its ready flag yet; this is only
@@ -233,7 +444,7 @@ void ReplaceSlot(void** slot, void* expected, void* replacement) {
 }
 } // namespace
 
-const char* StartHipHostTiming(HMODULE neuralModule, bool enabled) {
+const char* StartHipHostTiming(HMODULE neuralModule, bool enabled, bool sampleKernels) {
     if (!enabled) return "disabled_by_option";
     MODULEINFO info{};
     if (!GetModuleInformation(GetCurrentProcess(), neuralModule, &info, sizeof(info)))
@@ -268,6 +479,16 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled) {
     }
     HMODULE hip = GetModuleHandleW(L"amdhip64_7.dll");
     if (!hip) return "missing_hip7_module";
+    if (sampleKernels) {
+        timedLaunch = reinterpret_cast<decltype(timedLaunch)>(GetProcAddress(hip, "hipExtLaunchKernel"));
+        createTimingEvent = reinterpret_cast<decltype(createTimingEvent)>(GetProcAddress(hip, "hipEventCreateWithFlags"));
+        elapsedTimingEvents = reinterpret_cast<decltype(elapsedTimingEvents)>(GetProcAddress(hip, "hipEventElapsedTime"));
+        samplingGetDevice = reinterpret_cast<decltype(samplingGetDevice)>(GetProcAddress(hip, "hipGetDevice"));
+        samplingGetFunction = reinterpret_cast<decltype(samplingGetFunction)>(GetProcAddress(hip, "hipGetFuncBySymbol"));
+        samplingKernelName = reinterpret_cast<decltype(samplingKernelName)>(GetProcAddress(hip, "hipKernelNameRef"));
+    }
+    neuralImageBase = reinterpret_cast<uintptr_t>(info.lpBaseOfDll);
+    neuralImageSize = info.SizeOfImage;
     std::array<void*, ApiCount> originals{};
     for (size_t i = 0; i < ApiCount; ++i) {
         originals[i] = reinterpret_cast<void*>(GetProcAddress(hip, kNames[i]));
@@ -282,15 +503,24 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled) {
     traceFile = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (traceFile == INVALID_HANDLE_VALUE) return "unavailable_log_file";
     constexpr char header[] =
+        "bridge_version=" BRIDGE_BUILD_VERSION "\n"
         "schema=1 method=host_api_wall_clock scope=neural_module_named_imports capture_limit_s=120\n"
         "note=API calls are not neural jobs; synchronization time is not isolated GPU kernel time.\n"
         "note=Each row is one thread's interval; intervals on different threads overlap.\n"
-        "note=Timing adds CPU overhead; no kernels, streams, events, copies or waits are added.\n";
+        "note=Host timing adds overhead. Optional GPU sampling times one existing launch with flags=0; no kernels, copies, streams or waits are added.\n"
+        "note=GPU samples use hipExtLaunchKernel start/stop events, not hipEventRecord on the default stream. Events may perturb scheduling.\n"
+        "note=gpu_kernel rows are sampled dispatch timings across different worker intervals, not one complete inference timeline.\n";
     if (!WriteTrace(header, sizeof(header) - 1)) {
         CloseHandle(traceFile);
         traceFile = INVALID_HANDLE_VALUE;
         return "unavailable_log_write";
     }
+    const bool canSample = sampleKernels && timedLaunch && createTimingEvent && elapsedTimingEvents && samplingGetDevice;
+    char samplingHeader[256]{};
+    const int samplingHeaderBytes = std::snprintf(samplingHeader, sizeof(samplingHeader),
+        "kernel_sampling=%s since_s=15 until_s=90 max_samples=512 max_workers=4 events_per_worker=2\n",
+        canSample ? "bounded_timed_launch" : sampleKernels ? "unavailable_exports" : "disabled_by_option");
+    if (samplingHeaderBytes > 0) WriteTrace(samplingHeader, static_cast<size_t>(samplingHeaderBytes));
     originalLaunch = reinterpret_cast<decltype(originalLaunch)>(originals[Launch]);
     originalDeviceWait = reinterpret_cast<decltype(originalDeviceWait)>(originals[DeviceWait]);
     originalStreamWait = reinterpret_cast<decltype(originalStreamWait)>(originals[StreamWait]);
@@ -302,12 +532,13 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled) {
         reinterpret_cast<void*>(&ObservedStreamWait), reinterpret_cast<void*>(&ObservedEventWait),
         reinterpret_cast<void*>(&ObservedCopy), reinterpret_cast<void*>(&ObservedCopyAsync)};
     presentationThread = GetCurrentThreadId();
-    // An unavailable hint event leaves ordinary feed pacing in use. No event
-    // creation, allocation, file access or extra HIP call occurs per launch.
+    // An unavailable hint event leaves ordinary feed pacing in use. GPU sample
+    // events are created later, on the worker, after an existing successful wait.
     progressEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     for (size_t i = 0; i < ApiCount; ++i) ReplaceSlot(slots[i], originals[i], observers[i]);
     recording.store(true, std::memory_order_release);
     progressAvailable.store(progressEvent != nullptr, std::memory_order_release);
+    kernelSamplingAvailable.store(canSample, std::memory_order_release);
     return "active_host_api_timing";
 }
 
@@ -315,6 +546,12 @@ HipWorkProgress ReadHipWorkProgress() noexcept {
     if (!progressAvailable.load(std::memory_order_acquire)) return {};
     return {true, activeWorkerWaits.load(std::memory_order_acquire),
             returnedWorkerWaits.load(std::memory_order_acquire)};
+}
+
+HipKernelTimingProgress ReadHipKernelTimingProgress() noexcept {
+    if (!kernelSamplingAvailable.load(std::memory_order_acquire)) return {};
+    return {true, samplingAttempts.load(std::memory_order_relaxed),
+            samplingDropped.load(std::memory_order_relaxed)};
 }
 
 HANDLE HipWorkProgressEvent() noexcept {
@@ -341,10 +578,11 @@ void FlushHipHostTiming() noexcept {
 }
 
 #else
-const char* StartHipHostTiming(HMODULE, bool enabled) {
+const char* StartHipHostTiming(HMODULE, bool enabled, bool) {
     return enabled ? "unavailable_at_build" : "disabled_by_option";
 }
 void FlushHipHostTiming() noexcept {}
 HipWorkProgress ReadHipWorkProgress() noexcept { return {}; }
+HipKernelTimingProgress ReadHipKernelTimingProgress() noexcept { return {}; }
 HANDLE HipWorkProgressEvent() noexcept { return nullptr; }
 #endif

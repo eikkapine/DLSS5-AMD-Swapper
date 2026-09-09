@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -92,6 +93,9 @@ struct Config {
     std::wstring hipVisibleDevices = L"1";
     bool freezeSource = false;
     bool nativeResolution = false;
+    // Missing key keeps older installations on their prior behavior. New
+    // installs write the current performance preset explicitly.
+    float workingScale = 0.0f;
     int width = 1280;
     int height = 720;
     int startupDelayMs = 2000;
@@ -207,6 +211,18 @@ int ParseInt(const std::wstring& value, int fallback) {
     }
 }
 
+float ParseFloat(const std::wstring& value, float fallback) {
+    try {
+        return std::stof(value);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+bool UsesReducedWorkingResolution(const Config& config) {
+    return config.workingScale >= 0.25f && config.workingScale < 0.999f;
+}
+
 std::filesystem::path ResolvePath(const std::wstring& value, const std::filesystem::path& base) {
     std::filesystem::path path(value);
     if (path.is_relative()) {
@@ -261,6 +277,9 @@ Config LoadConfig() {
             config.freezeSource = ParseBool(value, config.freezeSource);
         } else if (key == L"nativeresolution") {
             config.nativeResolution = ParseBool(value, config.nativeResolution);
+        } else if (key == L"workingscale") {
+            const float parsed = ParseFloat(value, config.workingScale);
+            config.workingScale = parsed <= 0.0f ? 0.0f : std::clamp(parsed, 0.25f, 1.0f);
         } else if (key == L"width") {
             config.width = ParseInt(value, config.width);
         } else if (key == L"height") {
@@ -380,7 +399,9 @@ std::wstring BuildCommandLine(const Config& config,
         << L" --ready-file " << QuoteArg(readyFile.wstring())
         << L" --stop-event " << QuoteArg(stopEventName)
         << L" --parent-pid " << GetCurrentProcessId();
-    if (config.nativeResolution) {
+    if (UsesReducedWorkingResolution(config)) {
+        cmd << L" --working-scale " << std::fixed << std::setprecision(3) << config.workingScale;
+    } else if (config.nativeResolution) {
         cmd << L" --native-resolution";
     }
     if (!config.captureDirectory.empty()) {
@@ -595,13 +616,20 @@ void ApplyBridgeSettings(SettingsSnapshot settings) {
         return;
     }
 
-    if (g_config.nativeResolution) {
+    const bool reducedWorkingResolution = UsesReducedWorkingResolution(g_config);
+    if (g_config.nativeResolution && !reducedWorkingResolution) {
         settings.scalingMode = 1;
         settings.scalingType = 0;
         settings.scaleFactor = 1.0f;
         Log(L"Applying native-resolution 1:1 Lossless Scaling target settings");
     } else if (settings.scalingType == 0 && g_config.defaultScalingTypeIfOff > 0) {
         settings.scalingType = g_config.defaultScalingTypeIfOff;
+    }
+    if (reducedWorkingResolution) {
+        std::wstringstream message;
+        message << L"Applying reduced neural working scale " << std::fixed << std::setprecision(2)
+                << g_config.workingScale << L" before the selected Lossless Scaling upscaler";
+        Log(message.str());
     }
     settings.resizeBeforeScale = 0;
     settings.clipCursor = 0;

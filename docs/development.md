@@ -1,49 +1,49 @@
 # Development
 
-The main goal is straightforward: improve native-resolution throughput without reducing image quality.
+There are now two performance targets:
 
-For performance work I keep these fixed unless I am explicitly testing a separate quality tradeoff:
+1. **practical output performance** using the pre-upscale `WorkingScale` path, and
+2. **native 1:1 Neural Rendering** for maximum image fidelity and future kernel/runtime work.
 
-- native application dimensions when native mode is selected
-- the same model and weights
-- the same neural precision/settings
-- full effect strength
-- asynchronous inference (`Inline=0`)
-- the current Lossless Scaling profile and frame-generation choice
+The current public checkpoint, `v0.1.0-pre.3-dev.3`, is the first one focused on the practical path. It runs a 2560×1440 source at 1920×1080 neural resolution with `WorkingScale=0.75`, keeping the same model, weights, neural precision/settings and full effect strength. The final enlargement is handled by Lossless Scaling.
 
-## Current direction
+On the RX 9070 XT test system this reached about 30 FPS base output and about 60 FPS with Lossless Scaling 2× frame generation. The selected full-effect bridge window was 28.84 changed RGB submissions/s.
 
-The biggest work so far has been outside the neural model itself:
+## Invariants I keep for normal performance work
 
-- shared GPU transport between capture/presentation D3D11 and neural D3D12 devices
-- removal of unnecessary full-frame CPU readbacks
-- exact duplicate-output suppression
-- lower polling overhead
-- inference-aware feed scheduling
-- bounded HIP host timing to separate waiting from useful work
+- full neural effect strength unless I am explicitly testing the live blend
+- the same compatibility runtime model/weights and neural precision/settings
+- `Inline=0` / asynchronous path where the current setup requires it
+- GPU ownership/fence ordering and failure-drain lifetime rules
+- exact 1:1 texel handling whenever the source and neural dimensions match
+- paid/vendor/private runtime files outside Git
 
-These changes are intended to remove host/transport overhead while keeping the input pixels and neural path intact.
+`WorkingScale` is an explicit quality/performance control. A value below 1.0 is a deliberate resolution tradeoff and is documented as such rather than being described as a same-quality native optimization.
 
-## Published checkpoint
+## Current optimization order
 
-`v0.1.0-pre.2` is the latest public performance checkpoint. The manually exercised RX 9070 XT native 2560×1440 run recorded 1,112 changed RGB submissions in 60.238 seconds (`18.46/s`) and I observed roughly 19 FPS base output.
+The work so far has reduced host-side overhead with shared GPU transport, duplicate suppression, inference-aware feeding, direct WGC SRV use and output/history copy elision.
 
-That number is useful as a baseline, but it is not a controlled GPU benchmark. Bridge submission rate, neural-job timing, game FPS, LSFG output, and displayed FPS are different measurements and I keep them separate.
+The largest remaining native-resolution cost is still inside the neural GPU workload. Current research points toward:
 
-## What I avoid during optimization
+- fewer neural pixels before final upscale
+- kernel fusion to reduce memory round-trips
+- lower VGPR/LDS pressure on RDNA4
+- better occupancy / wave-level tuning
+- avoiding synchronization bubbles between compute stages
 
-I do not count lower processing resolution, reduced effect strength, lower neural precision, model replacement, or approximate pixel matching as performance wins for the native-quality target.
+The external compatibility runtime does not currently expose enough source here to safely rewrite those neural kernels inside NR Auto Scale, so dev.3 implements the largest architecture-level lever available in this project: running NR before the final upscale.
 
-I also keep runtime/vendor binaries, private settings, local logs, raw captures, backups, and machine-specific files out of Git.
+## Validation discipline
 
-## Measurement files
+I keep these numbers separate:
 
-Sanitized checkpoint data is kept under `docs/measurements/`. Release metadata in `RELEASE.json` records the binary hashes and which checks apply to that release.
+- user-observed base FPS
+- user-observed LSFG/display output
+- changed RGB submissions
+- bridge feed/presentation rate
+- HIP waits and runtime timing
 
-The private raw logs used to generate these summaries stay outside the repository.
+Raw logs remain private. Public measurement JSON contains only hashes and sanitized aggregates.
 
-## Release rule
-
-I only describe a behavior as verified when I have a matching test/run for that exact path. A bridge-only result does not automatically prove the complete Lossless Scaling workflow, and a nominal frame-generation multiplier is not reported as measured display FPS.
-
-See [Performance](performance.md) and [Verification](verification.md) for the current public baseline.
+Before publishing a checkpoint I build the production bridge/wrapper, verify artifact hashes, inspect the staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, external vendor runtime, private config/log or unreviewed screenshot.

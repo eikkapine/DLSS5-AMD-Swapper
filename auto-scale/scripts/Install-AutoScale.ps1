@@ -11,7 +11,8 @@ param(
     [int]$StartupDelayMs = 2000,
     [int]$WarmupFrames = 320,
     [int]$ReadyTimeoutMs = 180000,
-    [int]$NativeResolution = 0
+    [int]$NativeResolution = 0,
+    [double]$WorkingScale = 0.75
 )
 
 $ErrorActionPreference = "Stop"
@@ -264,6 +265,7 @@ StartupDelayMs=$StartupDelayMs
 WarmupFrames=$WarmupFrames
 ReadyTimeoutMs=$ReadyTimeoutMs
 NativeResolution=$NativeResolution
+WorkingScale=$WorkingScale
 DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 "@

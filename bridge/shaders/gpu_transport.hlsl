@@ -1,9 +1,13 @@
-// Byte-preserving transport only: no filtering, resizing, or neural operations.
+// Transport and composition shaders. The 1:1 path stays byte-addressed; the
+// reduced-working-resolution path uses one hardware bilinear sample per pixel.
 Texture2D<float4> inputImage : register(t0);
 Texture2D<float4> neuralImage : register(t1);
 Texture2D<float4> previousImage : register(t2);
+ByteAddressBuffer tileStatistics : register(t3);
 RWTexture2D<unorm float4> composedImage : register(u0);
 RWByteAddressBuffer counters : register(u1);
+RWByteAddressBuffer tileStatisticsOutput : register(u2);
+SamplerState resizeSampler : register(s0);
 
 cbuffer FrameParameters : register(b0)
 {
@@ -13,16 +17,32 @@ cbuffer FrameParameters : register(b0)
     uint frameFlags; // Bit 0: history valid; bit 1: compute source RGB sum.
 };
 
-float4 FullscreenVS(uint id : SV_VertexID) : SV_Position
+struct FullscreenVertex
 {
-    float2 position = float2((id << 1) & 2, id & 2);
-    return float4(position * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    float4 position : SV_Position;
+    float2 uv : TEXCOORD0;
+};
+
+FullscreenVertex FullscreenVS(uint id : SV_VertexID)
+{
+    FullscreenVertex output;
+    output.uv = float2((id << 1) & 2, id & 2);
+    output.position = float4(output.uv * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return output;
 }
 
 float4 CopyPS(float4 position : SV_Position) : SV_Target
 {
     // BGRA SRVs expose logical RGBA components, matching the CPU byte swizzle.
     return inputImage.Load(int3(int2(position.xy), 0));
+}
+
+float4 ScalePS(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target
+{
+    // The viewport is already the aspect-fit destination rectangle. Sampling
+    // normalized UVs lets the fixed-function sampler do the resize without a
+    // CPU readback or an extra full-size intermediate texture.
+    return inputImage.SampleLevel(resizeSampler, uv, 0.0);
 }
 
 float4 OpaquePS(float4 position : SV_Position) : SV_Target
@@ -34,6 +54,7 @@ float4 OpaquePS(float4 position : SV_Position) : SV_Target
 groupshared uint groupChanged[64];
 groupshared uint groupNonblack[64];
 groupshared uint groupSourceSum[64];
+groupshared uint4 finalStatistics[64];
 
 [numthreads(16, 4, 1)]
 void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint index : SV_GroupIndex)
@@ -103,22 +124,43 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
 
     if (index == 0)
     {
-        // Publish each reduced statistic once; increment the high word on carry.
-        uint unused;
-        if (groupChanged[0] != 0)
-            counters.InterlockedOr(0, 1, unused);
-        if (groupNonblack[0] != 0)
-            counters.InterlockedOr(4, 1, unused);
-        if (computeSourceSum && groupSourceSum[0] != 0)
-        {
-            // A full tile sums to at most 16 * 16 * 3 * 255 = 195840.
-            uint sourceSum = groupSourceSum[0];
-            uint priorSum;
-            counters.InterlockedAdd(8, sourceSum, priorSum);
-            // Exact 64-bit RGB sum, including fully white 3840x2160 input.
-            if (priorSum > 0xffffffffu - sourceSum)
-                counters.InterlockedAdd(12, 1, unused);
-        }
+        // Each tile owns one slot, eliminating contention on a single global
+        // counter. Every slot is overwritten, including zero-valued tail tiles.
+        // A tile sums to at most 16 * 16 * 3 * 255 = 195840, fitting in uint.
+        uint tile = group.y * ((imageWidth + 15) / 16) + group.x;
+        tileStatisticsOutput.Store4(tile * 16,
+            uint4(groupChanged[0], groupNonblack[0], groupSourceSum[0], 0));
     }
+}
+
+uint4 CombineStatistics(uint4 left, uint4 right)
+{
+    uint low = left.z + right.z;
+    uint high = left.w + right.w + (low < left.z ? 1u : 0u);
+    return uint4(left.x | right.x, left.y | right.y, low, high);
+}
+
+[numthreads(64, 1, 1)]
+void ReduceStatisticsCS(uint index : SV_GroupIndex)
+{
+    uint tileCount = ((imageWidth + 15) / 16) * ((imageHeight + 15) / 16);
+    uint4 value = uint4(0, 0, 0, 0);
+    for (uint tile = index; tile < tileCount; tile += 64)
+        value = CombineStatistics(value, tileStatistics.Load4(tile * 16));
+
+    finalStatistics[index] = value;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint stride = 32; stride > 0; stride >>= 1)
+    {
+        if (index < stride)
+            finalStatistics[index] = CombineStatistics(
+                finalStatistics[index], finalStatistics[index + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+    // One writer replaces all four counters. No clear or global atomics are
+    // required. Carry propagation preserves the exact 64-bit sum at 4K.
+    if (index == 0)
+        counters.Store4(0, finalStatistics[0]);
 }
 #endif

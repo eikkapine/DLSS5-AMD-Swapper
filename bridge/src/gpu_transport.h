@@ -15,8 +15,10 @@
 
 #include "kBridgeFullscreenVS.h"
 #include "kBridgeCopyPS.h"
+#include "kBridgeScalePS.h"
 #include "kBridgeOpaquePS.h"
 #include "kBridgeComposeCS.h"
+#include "kBridgeReduceStatisticsCS.h"
 
 namespace bridge_gpu {
 
@@ -95,31 +97,32 @@ public:
         }
 
         CreateSharedTexture(input_, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET, "input");
-        CreateSharedTexture(output_, D3D11_BIND_SHADER_RESOURCE, "output");
+        CreateSharedTexture(outputs_[0], D3D11_BIND_SHADER_RESOURCE, "output 0");
+        CreateSharedTexture(outputs_[1], D3D11_BIND_SHADER_RESOURCE, "output 1");
         Require(device_->CreateRenderTargetView(input_.texture.Get(), nullptr, &inputTarget_),
                 "Create shared input render target");
         CreateFence(inputReady12_, inputReady11_);
         CreateFence(outputReady12_, outputReady11_);
         CreateFence(consumerDone12_, consumerDone11_);
 
-        CreateLocalTexture(DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE,
-                           capturedTexture_, capturedView_);
         CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                            D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
                            composedTexture_, composedView_);
         Require(device_->CreateUnorderedAccessView(composedTexture_.Get(), nullptr, &composedUav_),
                 "Create composed image UAV");
-        CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_SHADER_RESOURCE,
-                           previousTexture_, previousView_);
 
         Require(device_->CreateVertexShader(kBridgeFullscreenVS, sizeof(kBridgeFullscreenVS),
                                             nullptr, &vertexShader_), "Create transport vertex shader");
         Require(device_->CreatePixelShader(kBridgeCopyPS, sizeof(kBridgeCopyPS),
                                            nullptr, &copyShader_), "Create transport copy shader");
+        Require(device_->CreatePixelShader(kBridgeScalePS, sizeof(kBridgeScalePS),
+                                           nullptr, &scaleShader_), "Create transport scale shader");
         Require(device_->CreatePixelShader(kBridgeOpaquePS, sizeof(kBridgeOpaquePS),
                                            nullptr, &opaqueShader_), "Create transport opaque shader");
         Require(device_->CreateComputeShader(kBridgeComposeCS, sizeof(kBridgeComposeCS),
                                              nullptr, &composeShader_), "Create transport composition shader");
+        Require(device_->CreateComputeShader(kBridgeReduceStatisticsCS, sizeof(kBridgeReduceStatisticsCS),
+                                             nullptr, &reduceShader_), "Create transport statistics reduction shader");
 
         D3D11_RASTERIZER_DESC rasterizer{};
         rasterizer.FillMode = D3D11_FILL_SOLID;
@@ -130,6 +133,13 @@ public:
         depth.DepthEnable = FALSE;
         depth.StencilEnable = FALSE;
         Require(device_->CreateDepthStencilState(&depth, &depthState_), "Create transport depth state");
+        D3D11_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        sampler.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        sampler.MaxLOD = D3D11_FLOAT32_MAX;
+        Require(device_->CreateSamplerState(&sampler, &resizeSampler_), "Create transport resize sampler");
 
         D3D11_BUFFER_DESC parameters{};
         parameters.ByteWidth = 16;
@@ -155,6 +165,25 @@ public:
         counters.MiscFlags = 0;
         counters.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         Require(device_->CreateBuffer(&counters, nullptr, &counterReadback_), "Create 16-byte counter readback");
+
+        // One 16-byte record per 16x16 tile: 225 KiB at 2560x1440,
+        // at most 518400 bytes at the supported 3840x2160 limit.
+        D3D11_BUFFER_DESC tiles{};
+        tiles.ByteWidth = ((width_ + 15) / 16) * ((height_ + 15) / 16) * 16;
+        tiles.Usage = D3D11_USAGE_DEFAULT;
+        tiles.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+        tiles.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+        Require(device_->CreateBuffer(&tiles, nullptr, &tileStatistics_), "Create transport tile statistics");
+        counterView.Buffer.NumElements = tiles.ByteWidth / sizeof(UINT);
+        Require(device_->CreateUnorderedAccessView(tileStatistics_.Get(), &counterView, &tileStatisticsUav_),
+                "Create transport tile statistics UAV");
+        D3D11_SHADER_RESOURCE_VIEW_DESC tileView{};
+        tileView.Format = DXGI_FORMAT_R32_TYPELESS;
+        tileView.ViewDimension = D3D11_SRV_DIMENSION_BUFFEREX;
+        tileView.BufferEx.NumElements = counterView.Buffer.NumElements;
+        tileView.BufferEx.Flags = D3D11_BUFFEREX_SRV_FLAG_RAW;
+        Require(device_->CreateShaderResourceView(tileStatistics_.Get(), &tileView, &tileStatisticsView_),
+                "Create transport tile statistics SRV");
     }
 
     ~FrameTransport() {
@@ -171,7 +200,10 @@ public:
     FrameTransport(const FrameTransport&) = delete;
     FrameTransport& operator=(const FrameTransport&) = delete;
 
-    void DrainForShutdown() { SignalConsumerAndWait(); }
+    void DrainForShutdown() {
+        SignalConsumerAndWait();
+        activeCaptureView_.Reset();
+    }
 
     void SeedInput(const uint8_t* rgba, UINT rowPitch) {
         context_->UpdateSubresource(input_.texture.Get(), 0, nullptr, rgba, rowPitch, 0);
@@ -181,19 +213,50 @@ public:
     void UpdateInput(ID3D11Texture2D* texture) {
         D3D11_TEXTURE2D_DESC description{};
         texture->GetDesc(&description);
-        if (description.Width != width_ || description.Height != height_ ||
+        if (description.Width == 0 || description.Height == 0 ||
             description.Format != DXGI_FORMAT_B8G8R8A8_UNORM ||
             description.SampleDesc.Count != 1 || description.MipLevels != 1 || description.ArraySize != 1) {
-            throw std::runtime_error("GPU capture dimensions/format changed; restart scaling at the new native resolution");
+            throw std::runtime_error("GPU capture format is unsupported by the shared transport");
         }
-        // The WGC texture need not support shader views. This local copy does.
-        context_->CopyResource(capturedTexture_.Get(), texture);
-        Draw(capturedView_.Get(), inputTarget_.Get(), copyShader_.Get());
+        if (sourceWidth_ == 0) {
+            sourceWidth_ = description.Width;
+            sourceHeight_ = description.Height;
+        } else if (description.Width != sourceWidth_ || description.Height != sourceHeight_) {
+            throw std::runtime_error("GPU capture dimensions changed; restart scaling at the new source resolution");
+        }
+        if (activeCaptureView_) {
+            throw std::runtime_error("Prior direct capture has not completed its consumer fence");
+        }
+        // WGC surfaces which support SRVs can feed the existing exact BGRA
+        // conversion directly. Keep this view only while its frame is checked
+        // out; Compose/Drain releases it before the caller returns the frame.
+        // Unsupported surfaces retain the established local-copy path.
+        if (!directCaptureUnavailable_ && (description.BindFlags & D3D11_BIND_SHADER_RESOURCE)) {
+            if (FAILED(device_->CreateShaderResourceView(texture, nullptr, &activeCaptureView_))) {
+                activeCaptureView_.Reset();
+                directCaptureUnavailable_ = true;
+            }
+        }
+        if (activeCaptureView_) {
+            DrawCapture(activeCaptureView_.Get(), description.Width, description.Height);
+            ++directCaptureCount_;
+        } else {
+            EnsureCapturedTexture(description.Width, description.Height);
+            context_->CopyResource(capturedTexture_.Get(), texture);
+            DrawCapture(capturedView_.Get(), description.Width, description.Height);
+            ++copiedCaptureCount_;
+        }
         SignalInput();
     }
 
     ID3D12Resource* inputResource() const { return input_.resource.Get(); }
-    ID3D12Resource* outputResource() const { return output_.resource.Get(); }
+    void BeginOutputWrite() {
+        // Keep the last accepted full-strength image immutable. Duplicate
+        // outputs overwrite the other slot until a new image is accepted.
+        // CopyOutputGpu still waits on the latest consumer fence before write.
+        outputIndex_ = historyValid_ ? 1u - historyOutputIndex_ : outputIndex_;
+    }
+    ID3D12Resource* outputResource() const { return outputs_[outputIndex_].resource.Get(); }
     ID3D12Fence* inputReadyFence() const { return inputReady12_.Get(); }
     ID3D12Fence* outputReadyFence() const { return outputReady12_.Get(); }
     ID3D12Fence* consumerDoneFence() const { return consumerDone12_.Get(); }
@@ -214,24 +277,36 @@ public:
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u);
         const std::array<UINT, 4> parameters = {width_, height_, alpha, frameFlags};
-        const UINT zeros[4]{};
         context_->UpdateSubresource(parameters_.Get(), 0, nullptr, parameters.data(), 0, 0);
-        context_->ClearUnorderedAccessViewUint(counterUav_.Get(), zeros);
-        ID3D11ShaderResourceView* inputs[] = {input_.view.Get(), output_.view.Get(), previousView_.Get()};
-        ID3D11UnorderedAccessView* outputs[] = {composedUav_.Get(), counterUav_.Get()};
+        ID3D11ShaderResourceView* history = outputs_[historyOutputIndex_].view.Get();
+        ID3D11ShaderResourceView* inputs[] = {input_.view.Get(), outputs_[outputIndex_].view.Get(), history};
+        ID3D11UnorderedAccessView* outputs[] = {composedUav_.Get(), nullptr, tileStatisticsUav_.Get()};
         ID3D11Buffer* constants[] = {parameters_.Get()};
         context_->CSSetShader(composeShader_.Get(), nullptr, 0);
         context_->CSSetConstantBuffers(0, 1, constants);
         context_->CSSetShaderResources(0, 3, inputs);
-        context_->CSSetUnorderedAccessViews(0, 2, outputs, nullptr);
+        context_->CSSetUnorderedAccessViews(0, 3, outputs, nullptr);
         context_->Dispatch((width_ + 15) / 16, (height_ + 15) / 16, 1);
-        ID3D11ShaderResourceView* noInputs[3]{};
-        ID3D11UnorderedAccessView* noOutputs[2]{};
-        context_->CSSetShaderResources(0, 3, noInputs);
-        context_->CSSetUnorderedAccessViews(0, 2, noOutputs, nullptr);
+        ID3D11ShaderResourceView* noInputs[4]{};
+        ID3D11UnorderedAccessView* noOutputs[3]{};
+        context_->CSSetShaderResources(0, 4, noInputs);
+        context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
+
+        // Rebind the first pass's UAV as an SRV. The D3D11 immediate context
+        // orders this producer/consumer dependency; no CPU wait or Flush is
+        // needed between dispatches. Never bind the same buffer as both views.
+        ID3D11ShaderResourceView* tileInputs[] = {tileStatisticsView_.Get()};
+        ID3D11UnorderedAccessView* reducedOutputs[] = {counterUav_.Get()};
+        context_->CSSetShader(reduceShader_.Get(), nullptr, 0);
+        context_->CSSetShaderResources(3, 1, tileInputs);
+        context_->CSSetUnorderedAccessViews(1, 1, reducedOutputs, nullptr);
+        context_->Dispatch(1, 1, 1);
+        context_->CSSetShaderResources(0, 4, noInputs);
+        context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
         context_->CSSetShader(nullptr, nullptr, 0);
         context_->CopyResource(counterReadback_.Get(), counters_.Get());
         SignalConsumerAndWait();
+        activeCaptureView_.Reset();
 
         // Only 16 bytes cross to the CPU. The completed fence bounds the wait;
         // Map must not silently start another unbounded driver wait.
@@ -260,15 +335,26 @@ public:
     }
 
     void DrawVisible(ID3D11RenderTargetView* target) {
-        ID3D11ShaderResourceView* image = displayAlpha_ == 256 ? output_.view.Get()
+        ID3D11ShaderResourceView* image = displayAlpha_ == 256 ? outputs_[outputIndex_].view.Get()
                                       : displayAlpha_ == 0 ? input_.view.Get() : composedView_.Get();
         Draw(image, target, opaqueShader_.Get());
     }
 
     void AcceptPresentation() {
-        ID3D11Texture2D* image = displayAlpha_ == 256 ? output_.texture.Get()
-                               : displayAlpha_ == 0 ? input_.texture.Get() : composedTexture_.Get();
-        context_->CopyResource(previousTexture_.Get(), image);
+        if (displayAlpha_ == 256) {
+            // Retain this already-populated shared texture as exact history,
+            // removing a full-frame GPU copy on each accepted neural image.
+            ++historyCopiesAvoided_;
+        } else {
+            // All current neural reads are complete and shader views unbound.
+            // Reuse this output slot for exact bypass/blend history instead of
+            // allocating a third full-size texture. The consumer fence below
+            // protects this D3D11 write before either D3D12 slot is reused.
+            ID3D11Texture2D* image = displayAlpha_ == 0 ? input_.texture.Get() : composedTexture_.Get();
+            context_->CopyResource(outputs_[outputIndex_].texture.Get(), image);
+            ++historyCopies_;
+        }
+        historyOutputIndex_ = outputIndex_;
         historyValid_ = true;
     }
 
@@ -282,6 +368,11 @@ public:
     uint64_t directImageCount() const { return directImageCount_; }
     uint64_t blendedImageCount() const { return blendedImageCount_; }
     uint64_t sourceAnalysisCount() const { return sourceAnalysisCount_; }
+    uint64_t directCaptureCount() const { return directCaptureCount_; }
+    uint64_t copiedCaptureCount() const { return copiedCaptureCount_; }
+    uint64_t scaledCaptureCount() const { return scaledCaptureCount_; }
+    uint64_t historyCopiesAvoided() const { return historyCopiesAvoided_; }
+    uint64_t historyCopies() const { return historyCopies_; }
 
     void InvalidateHistory() { historyValid_ = false; }
 
@@ -351,9 +442,14 @@ private:
 
     void CreateLocalTexture(DXGI_FORMAT format, UINT flags,
                             ComPtr<ID3D11Texture2D>& texture, ComPtr<ID3D11ShaderResourceView>& view) {
+        CreateLocalTexture(format, flags, width_, height_, texture, view);
+    }
+
+    void CreateLocalTexture(DXGI_FORMAT format, UINT flags, UINT width, UINT height,
+                            ComPtr<ID3D11Texture2D>& texture, ComPtr<ID3D11ShaderResourceView>& view) {
         D3D11_TEXTURE2D_DESC description{};
-        description.Width = width_;
-        description.Height = height_;
+        description.Width = width;
+        description.Height = height;
         description.MipLevels = 1;
         description.ArraySize = 1;
         description.Format = format;
@@ -362,6 +458,18 @@ private:
         description.BindFlags = flags;
         Require(device_->CreateTexture2D(&description, nullptr, &texture), "Create local GPU transport texture");
         Require(device_->CreateShaderResourceView(texture.Get(), nullptr, &view), "Create local GPU texture view");
+    }
+
+    void EnsureCapturedTexture(UINT width, UINT height) {
+        if (capturedTexture_ && capturedWidth_ == width && capturedHeight_ == height) {
+            return;
+        }
+        capturedView_.Reset();
+        capturedTexture_.Reset();
+        CreateLocalTexture(DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE,
+                           width, height, capturedTexture_, capturedView_);
+        capturedWidth_ = width;
+        capturedHeight_ = height;
     }
 
     void SignalInput() {
@@ -393,12 +501,39 @@ private:
         }
     }
 
-    void Draw(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* target,
-              ID3D11PixelShader* shader) {
+    void DrawCapture(ID3D11ShaderResourceView* source, UINT sourceWidth, UINT sourceHeight) {
+        if (sourceWidth == width_ && sourceHeight == height_) {
+            Draw(source, inputTarget_.Get(), copyShader_.Get(), nullptr, nullptr);
+            return;
+        }
+
+        const double fit = std::min(static_cast<double>(width_) / sourceWidth,
+                                    static_cast<double>(height_) / sourceHeight);
+        const UINT drawWidth = std::max<UINT>(1, static_cast<UINT>(sourceWidth * fit));
+        const UINT drawHeight = std::max<UINT>(1, static_cast<UINT>(sourceHeight * fit));
         D3D11_VIEWPORT viewport{};
-        viewport.Width = static_cast<float>(width_);
-        viewport.Height = static_cast<float>(height_);
+        viewport.TopLeftX = static_cast<float>((width_ - drawWidth) / 2);
+        viewport.TopLeftY = static_cast<float>((height_ - drawHeight) / 2);
+        viewport.Width = static_cast<float>(drawWidth);
+        viewport.Height = static_cast<float>(drawHeight);
         viewport.MaxDepth = 1.0f;
+        constexpr float black[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        context_->ClearRenderTargetView(inputTarget_.Get(), black);
+        Draw(source, inputTarget_.Get(), scaleShader_.Get(), &viewport, resizeSampler_.Get());
+        ++scaledCaptureCount_;
+    }
+
+    void Draw(ID3D11ShaderResourceView* source, ID3D11RenderTargetView* target,
+              ID3D11PixelShader* shader, const D3D11_VIEWPORT* customViewport = nullptr,
+              ID3D11SamplerState* sampler = nullptr) {
+        D3D11_VIEWPORT viewport{};
+        if (customViewport) {
+            viewport = *customViewport;
+        } else {
+            viewport.Width = static_cast<float>(width_);
+            viewport.Height = static_cast<float>(height_);
+            viewport.MaxDepth = 1.0f;
+        }
         context_->IASetInputLayout(nullptr);
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
@@ -407,6 +542,9 @@ private:
         context_->DSSetShader(nullptr, nullptr, 0);
         context_->PSSetShader(shader, nullptr, 0);
         context_->PSSetShaderResources(0, 1, &source);
+        if (sampler) {
+            context_->PSSetSamplers(0, 1, &sampler);
+        }
         context_->RSSetState(rasterizer_.Get());
         context_->RSSetViewports(1, &viewport);
         context_->OMSetDepthStencilState(depthState_.Get(), 0);
@@ -415,6 +553,10 @@ private:
         context_->Draw(3, 0);
         ID3D11ShaderResourceView* empty = nullptr;
         context_->PSSetShaderResources(0, 1, &empty);
+        if (sampler) {
+            ID3D11SamplerState* noSampler = nullptr;
+            context_->PSSetSamplers(0, 1, &noSampler);
+        }
         context_->OMSetRenderTargets(0, nullptr, nullptr);
     }
 
@@ -424,20 +566,28 @@ private:
     UINT width_;
     UINT height_;
     Handle completionEvent_;
-    SharedTexture input_, output_;
+    SharedTexture input_;
+    std::array<SharedTexture, 2> outputs_;
+    UINT outputIndex_ = 0, historyOutputIndex_ = 0;
+    ComPtr<ID3D11ShaderResourceView> activeCaptureView_;
+    bool directCaptureUnavailable_ = false;
     ComPtr<ID3D12Fence> inputReady12_, outputReady12_, consumerDone12_;
     ComPtr<ID3D11Fence> inputReady11_, outputReady11_, consumerDone11_;
     UINT64 inputValue_ = 0, outputValue_ = 0, consumerValue_ = 0;
-    ComPtr<ID3D11Texture2D> capturedTexture_, composedTexture_, previousTexture_;
-    ComPtr<ID3D11ShaderResourceView> capturedView_, composedView_, previousView_;
+    UINT sourceWidth_ = 0, sourceHeight_ = 0;
+    UINT capturedWidth_ = 0, capturedHeight_ = 0;
+    ComPtr<ID3D11Texture2D> capturedTexture_, composedTexture_;
+    ComPtr<ID3D11ShaderResourceView> capturedView_, composedView_;
     ComPtr<ID3D11RenderTargetView> inputTarget_;
-    ComPtr<ID3D11UnorderedAccessView> composedUav_, counterUav_;
-    ComPtr<ID3D11Buffer> parameters_, counters_, counterReadback_;
+    ComPtr<ID3D11UnorderedAccessView> composedUav_, counterUav_, tileStatisticsUav_;
+    ComPtr<ID3D11ShaderResourceView> tileStatisticsView_;
+    ComPtr<ID3D11Buffer> parameters_, counters_, counterReadback_, tileStatistics_;
     ComPtr<ID3D11VertexShader> vertexShader_;
-    ComPtr<ID3D11PixelShader> copyShader_, opaqueShader_;
-    ComPtr<ID3D11ComputeShader> composeShader_;
+    ComPtr<ID3D11PixelShader> copyShader_, scaleShader_, opaqueShader_;
+    ComPtr<ID3D11ComputeShader> composeShader_, reduceShader_;
     ComPtr<ID3D11RasterizerState> rasterizer_;
     ComPtr<ID3D11DepthStencilState> depthState_;
+    ComPtr<ID3D11SamplerState> resizeSampler_;
     bool historyValid_ = false;
     UINT displayAlpha_ = 256;
     bool sourceStatisticsValid_ = false;
@@ -446,6 +596,9 @@ private:
     uint64_t directImageCount_ = 0;
     uint64_t blendedImageCount_ = 0;
     uint64_t sourceAnalysisCount_ = 0;
+    uint64_t directCaptureCount_ = 0, copiedCaptureCount_ = 0;
+    uint64_t scaledCaptureCount_ = 0;
+    uint64_t historyCopiesAvoided_ = 0, historyCopies_ = 0;
 };
 
 } // namespace bridge_gpu

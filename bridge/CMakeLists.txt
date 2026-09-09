@@ -27,7 +27,7 @@ file(MAKE_DIRECTORY "${BRIDGE_SHADER_DIR}")
 function(bridge_compile_shader entry profile symbol)
     set(output "${BRIDGE_SHADER_DIR}/${symbol}.h")
     set(compute_define BRIDGE_COMPUTE=0)
-    if (entry STREQUAL "ComposeCS")
+    if (profile STREQUAL "cs_5_0")
         set(compute_define BRIDGE_COMPUTE=1)
     endif()
     add_custom_command(OUTPUT "${output}"
@@ -41,8 +41,10 @@ function(bridge_compile_shader entry profile symbol)
 endfunction()
 bridge_compile_shader(FullscreenVS vs_5_0 kBridgeFullscreenVS)
 bridge_compile_shader(CopyPS ps_5_0 kBridgeCopyPS)
+bridge_compile_shader(ScalePS ps_5_0 kBridgeScalePS)
 bridge_compile_shader(OpaquePS ps_5_0 kBridgeOpaquePS)
 bridge_compile_shader(ComposeCS cs_5_0 kBridgeComposeCS)
+bridge_compile_shader(ReduceStatisticsCS cs_5_0 kBridgeReduceStatisticsCS)
 add_custom_target(BridgeShaders DEPENDS ${BRIDGE_SHADER_HEADERS})
 
 add_executable(DlssNrBridge
@@ -69,11 +71,14 @@ else()
 endif()
 
 target_compile_features(DlssNrBridge PRIVATE cxx_std_20)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" BRIDGE_BUILD_VERSION LIMIT_COUNT 1)
 target_compile_definitions(DlssNrBridge PRIVATE
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
     NOMINMAX
+    BRIDGE_BUILD_VERSION="${BRIDGE_BUILD_VERSION}"
 )
 
 target_link_libraries(DlssNrBridge PRIVATE
@@ -107,7 +112,8 @@ if (BUILD_TESTING)
     add_dependencies(BridgePixelTests BridgeShaders)
     target_include_directories(BridgePixelTests PRIVATE "${BRIDGE_SHADER_DIR}")
     target_compile_features(BridgePixelTests PRIVATE cxx_std_20)
-    target_compile_definitions(BridgePixelTests PRIVATE WIN32_LEAN_AND_MEAN UNICODE _UNICODE NOMINMAX)
+    target_compile_definitions(BridgePixelTests PRIVATE WIN32_LEAN_AND_MEAN UNICODE _UNICODE NOMINMAX
+        BRIDGE_BUILD_VERSION="${BRIDGE_BUILD_VERSION}")
     target_link_libraries(BridgePixelTests PRIVATE d3d11 d3d12 dxgi windowsapp psapi winmm)
     if (MSVC)
         target_compile_options(BridgePixelTests PRIVATE /W4 /permissive- /EHsc /await /arch:AVX2)

@@ -69,11 +69,13 @@ struct Options {
     bool noProxy = false;
     bool freezeSource = false;
     bool nativeResolution = false;
+    float workingScale = 0.0f;
     bool preciseScheduling = true;
     bool repeatPresentations = false;
     bool completionPacing = true;
     bool cpuTransport = false;
     bool hipHostTiming = true;
+    bool hipKernelSampling = false;
     std::wstring stopEventName;
     DWORD parentPid = 0;
     UINT warmupFrames = 301;
@@ -413,6 +415,12 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.freezeSource = true;
         } else if (arg == L"--native-resolution") {
             options.nativeResolution = true;
+        } else if (arg == L"--working-scale") {
+            const float value = std::stof(needValue(L"--working-scale"));
+            if (!std::isfinite(value) || value < 0.25f || value > 1.0f) {
+                throw std::runtime_error("--working-scale must be between 0.25 and 1.0");
+            }
+            options.workingScale = value;
         } else if (arg == L"--default-scheduling") {
             options.preciseScheduling = false;
         } else if (arg == L"--repeat-presentations") {
@@ -423,6 +431,10 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.cpuTransport = true;
         } else if (arg == L"--no-hip-timing") {
             options.hipHostTiming = false;
+        } else if (arg == L"--no-hip-kernel-timing") {
+            options.hipKernelSampling = false;
+        } else if (arg == L"--hip-kernel-timing") {
+            options.hipKernelSampling = true;
         } else if (arg == L"--warmup-frames") {
             options.warmupFrames = std::stoul(needValue(L"--warmup-frames"));
         } else if (arg == L"--max-fps") {
@@ -436,6 +448,11 @@ Options ParseOptions(int argc, wchar_t** argv) {
             ws << L"Unknown argument: " << arg;
             throw std::runtime_error(NarrowAscii(ws.str()));
         }
+    }
+    if (options.workingScale > 0.0f && options.workingScale < 0.999f) {
+        // Reduced NR must leave the final scaler active. It intentionally
+        // takes precedence if both switches were supplied.
+        options.nativeResolution = false;
     }
     return options;
 }
@@ -768,6 +785,13 @@ FramePixels PrepareInputFrame(const FramePixels& src, const Options& options) {
     return ScaleToFit(src, options.width, options.height);
 }
 
+UINT ScaledEvenDimension(UINT source, float scale) {
+    UINT result = static_cast<UINT>(std::floor(static_cast<double>(source) * scale));
+    result = std::max<UINT>(64, result);
+    result &= ~1u;
+    return std::max<UINT>(64, result);
+}
+
 const FramePixels& SelectInputFrame(const FramePixels& src,
                                    const Options& options,
                                    std::optional<FramePixels>& prepared,
@@ -852,19 +876,29 @@ public:
         // The D3D11 signal has already been flushed before this queue wait.
         Check(queue_->Wait(transport.inputReadyFence(), transport.inputReadyValue()),
               "Wait for GPU capture texture");
-        ResetCommands();
+        // Feed and output must not reset the same in-flight allocator. The
+        // previous Compose normally completed this fence transitively; retain
+        // a bounded check before reuse rather than relying on call ordering.
+        WaitForFenceValue(gpuFeedFenceValue_, 5000);
+        Check(gpuFeedAllocator_->Reset(), "GPU feed allocator Reset");
+        Check(gpuFeedCommandList_->Reset(gpuFeedAllocator_.Get(), nullptr), "GPU feed commandList Reset");
         auto acquire = Transition(transport.inputResource(), D3D12_RESOURCE_STATE_COMMON,
                                   D3D12_RESOURCE_STATE_COPY_SOURCE);
-        commandList_->ResourceBarrier(1, &acquire);
-        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_DEST);
-        commandList_->CopyResource(backBuffers_[frameIndex_].Get(), transport.inputResource());
+        gpuFeedCommandList_->ResourceBarrier(1, &acquire);
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_DEST, gpuFeedCommandList_.Get());
+        gpuFeedCommandList_->CopyResource(backBuffers_[frameIndex_].Get(), transport.inputResource());
         auto release = Transition(transport.inputResource(), D3D12_RESOURCE_STATE_COPY_SOURCE,
                                   D3D12_RESOURCE_STATE_COMMON);
-        commandList_->ResourceBarrier(1, &release);
-        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
-        // Retain the established allocator/input ownership fence. This wait
-        // also permits the caller to release the WGC capture frame safely.
-        ExecuteCommands(5000);
+        gpuFeedCommandList_->ResourceBarrier(1, &release);
+        SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT, gpuFeedCommandList_.Get());
+        Check(gpuFeedCommandList_->Close(), "Close GPU feed commandList");
+        ID3D12CommandList* lists[] = {gpuFeedCommandList_.Get()};
+        queue_->ExecuteCommandLists(1, lists);
+        gpuFeedFenceValue_ = SignalGpu();
+        // Present and the following output copy use this same direct queue.
+        // Queue ordering supplies the dependency without blocking the CPU
+        // here. The caller retains its WGC frame through Compose's completed
+        // consumer fence (or drains both devices before releasing on failure).
         Check(swapChain_->Present(0, 0), "Present GPU neural feed");
         uploadInitialized_ = false;
         ++presentCount_;
@@ -875,6 +909,7 @@ public:
             Check(queue_->Wait(transport.consumerDoneFence(), transport.consumerDoneValue()),
                   "Wait for prior GPU output consumer");
         }
+        transport.BeginOutputWrite();
         ResetCommands();
         SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_COPY_SOURCE);
         auto acquire = Transition(transport.outputResource(), D3D12_RESOURCE_STATE_COMMON,
@@ -887,9 +922,9 @@ public:
         SetBackBufferState(frameIndex_, D3D12_RESOURCE_STATE_PRESENT);
         // Compose waits on outputReady on D3D11, then completes its bounded
         // consumer fence before returning. That transitively completes this
-        // copy and allocator use, so a separate CPU wait here is redundant.
-        // The caller must Compose (or DrainForShutdown on error) before any
-        // subsequent ResetCommands or release of the shared texture.
+        // copy, the preceding feed and both allocators. The caller must Compose
+        // (or DrainForShutdown on error) before releasing the capture/shared
+        // resources. ResetCommands additionally checks its own reuse fence.
         SubmitCommands();
         const UINT64 outputValue = transport.NextOutputValue();
         Check(queue_->Signal(transport.outputReadyFence(), outputValue), "Signal GPU neural output copy");
@@ -968,6 +1003,9 @@ private:
         Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "CreateCommandAllocator");
         Check(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&commandList_)), "CreateCommandList");
         Check(commandList_->Close(), "initial Close");
+        Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gpuFeedAllocator_)), "Create GPU feed allocator");
+        Check(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, gpuFeedAllocator_.Get(), nullptr, IID_PPV_ARGS(&gpuFeedCommandList_)), "Create GPU feed commandList");
+        Check(gpuFeedCommandList_->Close(), "initial GPU feed Close");
         Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "CreateFence");
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!fenceEvent_) {
@@ -1039,6 +1077,7 @@ private:
     }
 
     void ResetCommands() {
+        WaitForFenceValue(commandsFenceValue_, 5000);
         Check(allocator_->Reset(), "allocator Reset");
         Check(commandList_->Reset(allocator_.Get(), nullptr), "commandList Reset");
     }
@@ -1047,16 +1086,26 @@ private:
         Check(commandList_->Close(), "Close commandList");
         ID3D12CommandList* lists[] = {commandList_.Get()};
         queue_->ExecuteCommandLists(1, lists);
+        commandsFenceValue_ = SignalGpu();
     }
 
     void ExecuteCommands(DWORD timeoutMs) {
         SubmitCommands();
-        WaitForGpu(timeoutMs);
+        WaitForFenceValue(commandsFenceValue_, timeoutMs);
+    }
+
+    UINT64 SignalGpu() {
+        const UINT64 value = ++fenceValue_;
+        Check(queue_->Signal(fence_.Get(), value), "fence Signal");
+        return value;
     }
 
     void WaitForGpu(DWORD timeoutMs) {
-        const UINT64 value = ++fenceValue_;
-        Check(queue_->Signal(fence_.Get(), value), "fence Signal");
+        WaitForFenceValue(SignalGpu(), timeoutMs);
+    }
+
+    void WaitForFenceValue(UINT64 value, DWORD timeoutMs) {
+        if (value == 0) return;
         auto completedValue = [&]() {
             const UINT64 completed = fence_->GetCompletedValue();
             if (completed == UINT64_MAX) {
@@ -1077,12 +1126,13 @@ private:
         }
     }
 
-    void SetBackBufferState(UINT index, D3D12_RESOURCE_STATES state) {
+    void SetBackBufferState(UINT index, D3D12_RESOURCE_STATES state,
+                           ID3D12GraphicsCommandList* commands = nullptr) {
         if (bufferStates_[index] == state) {
             return;
         }
         auto barrier = Transition(backBuffers_[index].Get(), bufferStates_[index], state);
-        commandList_->ResourceBarrier(1, &barrier);
+        (commands ? commands : commandList_.Get())->ResourceBarrier(1, &barrier);
         bufferStates_[index] = state;
     }
 
@@ -1095,9 +1145,13 @@ private:
     ComPtr<IDXGISwapChain3> swapChain_;
     ComPtr<ID3D12CommandAllocator> allocator_;
     ComPtr<ID3D12GraphicsCommandList> commandList_;
+    ComPtr<ID3D12CommandAllocator> gpuFeedAllocator_;
+    ComPtr<ID3D12GraphicsCommandList> gpuFeedCommandList_;
     ComPtr<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
     UINT64 fenceValue_ = 0;
+    UINT64 commandsFenceValue_ = 0;
+    UINT64 gpuFeedFenceValue_ = 0;
     ComPtr<ID3D12Resource> backBuffers_[kBufferCount];
     D3D12_RESOURCE_STATES bufferStates_[kBufferCount]{};
     ComPtr<ID3D12Resource> upload_;
@@ -1611,6 +1665,7 @@ void WriteReport(const std::filesystem::path& path,
     report << "output_width=" << options.width << "\n";
     report << "output_height=" << options.height << "\n";
     report << "native_resolution=" << (options.nativeResolution ? 1 : 0) << "\n";
+    report << "working_scale=" << options.workingScale << "\n";
     report << "source_actual_width=" << sourceActualWidth << "\n";
     report << "source_actual_height=" << sourceActualHeight << "\n";
     report << "frames_captured=" << captured << "\n";
@@ -1720,7 +1775,7 @@ int wmain(int argc, wchar_t** argv) {
             if (!proxy) {
                 throw std::runtime_error("LoadLibraryW(version.dll) failed");
             }
-            hipTimingStatus = StartHipHostTiming(proxy, options.hipHostTiming);
+            hipTimingStatus = StartHipHostTiming(proxy, options.hipHostTiming, options.hipKernelSampling);
             if (options.startupDelayMs > 0) {
                 Sleep(options.startupDelayMs);
             }
@@ -1793,7 +1848,9 @@ int wmain(int argc, wchar_t** argv) {
             return true;
         };
 
-        if (options.nativeResolution) {
+        const bool sourceRelativeDimensions = options.nativeResolution ||
+            (options.workingScale > 0.0f && options.workingScale < 0.999f);
+        if (sourceRelativeDimensions) {
             const auto firstFrameDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
             while (!lastInputFrame) {
                 if (shouldStop()) {
@@ -1803,22 +1860,27 @@ int wmain(int argc, wchar_t** argv) {
                     return 0;
                 }
                 if (capture.closed()) {
-                    throw std::runtime_error("Source window closed before native-resolution dimensions were captured");
+                    throw std::runtime_error("Source window closed before source dimensions were captured");
                 }
                 if (captureLatestInput()) {
                     break;
                 }
                 if (std::chrono::steady_clock::now() >= firstFrameDeadline) {
-                    throw std::runtime_error("Timed out waiting for first WGC frame in native-resolution mode");
+                    throw std::runtime_error("Timed out waiting for first WGC frame for source-relative processing");
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
-            options.width = lastInputFrame->width;
-            options.height = lastInputFrame->height;
+            if (options.nativeResolution) {
+                options.width = lastInputFrame->width;
+                options.height = lastInputFrame->height;
+            } else {
+                options.width = ScaledEvenDimension(lastInputFrame->width, options.workingScale);
+                options.height = ScaledEvenDimension(lastInputFrame->height, options.workingScale);
+            }
             if (options.width == 0 || options.height == 0 || options.width > 3840 || options.height > 2160) {
                 std::ostringstream os;
-                os << "Native-resolution source size " << options.width << "x" << options.height
-                   << " is outside supported bounds 1..3840 x 1..2160";
+                os << "Neural working size " << options.width << "x" << options.height
+                   << " is outside supported bounds 64..3840 x 64..2160";
                 throw std::runtime_error(os.str());
             }
         }
@@ -1907,15 +1969,20 @@ int wmain(int argc, wchar_t** argv) {
         D3D11Presenter visiblePresenter(bridge, options.width, options.height, !suppressIdenticalRgb,
                                        capture.device(), capture.context());
         std::unique_ptr<bridge_gpu::FrameTransport> gpuTransport;
-        std::string transportDetail = "cpu: diagnostic, fixed-size, bypass, or explicit compatibility mode";
-        if (options.nativeResolution && !options.noProxy && !options.cpuTransport &&
+        std::string transportDetail = "cpu: diagnostic, bypass, or explicit compatibility mode";
+        if (!options.noProxy && !options.cpuTransport &&
             !options.saveCaptures && !options.freezeSource) {
             try {
                 gpuTransport = std::make_unique<bridge_gpu::FrameTransport>(
                     capture.device(), capture.context(), nrPresenter.device(), options.width, options.height);
                 const FramePixels& initial = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, false);
                 gpuTransport->SeedInput(initial.rgba.data(), options.width * 4);
-                transportDetail = "gpu_shared: d3d11_nt textures imported into D3D12; native pixels; 16-byte status readback per compose";
+                std::ostringstream detail;
+                detail << "gpu_shared: d3d11_nt textures imported into D3D12; WGC "
+                       << sourceActualWidth << 'x' << sourceActualHeight << " -> neural "
+                       << options.width << 'x' << options.height
+                       << "; GPU bilinear resize only when dimensions differ; 16-byte status readback per compose";
+                transportDetail = detail.str();
             } catch (const std::exception& error) {
                 gpuTransport.reset();
                 // Unsupported sharing may use the existing CPU path. Device
@@ -2003,15 +2070,20 @@ int wmain(int argc, wchar_t** argv) {
         uint64_t cadenceGpuFrames = 0;
         uint64_t cadenceCaptured = capturedFrames;
         uint64_t cadenceIterations = 0;
+        uint32_t cadenceKernelAttempts = ReadHipKernelTimingProgress().attempts;
         std::array<double, 6> cadenceStages{};
         std::ofstream cadenceLog("bridge-cadence-" + std::to_string(GetCurrentProcessId()) + ".log");
         cadenceLog << "width=" << options.width << " height=" << options.height
+                   << " source_width=" << sourceActualWidth << " source_height=" << sourceActualHeight
+                   << " working_scale=" << options.workingScale
                    << " suppress_identical_rgb=" << suppressIdenticalRgb
                    << " minimum_feed_interval_ms=" << std::chrono::duration<double, std::milli>(frameInterval).count()
                    << " transport=" << (gpuTransport ? "gpu_shared" : "cpu")
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
-                   << "gpu_transport_revision=tree64_direct_endpoints_deferred_copy_wait\n"
+                   << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
+                   << "gpu_transport_revision=ring_history_direct_capture_gpu_resize\n"
+                   << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
                    << " keepalive_ms=" << feedKeepalive.count()
@@ -2031,6 +2103,7 @@ int wmain(int argc, wchar_t** argv) {
             const uint64_t presented = visiblePresenter.presentCount();
             const uint64_t skipped = visiblePresenter.duplicatesSkipped();
             const uint64_t occluded = visiblePresenter.occludedSubmissions();
+            const auto kernelTiming = ReadHipKernelTimingProgress();
             cadenceLog << std::fixed << std::setprecision(3)
                        << "elapsed_s=" << std::chrono::duration<double>(at - visibleStart).count()
                        << " interval_s=" << seconds
@@ -2047,12 +2120,23 @@ int wmain(int argc, wchar_t** argv) {
                        << " publication_rechecks=" << publicationRechecks
                        << " keepalive_feeds=" << keepaliveFeeds
                        << " prefetched_captures=" << prefetchedCaptures
+                       << " kernel_sampling_available=" << kernelTiming.available
+                       << " kernel_sampling_attempts=" << kernelTiming.attempts
+                       << " kernel_sampling_attempts_in_interval=" << (kernelTiming.attempts - cadenceKernelAttempts)
+                       << " kernel_sampling_dropped=" << kernelTiming.dropped
+                       << " effect_enabled=" << effectEnabled
+                       << " strength=" << strength
                        << " final=" << final;
             if (gpuTransport) {
                 // Cumulative work counters, not presentation or inference FPS.
                 cadenceLog << " total_direct_image_checks=" << gpuTransport->directImageCount()
                            << " total_blended_images=" << gpuTransport->blendedImageCount()
-                           << " total_source_analyses=" << gpuTransport->sourceAnalysisCount();
+                           << " total_source_analyses=" << gpuTransport->sourceAnalysisCount()
+                           << " total_direct_captures=" << gpuTransport->directCaptureCount()
+                           << " total_copied_captures=" << gpuTransport->copiedCaptureCount()
+                           << " total_scaled_captures=" << gpuTransport->scaledCaptureCount()
+                           << " total_history_copies_avoided=" << gpuTransport->historyCopiesAvoided()
+                           << " total_history_copies=" << gpuTransport->historyCopies();
             }
             constexpr const char* stageNames[] = {"capture", "prepare", "nr_present", "output_handoff", "guard_blend", "visible_present"};
             const uint64_t iterations = performance.frames - cadenceIterations;
@@ -2071,6 +2155,7 @@ int wmain(int argc, wchar_t** argv) {
             cadenceCaptured = capturedFrames;
             cadenceGpuFrames = gpuTransportFrames;
             cadenceIterations = performance.frames;
+            cadenceKernelAttempts = kernelTiming.attempts;
             cadenceStages = performance.stageMs;
         };
         while (running) {
@@ -2172,15 +2257,20 @@ int wmain(int argc, wchar_t** argv) {
                     }
                     stageTimes[2] = PerformanceStats::Clock::now();
                     nrPresenter.PresentGpu(*gpuTransport);
-                    if (capturedFrame) {
-                        capturedFrame.Close();
-                        capturedFrame = nullptr;
-                    }
                     stageTimes[3] = PerformanceStats::Clock::now();
                     nrPresenter.CopyOutputGpu(*gpuTransport);
                     const UINT alpha = effectEnabled
                         ? static_cast<UINT>(std::lround(std::clamp(strength, 0.0f, 1.0f) * 256.0f)) : 0;
                     auto stats = gpuTransport->Compose(alpha);
+                    // Compose's bounded D3D11 consumer fence follows its wait
+                    // on the D3D12 output copy. That copy follows the feed and
+                    // input-ready wait, so all reads of this WGC surface have
+                    // now completed. Do not return it to the pool any earlier.
+                    if (capturedFrame) {
+                        capturedFrame.Close();
+                        capturedFrame = nullptr;
+                        capturedTexture.Reset();
+                    }
                     stageTimes[4] = PerformanceStats::Clock::now();
                     const bool wasEnabled = effectEnabled;
                     guardBlackOutput(stats.sourceMeaningfullyNonblack, stats.neuralNonblack);

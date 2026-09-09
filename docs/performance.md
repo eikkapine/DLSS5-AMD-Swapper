@@ -1,61 +1,72 @@
 # Performance
 
-Performance is the main unfinished part of NR Auto Scale. I am trying to improve throughput without reducing processing resolution, neural strength, model/weights, or precision.
+The biggest performance change so far is **v0.1.0-pre.3-dev.3**. It moves the expensive Neural Rendering work to a smaller source-relative working resolution and leaves the final enlargement to Lossless Scaling.
 
-## Current native checkpoint
+## Current RX 9070 XT checkpoint
 
-The published `v0.1.0-pre.2` run on my RX 9070 XT used native **2560×1440** processing at full effect strength.
+The exercised setup used a **2560×1440 source** with `WorkingScale=0.75`, giving the neural runtime a **1920×1080** working image.
 
 | Measurement | Result |
 | --- | ---: |
-| Changed RGB submissions | 1,112 |
-| Recorded interval | 60.238 s |
-| Changed RGB submissions / s | 18.46 |
-| Observed base output | about 19 FPS |
-| Nominal 2× FG multiplier | about 38 FPS |
+| Source resolution | 2560×1440 |
+| Neural working resolution | 1920×1080 |
+| Relative neural pixel count | 56.25% of native |
+| Effect strength | 1.0 / full |
+| Transport | shared GPU |
+| GPU-resized captures | active |
+| Kernel sampling | off |
+| User-observed base output | ~30 FPS |
+| User-observed output with Lossless Scaling 2× FG | ~60 FPS |
+| Selected non-FG changed RGB submissions | 1,417 |
+| Selected non-FG interval | 49.127 s |
+| Selected non-FG changed RGB submissions / s | ~28.84 |
 
-The last line is just `19 × 2`. The bridge did not independently measure LSFG/display FPS, so I do not present it as measured output.
+The separate 2× frame-generation session used the same 2560×1440 → 1920×1080 neural path. The bridge does not count generated LSFG frames, so the 60 FPS value is recorded as the observed Lossless Scaling output from the manual test.
 
-## What improved
+## Compared with the previous public checkpoint
 
-The current checkpoint includes work aimed at removing host-side overhead:
+The previous `v0.1.0-pre.2` run processed the full **2560×1440** image through Neural Rendering and produced about **19 FPS** base output, with 18.46 changed RGB submissions/s over the complete recording.
 
-- shared GPU transport for the native path
-- exact duplicate-output suppression
-- reduced redundant GPU feed/check work
-- direct full-strength neural presentation where possible
-- bounded HIP host timing
-- inference-aware feed pacing based on observed worker waits
+| Checkpoint | Neural size | Base FPS | Changed RGB/s |
+| --- | ---: | ---: | ---: |
+| v0.1.0-pre.2 | 2560×1440 | ~19 | 18.46 |
+| v0.1.0-pre.3-dev.3 | 1920×1080 | ~30 | ~28.84 |
 
-In selected intervals, changed RGB submissions moved from about `17.53/s` to `18.69/s` while GPU feed/check iterations dropped from roughly `105.49/s` to `26.08/s`. That shows less redundant work, but it is not a 4× neural speedup. HIP device waits remained around 52 ms in the sampled data.
+The base-output improvement is roughly 58%, and the selected full-effect changed-RGB cadence is roughly 56% higher than pre.2's complete-run 18.46/s figure. This is a deliberate workload change, not a same-resolution micro-optimization: dev.3 evaluates only 56.25% as many neural pixels before the final upscale.
 
-## Historical fixed-size tests
+## What changed
 
-Earlier bridge-only work used smaller fixed processing sizes to validate the path and separate host overhead from neural cost. The current fresh-install default is 1280×720, while native mode stays available for the quality target.
+- Added `WorkingScale` as a source-relative neural-resolution control.
+- New installs use `WorkingScale=0.75`.
+- Generalized the shared GPU transport so reduced/fixed neural sizes do not fall back to full-frame CPU capture/readback.
+- Kept WGC capture at the source resolution.
+- Added a GPU bilinear resize into the shared neural input texture when the dimensions differ.
+- Kept the exact texel-load path for 1:1 transport.
+- Retained the two-slot accepted-history path and direct shader-capable WGC capture from the previous local candidate.
+- Disabled bounded HIP kernel sampling by default; it remains available with `--hip-kernel-timing`.
 
-Those smaller-resolution numbers should not be compared directly with the native 1440p checkpoint as if they were the same workload.
+The neural model, weights, precision/settings and full effect strength are unchanged.
 
-## Image-path checks
+## Why this helps
 
-In the approved frozen 2560×1440 CS2 comparison:
+The previous measurements already showed that host submission overhead was small while the neural GPU wait stayed around 52 ms at native 1440p. Recent NVIDIA-side DLSS 5 work and AMD community tests both point to neural pixel count as the largest practical lever available without rewriting the private neural kernels.
 
-- captured input and the original frame sent into processing matched with max error `0`
-- neural output was non-black
-- mean absolute RGB difference from original was about `2.87/255`
-- maximum channel difference was `55/255`
-- about 97.7% of pixels changed
-- sampled neural jobs settled around `63 ms/job`
+At 0.75 scale, each axis is 75% of the source, so the neural pixel count is:
 
-That job time is runtime/bridge timing, not complete input-to-display latency or game FPS.
+```text
+0.75 × 0.75 = 0.5625
+```
 
-## Where the time appears to be going
+That means about 43.75% fewer pixels go through the neural pass. Fixed capture, presentation and upscaling costs still remain, so total FPS does not scale perfectly with pixel count.
 
-The host side now does substantially less repeated work than the earliest builds. The remaining measurements point more strongly at neural GPU execution, synchronization, and runtime scheduling as the next areas to understand.
+## Quality tradeoff
 
-I do not treat repeated presentations, lower resolution, reduced effect strength, lower precision, or approximate image matching as valid performance gains for the native-quality target.
+This mode does change the neural working resolution. It keeps the same model and full effect strength, but it should not be described as pixel-identical to native NR. In the manual dev.3 test the result was good enough to keep using, while the performance improvement was large enough to reach about 30 FPS base / 60 FPS with 2× frame generation.
+
+The older approved before/after screenshots were captured in native 1:1 mode and are kept only as evidence that the neural effect is visible. They are not presented as a dev.3 quality comparison.
 
 ## Measurement files
 
-Sanitized records for the published checkpoint are under [`docs/measurements/`](measurements/). `RELEASE.json` records the release artifact hashes and the exact verification flags attached to that checkpoint.
+Sanitized records are under [`docs/measurements/`](measurements/). Raw runtime and cadence logs stay private. `RELEASE.json` records the exact tested binary hashes and verification limits for the public checkpoint.
 
-See [Development](development.md) for the optimization rules and [Verification](verification.md) for the practical limits of these numbers.
+See [the pre-upscale design note](neural-upstream-performance.md) for the architecture and research references, and [Verification](verification.md) for what has actually been exercised.

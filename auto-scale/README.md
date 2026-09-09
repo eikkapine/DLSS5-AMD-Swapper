@@ -2,25 +2,19 @@
 
 The auto-scale component builds the project-owned `Lossless.dll` wrapper used to start/stop `DlssNrBridge.exe` around a normal Lossless Scaling scaling session.
 
-The wrapper loads the privately preserved original DLL (`Lossless_original.dll`), forwards the required exports, and wraps the activation flow so Lossless Scaling targets the bridge output automatically.
-
-It does not inject the bridge or external neural runtime into the source application.
+The wrapper loads the privately preserved original DLL (`Lossless_original.dll`), forwards the required exports, and redirects activation to the bridge output. It does not inject the bridge or external neural runtime into the source application.
 
 ## Build
-
-From the repository root:
 
 ```powershell
 .\auto-scale\build.ps1
 ```
 
-The main output is `auto-scale\build\Release\Lossless.dll`.
+The output is `auto-scale\build\Release\Lossless.dll`.
 
 ## Configuration
 
-`NrAutoScale.ini` sits beside the installed wrapper.
-
-Fresh setup currently uses:
+`NrAutoScale.ini` sits beside the installed wrapper. New installs use:
 
 ```ini
 [AutoScale]
@@ -31,6 +25,7 @@ CaptureDirectory=
 HipVisibleDevices=1
 FreezeSource=0
 NativeResolution=0
+WorkingScale=0.75
 Width=1280
 Height=720
 StartupDelayMs=2000
@@ -40,9 +35,13 @@ DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 ```
 
-`HipVisibleDevices` is machine-specific. The interactive setup asks for the AMD HIP device index instead of assuming the same GPU number works everywhere.
+`WorkingScale=0.75` is the current performance preset. It takes 75% of each captured source axis for the neural working size and preserves the selected Lossless Scaling scaler for the final enlargement. `WorkingScale=0` disables this source-relative path.
 
-With `NativeResolution=0`, the bridge uses the fixed bounds and Lossless Scaling keeps the selected scaler. With `NativeResolution=1`, the wrapper starts the bridge in native mode and requests 1:1 geometry.
+With `WorkingScale=0`, `NativeResolution=1` requests 1:1 processing; `NativeResolution=0` uses `Width` / `Height` as the fixed fallback.
+
+Missing `WorkingScale` keeps an older existing installation on its previous behavior instead of silently migrating it.
+
+`HipVisibleDevices` is machine-specific. Interactive setup asks for the AMD HIP device index instead of assuming the same GPU number works everywhere.
 
 ## Activation flow
 
@@ -53,6 +52,7 @@ Lossless Scaling Activate(source HWND)
 project Lossless.dll
         │
         ├─ start DlssNrBridge.exe
+        ├─ forward WorkingScale / geometry
         ├─ wait for ready file
         ├─ validate bridge HWND/process
         ▼
@@ -63,14 +63,10 @@ The wrapper keeps the current frame-generation settings when forwarding profile 
 
 ## Setup / uninstall
 
-Source-tree setup:
-
 ```powershell
 .\auto-scale\scripts\Setup.cmd
 ```
 
-Release packages expose the same setup entry point at the ZIP root as `Setup.cmd`.
-
-Uninstall uses the manifest/backups created during setup to restore the original local DLL. Close Lossless Scaling before installing or uninstalling.
+Release packages expose the same setup entry point at the ZIP root as `Setup.cmd`. Uninstall uses the local manifest/backups created during setup to restore the original private DLL.
 
 See [Installation](../docs/install.md) for the main setup flow.

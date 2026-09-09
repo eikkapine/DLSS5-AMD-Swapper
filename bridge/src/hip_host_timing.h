@@ -3,10 +3,11 @@
 #include <windows.h>
 #include <cstdint>
 
-// Observes the loaded neural module's existing HIP imports. It never launches
-// GPU work or changes an API's arguments, result, stream, or synchronization.
+// Observes the loaded neural module's HIP imports. Optional bounded sampling
+// uses HIP's timed-launch API for one existing kernel per worker wait interval.
+// No kernel is added/replayed, and no stream, dimensions, arguments or wait changes.
 // Call once, before creating the neural swapchain. Callbacks live until exit.
-const char* StartHipHostTiming(HMODULE neuralModule, bool enabled);
+const char* StartHipHostTiming(HMODULE neuralModule, bool enabled, bool sampleKernels = true);
 
 // Drain bounded in-memory samples during the bridge's existing cadence log
 // update. HIP workers perform no file I/O and never wait for this drain.
@@ -22,3 +23,12 @@ struct HipWorkProgress {
 };
 HipWorkProgress ReadHipWorkProgress() noexcept;
 HANDLE HipWorkProgressEvent() noexcept;
+
+// Counts diagnostic attempts, not neural jobs. Compare cadence intervals with
+// no new attempts separately from intervals affected by timed dispatches.
+struct HipKernelTimingProgress {
+    bool available = false;
+    uint32_t attempts = 0;
+    uint32_t dropped = 0;
+};
+HipKernelTimingProgress ReadHipKernelTimingProgress() noexcept;
