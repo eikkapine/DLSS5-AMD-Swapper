@@ -7,11 +7,11 @@
 
 I built **NR Auto Scale** to make an experimental DLSS Neural Rendering compatibility path practical through **Lossless Scaling on AMD hardware** without manually targeting a separate bridge every session.
 
-The current checkpoint is **v0.1.0-pre.3-dev.6**. It keeps the visible image at the captured application's native resolution while capping the expensive neural branch at **480 pixels high**. A 2560×1440 source therefore stays 2560×1440 for presentation while Neural Rendering works at about **854×480**.
+The current checkpoint is **v0.1.0-pre.3-dev.14**. It keeps the visible image at the captured application's native resolution while capping the expensive neural branch at **480 pixels high**. A 2560×1440 source therefore stays 2560×1440 for presentation while Neural Rendering works at about **854×480**.
 
-The important dev.6 change is how that low-resolution neural result is used. The bridge keeps the native source as the image base, matches the asynchronous neural output to its current or previous low-resolution input, extracts the network's correction, and applies that correction back to the native frame. This preserves much more of the neural lighting/material/face detail than the earlier high-frequency-only compositor while keeping the 480p neural workload.
+Dev.14 keeps the native source as the image base, extracts the asynchronous neural residual at the reduced working size, removes broad unstable color/luminance residuals, and rejects stale chroma as motion rises. Exact static pixels can reuse their accepted correction, while changed pixels are never blended with an old native frame. This keeps the neural detail without bringing back the earlier wet-paint/ghosting behavior.
 
-I manually accepted the dev.6 visual behavior after testing it through Lossless Scaling. The earlier dev.4 version of the same 480p/native-output path was about **60 FPS without frame generation** in my World of Tanks test. I did not record a fresh numeric FPS value for dev.6, so I do not present that earlier number as a new dev.6 benchmark.
+I manually accepted dev.14 after testing it through Lossless Scaling: stationary flicker was fixed, flicker during movement was barely noticeable, and performance still felt good. I did not record a fresh numeric game-FPS value for dev.14, so I do not turn bridge cadence or earlier gameplay observations into a new FPS claim.
 
 ## What it does
 
@@ -59,13 +59,13 @@ In the native neural-delta mode, strength starts at `1.0` and can be increased u
 
 ## Before / after
 
-These are the previously approved matching 1:1 crops from the same frozen 2560×1440 CS2 frame. They are historical native-mode examples showing that the neural runtime produces a real image change; they are **not** new dev.6 screenshots.
+These are the previously approved matching 1:1 crops from the same frozen 2560×1440 CS2 frame. They are historical native-mode examples showing that the neural runtime produces a real image change; they are **not** new dev.14 screenshots.
 
 | Original | Neural output |
 | :---: | :---: |
 | ![Original native-resolution crop](docs/images/cs2-native-off.png) | ![Neural output crop](docs/images/cs2-native-on.png) |
 
-No new screenshots were added for dev.6.
+No new screenshots were added for dev.14.
 
 ## How it works
 
@@ -85,7 +85,7 @@ native source texture (2560×1440)
     │                  neural output (~854×480)
     │                         │
     └──────────────┬──────────┘
-                   │ temporally matched neural delta
+                   │ filtered async neural residual
                    ▼
         native-resolution composite (2560×1440)
                    │
@@ -93,7 +93,7 @@ native source texture (2560×1440)
           Lossless Scaling output
 ```
 
-The color-only Lossless Scaling bridge does not receive the game's real engine depth or motion-vector buffers. The current runtime therefore cannot reproduce the full guided FSR-hook path used by native in-game integrations. Dev.6 keeps the fast color-only path and uses lightweight temporal matching to reduce stale-frame artifacts while retaining the broader neural correction.
+The color-only Lossless Scaling bridge does not receive the game's real engine depth or motion-vector buffers. The current runtime therefore cannot reproduce the full guided FSR-hook path used by native in-game integrations. Dev.14 keeps the fast color-only path and stabilizes its asynchronous residual spatially: broad exposure/color swings are limited and stale chroma is strongly reduced when the source moves.
 
 `Lossless.dll` in this project is my own proxy wrapper. During local setup it forwards to the original paid Lossless Scaling DLL kept privately on the installed machine. The original application DLL is never part of this repository or release package.
 
@@ -104,7 +104,8 @@ The color-only Lossless Scaling bridge does not receive the game's real engine d
 | v0.1.0-pre.2 | 2560×1440 | 2560×1440 | ~19 FPS base |
 | v0.1.0-pre.3-dev.3 | 2560×1440 | 1920×1080 | ~30 FPS base / ~60 FPS with 2× LSFG |
 | dev.4 | 2560×1440 | ~854×480 | ~60 FPS base, frame generation off |
-| **v0.1.0-pre.3-dev.6** | native visible output | max 480p neural branch | visual behavior manually accepted; no fresh numeric FPS recorded |
+| v0.1.0-pre.3-dev.6 | native visible output | max 480p neural branch | neural behavior manually accepted |
+| **v0.1.0-pre.3-dev.14** | native visible output | max 480p neural branch | stationary flicker fixed; moving flicker barely noticeable; no fresh numeric FPS recorded |
 
 These are manual observations from different gameplay sessions, not controlled benchmark runs. The bridge also does not count generated LSFG frames.
 

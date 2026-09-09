@@ -6,9 +6,9 @@ The project currently has three useful processing paths:
 2. **legacy reduced source-relative processing** using `WorkingScale`
 3. **full 1:1 neural processing** for quality/reference work
 
-The current public checkpoint, **v0.1.0-pre.3-dev.6**, focuses on the first path. The captured source stays at its native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
+The current public checkpoint, **v0.1.0-pre.3-dev.14**, focuses on the first path. The captured source stays at its native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
 
-Dev.6 keeps the native source as the image base and applies a temporally matched neural correction over it. This replaces the dev.5 high-frequency-only compositor that made the result look mostly like sharpening.
+Dev.14 keeps the native source as the image base and applies a spatially filtered asynchronous neural residual over it. Broad residual color/exposure swings are limited, stale chroma is suppressed as motion rises, and correction history is reused only for effectively unchanged source pixels.
 
 ## Invariants for normal performance work
 
@@ -28,7 +28,7 @@ The work so far has reduced host-side overhead with shared GPU transport, duplic
 The remaining quality/performance work is mainly about:
 
 - retaining more useful neural reconstruction without showing the low-resolution neural frame as the base image
-- improving temporal alignment without real engine motion/depth buffers
+- preserving the accepted anti-flicker behavior without real engine motion/depth buffers
 - reducing composition and synchronization overhead
 - investigating upstream/runtime kernel improvements when they can be applied without changing model quality
 

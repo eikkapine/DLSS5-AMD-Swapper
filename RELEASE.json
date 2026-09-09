@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-dev.6",
-  "tag": "v0.1.0-pre.3-dev.6",
+  "version": "0.1.0-pre.3-dev.14",
+  "tag": "v0.1.0-pre.3-dev.14",
   "status": "experimental-preview",
   "date": "2026-09-09",
   "published": true,
-  "previous_published_version": "0.1.0-pre.3-dev.3",
+  "previous_published_version": "0.1.0-pre.3-dev.6",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "bca17eef25fa5802ed91bf92b55c0b95ef464e9dd743811ec7df62645857586c",
-      "bytes": 277504,
+      "sha256": "1076f5c42dfb315cacf5074f14a806161b4e20d7df82d2e4ad9f1b863d92e9d7",
+      "bytes": 285696,
       "matches_manually_exercised_installation": true
     },
     {
       "name": "Lossless.dll",
       "package_path": "bin/Lossless.dll",
-      "sha256": "22590575827a0de3a07787cf16ba407e116794cb31e8be7082780e21b283bd78",
+      "sha256": "717fa40bb0e59d6c0b760b919f402ee3c07ca8f92f00bf5f14ec0807e4817bbe",
       "bytes": 129536,
       "matches_manually_exercised_installation": true
     }
@@ -25,9 +25,9 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "8ce759b697d8f1a2d61bd01516eb82a164c4f56d36db946e606671a45e3f7ca6",
-      "bridge/src/gpu_transport.h": "32fbf6b9e290331a424fbb5d2ee11bb334895d8a0f8bbfb1010535a09d1bf47b",
-      "bridge/shaders/gpu_transport.hlsl": "b982d4f17d73417ac1fb3d32306eba41096bb37d090dbebd290a679610070a60",
+      "bridge/src/main.cpp": "308776adbe9f1cf6d244425b2433ffaecdc8e8f0ae5b068f2ebd6d4e803c94be",
+      "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
+      "bridge/shaders/gpu_transport.hlsl": "7f5778bc4f7de59770e1d73b7741c505461721dfc3683d48d3643fa1b4ec0a34",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
@@ -35,7 +35,7 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "93177d6ce449c2358465aa766a5e8b6f3105224969b882f2957c271b3a6d1f3a"
+      "VERSION": "4a23d0977281525428461e5319a312f972d0a8ef40482e7623b575c19ccba158"
     }
   },
   "verification": {
@@ -43,15 +43,17 @@
     "production_proxy_build_passed": true,
     "installed_hash_verified": true,
     "bridge_version_stamp_verified": true,
-    "manual_dev6_visual_behavior_accepted": true,
     "automatic_scale_workflow_accepted": true,
     "native_visible_output_path_accepted": true,
     "neural_height_cap": 480,
-    "new_dev6_numeric_fps_recorded": false,
-    "automated_tests_run_for_release": false,
+    "automated_tests_run_for_release": true,
     "automated_playback_run_for_release": false,
     "new_screenshots_added": false,
-    "full_engine_guide_buffer_equivalence_claimed": false
+    "full_engine_guide_buffer_equivalence_claimed": false,
+    "manual_dev14_visual_behavior_accepted": true,
+    "stationary_flicker_reported_fixed": true,
+    "moving_flicker_reported_barely_noticeable": true,
+    "new_dev14_numeric_game_fps_recorded": false
   },
   "working_resolution": {
     "mode": "native visible output + capped neural branch",
@@ -59,11 +61,11 @@
     "example_source": "2560x1440",
     "example_neural": "854x480",
     "visible_output": "2560x1440",
-    "composition": "native source + temporally matched neural delta",
+    "composition": "native source + spatially filtered async neural residual with motion rejection",
     "strength_baseline": 1.0,
     "strength_max": 4.0
   },
-  "performance_note": "The earlier dev.4 version of the same 480p-neural/native-output layout was manually reported at about 60 FPS without frame generation. The final dev.6 acceptance did not include a fresh numeric FPS value.",
+  "performance_note": "Dev.14 was manually accepted with stationary flicker fixed, movement flicker barely noticeable, and performance still good. No fresh numeric game-FPS value was recorded for dev.14.",
   "historical_measurements": [
     "docs/measurements/20260909-dev3-no-fg.json",
     "docs/measurements/20260909-dev3-lsfg2x.json",
