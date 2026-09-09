@@ -1,41 +1,71 @@
-# NR Auto Scale
+# NR Auto Scale — experimental soft-cheat branch
 
-[![Release](https://img.shields.io/github/v/release/eikkapine/NR-Auto-Scale?include_prereleases&label=preview)](https://github.com/eikkapine/NR-Auto-Scale/releases)
-[![License](https://img.shields.io/badge/license-MIT-2ea44f)](LICENSE)
-[![Windows](https://img.shields.io/badge/Windows-11-0078d4?logo=windows11)](https://www.microsoft.com/windows/windows-11)
-[![AMD](https://img.shields.io/badge/tested-RX%209070%20XT-ed1c24?logo=amd)](https://www.amd.com/)
+This branch preserves the earlier **dev.5 high-frequency Neural Rendering compositor** that I tested before moving the main project toward broader DLSS-NR reconstruction.
 
-I built **NR Auto Scale** to make an experimental DLSS Neural Rendering compatibility path practical through **Lossless Scaling on AMD hardware** without manually targeting a separate bridge every session.
+The visible image stays at the captured application's native resolution. Only the expensive neural branch is capped to **480 pixels high** by default. The neural result is then used as a high-frequency detail layer over the native frame.
 
-The current checkpoint is **v0.1.0-pre.3-dev.6**. It keeps the visible image at the captured application's native resolution while capping the expensive neural branch at **480 pixels high**. A 2560×1440 source therefore stays 2560×1440 for presentation while Neural Rendering works at about **854×480**.
+That produces a different look from the main branch: it is mostly perceived as extra sharpness and distant-detail separation. In my testing it could also make distant fog or haze look weaker in some scenes, which is why I keep this as a separate **experimental soft-cheat** branch instead of mixing it into the normal visual-quality path.
 
-The important dev.6 change is how that low-resolution neural result is used. The bridge keeps the native source as the image base, matches the asynchronous neural output to its current or previous low-resolution input, extracts the network's correction, and applies that correction back to the native frame. This preserves much more of the neural lighting/material/face detail than the earlier high-frequency-only compositor while keeping the 480p neural workload.
+The branch keeps the existing automatic Lossless Scaling integration and hotkeys:
 
-I manually accepted the dev.6 visual behavior after testing it through Lossless Scaling. The earlier dev.4 version of the same 480p/native-output path was about **60 FPS without frame generation** in my World of Tanks test. I did not record a fresh numeric FPS value for dev.6, so I do not present that earlier number as a new dev.6 benchmark.
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Alt+F6` | Toggle the effect |
+| `Ctrl+Alt+F7` | Reduce strength |
+| `Ctrl+Alt+F8` | Increase strength |
 
-## What it does
+Strength starts at `1.0` and can be pushed to `4.0`. Above `1.0`, F7/F8 use 0.25 steps. From `0.0` to `1.0`, they use 0.1 steps.
 
-- Starts automatically when Lossless Scaling activates the configured source.
-- Captures the source through Windows Graphics Capture.
-- Keeps the bridge outside the source application's process.
-- Keeps the visible output at the captured source resolution.
-- Caps only the neural branch with `NeuralMaxHeight=480` by default.
-- Uses shared D3D11/D3D12 GPU resources for the normal live path.
-- Applies the neural correction over the untouched native source instead of displaying the low-resolution neural frame as the base image.
-- Provides live on/off and strength controls.
-- Keeps paid Lossless Scaling files, NVIDIA runtime/model files, AMD proxy binaries, logs, backups and private machine files out of the repository and release ZIP.
+## What this branch does
 
-## Quick start
+- Starts automatically when Lossless Scaling activates a source.
+- Captures the selected window with Windows Graphics Capture.
+- Keeps the visible output at the source resolution.
+- Caps only the neural working image with `NeuralMaxHeight=480` by default.
+- Keeps the normal D3D11/D3D12 shared-resource path.
+- Extracts high-frequency structure from the neural result with a five-sample cross filter.
+- Adds that detail back to the untouched native source instead of using the low-resolution neural image as the visible base.
+- Keeps the bridge outside the target application's process.
 
-1. Install Lossless Scaling normally from an official source.
-2. Download the latest preview ZIP from [Releases](https://github.com/eikkapine/NR-Auto-Scale/releases).
-3. Extract it somewhere **outside** the Lossless Scaling install folder.
-4. Run `Setup.cmd`.
-5. Select your Lossless Scaling install if setup does not detect it.
-6. Supply the external runtime files requested by setup from your own legally obtained copies.
-7. Focus the game, browser, video or other capturable window and press **Scale** in Lossless Scaling.
+For a 2560×1440 source, the visible bridge remains 2560×1440 while the neural branch is approximately 854×480.
 
-New installs use:
+## Why this branch exists
+
+The dev.5 compositor deliberately discards the neural result's low-frequency image base. The GPU path computes a small blur from the neural output and applies only:
+
+```text
+native + (neural - neural_blur) * strength
+```
+
+This makes the result behave more like a neural detail filter. It also avoids depending on the exact input frame that produced an asynchronously published neural frame, which is useful for this experiment.
+
+This branch was reconstructed from the exact dev.5 implementation edits preserved in my previous development session and checked against the preserved dev.5 behavior. I do not claim the newly compiled executable is byte-for-byte identical to the old binary.
+
+## Install from this branch
+
+You need your own legitimate Lossless Scaling installation plus the external compatibility/runtime files described in [Installation](docs/install.md). Those files are not included here.
+
+Clone this branch:
+
+```powershell
+git clone --branch experimental-soft-cheat https://github.com/eikkapine/NR-Auto-Scale.git
+cd NR-Auto-Scale
+```
+
+Build the proxy and bridge:
+
+```powershell
+.\auto-scale\build.ps1
+.\bridge\build.ps1
+```
+
+Then run the source-tree setup:
+
+```powershell
+.\auto-scale\scripts\Setup.cmd
+```
+
+Fresh setup should use:
 
 ```ini
 NativeResolution=0
@@ -43,124 +73,52 @@ WorkingScale=0
 NeuralMaxHeight=480
 ```
 
-`NeuralMaxHeight=480` is the active source-relative mode. It keeps the bridge output at the captured source size while reducing only the neural working image. `Width` and `Height` remain fallback values for fixed-size mode.
-
-The release does **not** bundle Lossless Scaling files, NVIDIA DLLs, the AMD compatibility proxy, neural weights/models, or HIP installers. See [Installation](docs/install.md) for the full setup and uninstall flow.
-
-## Controls
-
-| Shortcut | Action |
-| --- | --- |
-| `Ctrl+Alt+F6` | Toggle processed output on/off |
-| `Ctrl+Alt+F7` | Reduce effect strength |
-| `Ctrl+Alt+F8` | Increase effect strength |
-
-In the native neural-delta mode, strength starts at `1.0` and can be increased up to `4.0`. Above `1.0`, F7/F8 use 0.25 steps; from `0.0` to `1.0` they use 0.1 steps.
-
-## Before / after
-
-These are the previously approved matching 1:1 crops from the same frozen 2560×1440 CS2 frame. They are historical native-mode examples showing that the neural runtime produces a real image change; they are **not** new dev.6 screenshots.
-
-| Original | Neural output |
-| :---: | :---: |
-| ![Original native-resolution crop](docs/images/cs2-native-off.png) | ![Neural output crop](docs/images/cs2-native-on.png) |
-
-No new screenshots were added for dev.6.
-
-## How it works
-
-```text
-source window (2560×1440 example)
-    │
-    │ Windows Graphics Capture
-    ▼
-native source texture (2560×1440)
-    │                         │
-    │ keep for visible base   │ GPU resize
-    │                         ▼
-    │                  neural input (~854×480)
-    │                         │
-    │                         │ DLSS-NR compatibility runtime
-    │                         ▼
-    │                  neural output (~854×480)
-    │                         │
-    └──────────────┬──────────┘
-                   │ temporally matched neural delta
-                   ▼
-        native-resolution composite (2560×1440)
-                   │
-                   ▼
-          Lossless Scaling output
-```
-
-The color-only Lossless Scaling bridge does not receive the game's real engine depth or motion-vector buffers. The current runtime therefore cannot reproduce the full guided FSR-hook path used by native in-game integrations. Dev.6 keeps the fast color-only path and uses lightweight temporal matching to reduce stale-frame artifacts while retaining the broader neural correction.
-
-`Lossless.dll` in this project is my own proxy wrapper. During local setup it forwards to the original paid Lossless Scaling DLL kept privately on the installed machine. The original application DLL is never part of this repository or release package.
-
-## Performance history
-
-| Checkpoint | Source | Neural working size | Manual observation |
-| --- | ---: | ---: | --- |
-| v0.1.0-pre.2 | 2560×1440 | 2560×1440 | ~19 FPS base |
-| v0.1.0-pre.3-dev.3 | 2560×1440 | 1920×1080 | ~30 FPS base / ~60 FPS with 2× LSFG |
-| dev.4 | 2560×1440 | ~854×480 | ~60 FPS base, frame generation off |
-| **v0.1.0-pre.3-dev.6** | native visible output | max 480p neural branch | visual behavior manually accepted; no fresh numeric FPS recorded |
-
-These are manual observations from different gameplay sessions, not controlled benchmark runs. The bridge also does not count generated LSFG frames.
-
-See [Performance](docs/performance.md) for the measurement boundary and implementation notes.
-
-## Processing modes
-
-```ini
-# Current default: native visible output + low-resolution neural branch
-WorkingScale=0
-NeuralMaxHeight=480
-
-# Legacy source-relative mode
-# WorkingScale=0.75
-# NeuralMaxHeight=0
-
-# Full 1:1 neural processing
-# WorkingScale=0
-# NeuralMaxHeight=0
-# NativeResolution=1
-```
-
-`NeuralMaxHeight` takes precedence when it is non-zero. Sources at or below the cap are not enlarged for neural processing.
+When you press **Scale** in Lossless Scaling, the proxy launches the bridge automatically and targets the bridge output.
 
 ## Requirements
 
 - Windows 11
-- Lossless Scaling installed from an official source
+- Lossless Scaling from an official source
 - AMD Radeon GPU; development has focused on RDNA4 / RX 9070 XT
-- AMD HIP runtime required by the chosen compatibility runtime
+- CMake 3.20+, MSVC C++ build tools and a Windows SDK when building from source
+- The AMD HIP/runtime pieces required by the chosen compatibility runtime
 - User-supplied compatibility/runtime files described in [Installation](docs/install.md)
+
+## Verification for this branch
+
+The reconstructed branch builds successfully in Release mode and the existing bridge pixel tests pass. No gameplay automation or computer-use test was run for this branch.
+
+The main visual evidence for this mode comes from the earlier manual testing where the effect was seen primarily as sharpening/detail separation and reduced distant fog/haze. That observation is the reason this code is preserved separately.
+
+## Public-file boundary
+
+This repository contains project source code and documentation. It does not include:
+
+- paid Lossless Scaling binaries or `Lossless_original.dll`
+- NVIDIA DLSS-NR DLLs, models or weights
+- AMD compatibility proxy/runtime binaries
+- private INI files, logs, backups or machine-specific runtime files
+- personal files or secrets
+
+The project-built proxy is also named `Lossless.dll`, but it is my own forwarding wrapper. The paid original remains private on the user's installed machine.
+
+Use external filters only where the software or game rules you are using allow them. This branch does not contain anti-cheat bypasses or in-process game injection.
 
 ## Documentation
 
-| Page | What it covers |
-| --- | --- |
-| [Installation](docs/install.md) | Setup, uninstall and processing modes |
-| [Architecture](docs/architecture.md) | Capture, proxy, bridge and GPU handoff |
-| [Performance](docs/performance.md) | Current measurements and limitations |
-| [Verification](docs/verification.md) | What I have actually exercised |
-| [Development](docs/development.md) | Development and release discipline |
-| [Licensing](docs/licensing.md) | Project license and third-party boundaries |
-
-Component notes are in [bridge/README.md](bridge/README.md) and [auto-scale/README.md](auto-scale/README.md).
-
-## License and third-party files
-
-My original project code is released under the [MIT License](LICENSE). Third-party projects and runtime files keep their own licenses and terms.
-
-I do not redistribute paid Lossless Scaling files, NVIDIA runtime/model files, or the AMD compatibility proxy. Check [Licensing](docs/licensing.md) before redistributing third-party components.
+- [Installation](docs/install.md)
+- [Architecture](docs/architecture.md)
+- [Performance](docs/performance.md)
+- [Verification](docs/verification.md)
+- [Licensing](docs/licensing.md)
+- [Bridge internals](bridge/README.md)
 
 ## Credits
 
-This project builds on ideas and compatibility work from:
+The project builds on compatibility work and ideas from:
 
 - [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)
 - [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
 - [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
-- current community pre-upscale / Neural Upstream experiments referenced in [the performance note](docs/neural-upstream-performance.md)
+
+My original project code is released under the [MIT License](LICENSE). Third-party components keep their own licenses and terms.

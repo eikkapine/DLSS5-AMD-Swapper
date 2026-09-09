@@ -1,33 +1,37 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-dev.6",
-  "tag": "v0.1.0-pre.3-dev.6",
-  "status": "experimental-preview",
+  "version": "0.1.0-pre.3-soft-cheat.1",
+  "tag": null,
+  "status": "experimental-branch",
   "date": "2026-09-09",
-  "published": true,
-  "previous_published_version": "0.1.0-pre.3-dev.3",
+  "published": false,
+  "branch": "experimental-soft-cheat",
+  "branch_public": true,
+  "based_on_public_version": "0.1.0-pre.3-dev.6",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "bca17eef25fa5802ed91bf92b55c0b95ef464e9dd743811ec7df62645857586c",
-      "bytes": 277504,
-      "matches_manually_exercised_installation": true
+      "sha256": "c30a0937f5d4c19a75249d3f6c0e54d77bc987d57e64db9096ff198784cd9e62",
+      "bytes": 264704,
+      "local_validation_build": true,
+      "published_binary": false
     },
     {
       "name": "Lossless.dll",
       "package_path": "bin/Lossless.dll",
-      "sha256": "22590575827a0de3a07787cf16ba407e116794cb31e8be7082780e21b283bd78",
+      "sha256": "ac276b9a4598e9c213bcfbbf3bf90fe11005f073c08254469bf6c9a83b0f2f51",
       "bytes": 129536,
-      "matches_manually_exercised_installation": true
+      "local_validation_build": true,
+      "published_binary": false
     }
   ],
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "8ce759b697d8f1a2d61bd01516eb82a164c4f56d36db946e606671a45e3f7ca6",
-      "bridge/src/gpu_transport.h": "32fbf6b9e290331a424fbb5d2ee11bb334895d8a0f8bbfb1010535a09d1bf47b",
-      "bridge/shaders/gpu_transport.hlsl": "b982d4f17d73417ac1fb3d32306eba41096bb37d090dbebd290a679610070a60",
+      "bridge/src/main.cpp": "df4b2bcfc5a4f01e3ca36d0826b56b7cef92aa07f85d9e93494435f51ae6d99e",
+      "bridge/src/gpu_transport.h": "cbc26b256d723ad70703ba6334d695b2fb9f74975aa9b119a4c6e80fe352fde5",
+      "bridge/shaders/gpu_transport.hlsl": "f20bb7883fc8e63126f9a4230bade217e25d91b3aa9a5ba454a808b293bb7ef3",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
@@ -35,47 +39,40 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "93177d6ce449c2358465aa766a5e8b6f3105224969b882f2957c271b3a6d1f3a"
+      "VERSION": "c8f75e4a939ad0e94d411ac93c50aaa0f6b7ea7243617d71ecbcb8fb913259e2"
     }
+  },
+  "implementation": {
+    "visible_output": "native captured source resolution",
+    "neural_max_height": 480,
+    "composition": "native source + high-frequency neural detail",
+    "gpu_filter": "five-sample cross high-pass",
+    "strength_baseline": 1.0,
+    "strength_max": 4.0,
+    "hotkeys": "Ctrl+Alt+F6 toggle, Ctrl+Alt+F7 decrease, Ctrl+Alt+F8 increase"
+  },
+  "provenance": {
+    "reconstruction": "Exact dev.5 implementation edits recovered from the previous local Codex development session and reapplied to the accepted dev.6 source base.",
+    "preserved_dev5_binary_sha256": "e8b40a181abfbede17f9fc85a8190f4deffcbb87f289deaa26ee1096d4946434",
+    "preserved_dev5_binary_bytes": 275968,
+    "byte_identical_rebuild_claimed": false
   },
   "verification": {
     "production_bridge_build_passed": true,
     "production_proxy_build_passed": true,
-    "installed_hash_verified": true,
-    "bridge_version_stamp_verified": true,
-    "manual_dev6_visual_behavior_accepted": true,
-    "automatic_scale_workflow_accepted": true,
-    "native_visible_output_path_accepted": true,
-    "neural_height_cap": 480,
-    "new_dev6_numeric_fps_recorded": false,
-    "automated_tests_run_for_release": false,
-    "automated_playback_run_for_release": false,
+    "bridge_pixel_tests_passed": true,
+    "auto_scale_harness_passed": true,
+    "installer_setup_tests_passed": true,
+    "manual_visual_behavior_source": "earlier dev.5 user testing",
+    "new_gameplay_automation_run": false,
+    "new_computer_use_test_run": false,
     "new_screenshots_added": false,
-    "full_engine_guide_buffer_equivalence_claimed": false
+    "optional_hip_host_timing_available_in_local_bridge_build": false
   },
-  "working_resolution": {
-    "mode": "native visible output + capped neural branch",
-    "neural_max_height": 480,
-    "example_source": "2560x1440",
-    "example_neural": "854x480",
-    "visible_output": "2560x1440",
-    "composition": "native source + temporally matched neural delta",
-    "strength_baseline": 1.0,
-    "strength_max": 4.0
-  },
-  "performance_note": "The earlier dev.4 version of the same 480p-neural/native-output layout was manually reported at about 60 FPS without frame generation. The final dev.6 acceptance did not include a fresh numeric FPS value.",
-  "historical_measurements": [
-    "docs/measurements/20260909-dev3-no-fg.json",
-    "docs/measurements/20260909-dev3-lsfg2x.json",
-    "docs/measurements/20260907-native-pacing.json",
-    "docs/measurements/20260907-host-timing-baseline.json"
-  ],
-  "external_runtime": {
-    "project": "danielblnc/DLSS-NR-on-AMD",
-    "tested_version": "v0.2.15",
-    "redistributed": false,
-    "latest_checked_version": "v0.2.16",
-    "guide_buffer_note": "Lossless Scaling color-only path uses UseFsrInputs=0 and does not provide engine motion/depth guide buffers."
-  },
-  "configuration_note": "Fresh setup defaults to WorkingScale=0 and NeuralMaxHeight=480. NeuralMaxHeight keeps visible output at the captured source resolution while capping only the neural branch."
+  "public_boundary": {
+    "redistributes_lossless_scaling_files": false,
+    "redistributes_nvidia_runtime_or_models": false,
+    "redistributes_amd_proxy_or_runtime": false,
+    "includes_private_configs_logs_backups": false
+  }
 }

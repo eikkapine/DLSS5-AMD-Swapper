@@ -59,7 +59,7 @@ The proxy preserves the user's selected Lossless Scaling scaler and frame-genera
 
 ## IPC contract
 
-A normal dev.6 launch includes the source handle and `--neural-max-height 480`. The bridge writes its visible HWND to the ready file only after the runtime health gate passes. The proxy verifies that HWND belongs to the bridge process before calling the original `Activate`.
+A normal launch on this branch includes the source handle and `--neural-max-height 480`. The bridge writes its visible HWND to the ready file only after the runtime health gate passes. The proxy verifies that HWND belongs to the bridge process before calling the original `Activate`.
 
 ## Release boundary
 

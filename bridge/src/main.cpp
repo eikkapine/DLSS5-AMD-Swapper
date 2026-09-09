@@ -828,7 +828,6 @@ std::pair<UINT, UINT> FitNeuralDimensions(UINT sourceWidth, UINT sourceHeight, U
 }
 
 FramePixels ComposeNativeDetailCpu(const FramePixels& nativeSource,
-                                   const FramePixels& neuralInput,
                                    const FramePixels& neuralOutput,
                                    float strength,
                                    bool enabled) {
@@ -838,34 +837,31 @@ FramePixels ComposeNativeDetailCpu(const FramePixels& nativeSource,
     if (neuralOutput.width == 0 || neuralOutput.height == 0 || neuralOutput.rgba.empty()) {
         throw std::runtime_error("Neural output is empty during native-detail fallback");
     }
-    if (neuralInput.width != neuralOutput.width || neuralInput.height != neuralOutput.height ||
-        neuralInput.rgba.size() != neuralOutput.rgba.size()) {
-        throw std::runtime_error("Neural input/output dimensions differ during native-detail fallback");
-    }
     FramePixels result = nativeSource;
     const float amount = std::clamp(strength, 0.0f, 4.0f);
-    auto sampleAt = [](const FramePixels& frame, UINT x, UINT y, size_t channel) -> int {
-        x = std::min(x, frame.width - 1);
-        y = std::min(y, frame.height - 1);
-        return frame.rgba[(static_cast<size_t>(y) * frame.width + x) * 4 + channel];
-    };
     auto neuralAt = [&](UINT x, UINT y, size_t channel) -> int {
         x = std::min(x, neuralOutput.width - 1);
         y = std::min(y, neuralOutput.height - 1);
-        return sampleAt(neuralOutput, x, y, channel);
+        return neuralOutput.rgba[(static_cast<size_t>(y) * neuralOutput.width + x) * 4 + channel];
     };
     for (UINT y = 0; y < nativeSource.height; ++y) {
         const UINT ny = std::min<UINT>(neuralOutput.height - 1,
             static_cast<UINT>(static_cast<uint64_t>(y) * neuralOutput.height / nativeSource.height));
+        const UINT up = ny > 0 ? ny - 1 : ny;
+        const UINT down = std::min(neuralOutput.height - 1, ny + 1);
         for (UINT x = 0; x < nativeSource.width; ++x) {
             const UINT nx = std::min<UINT>(neuralOutput.width - 1,
                 static_cast<UINT>(static_cast<uint64_t>(x) * neuralOutput.width / nativeSource.width));
+            const UINT left = nx > 0 ? nx - 1 : nx;
+            const UINT right = std::min(neuralOutput.width - 1, nx + 1);
             const size_t offset = (static_cast<size_t>(y) * nativeSource.width + x) * 4;
             for (size_t channel = 0; channel < 3; ++channel) {
-                const int neural = neuralAt(nx, ny, channel);
-                const int input = sampleAt(neuralInput, nx, ny, channel);
+                const int center = neuralAt(nx, ny, channel);
+                const int blur = (center * 4 + neuralAt(left, ny, channel) +
+                                  neuralAt(right, ny, channel) + neuralAt(nx, up, channel) +
+                                  neuralAt(nx, down, channel) + 4) / 8;
                 const int value = static_cast<int>(nativeSource.rgba[offset + channel]) +
-                                  static_cast<int>(std::lround((neural - input) * amount));
+                                  static_cast<int>(std::lround((center - blur) * amount));
                 result.rgba[offset + channel] = static_cast<uint8_t>(std::clamp(value, 0, 255));
             }
         }
@@ -2085,7 +2081,7 @@ int wmain(int argc, wchar_t** argv) {
                        << options.width << 'x' << options.height << " -> visible "
                        << options.displayWidth << 'x' << options.displayHeight
                        << (options.neuralMaxHeight > 0
-                           ? "; native source retained + low-res neural delta composite"
+                           ? "; native source retained + high-frequency neural detail composite"
                            : "; GPU bilinear resize only when dimensions differ")
                        << "; 16-byte status readback per compose";
                 transportDetail = detail.str();
@@ -2191,7 +2187,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=native_source_temporally_matched_neural_delta\n"
+                   << "gpu_transport_revision=experimental_high_frequency_neural_detail\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2458,15 +2454,15 @@ int wmain(int argc, wchar_t** argv) {
             }
             const bool nrNonBlack = FrameHasNonBlackPixels(nrFrame);
             guardBlackOutput(*sourceNonBlack, nrNonBlack);
-            // Native-detail fallback preserves the captured source as the base
-            // image and applies the network's low-resolution correction to it.
+            // Experimental native-detail fallback preserves the captured source
+            // and applies only high-frequency structure from the neural output.
             FramePixels nativeResidual;
             FramePixels blended;
             const FramePixels* display = options.neuralMaxHeight > 0 ? &*lastInputFrame : &original;
             if (options.neuralMaxHeight > 0) {
                 if (effectEnabled && strength > 0.0f) {
                     nativeResidual = ComposeNativeDetailCpu(
-                        *lastInputFrame, original, nrFrame, strength, true);
+                        *lastInputFrame, nrFrame, strength, true);
                     display = &nativeResidual;
                 }
             } else {

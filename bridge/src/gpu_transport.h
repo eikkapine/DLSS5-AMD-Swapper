@@ -110,9 +110,6 @@ public:
 
         if (nativeResidualComposite_) {
             CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
-                               D3D11_BIND_SHADER_RESOURCE,
-                               width_, height_, previousNeuralInputTexture_, previousNeuralInputView_);
-            CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                                D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
                                displayWidth_, displayHeight_, sourceTexture_, sourceView_);
             Require(device_->CreateRenderTargetView(sourceTexture_.Get(), nullptr, &sourceTarget_),
@@ -251,14 +248,6 @@ public:
         if (activeCaptureView_) {
             throw std::runtime_error("Prior direct capture has not completed its consumer fence");
         }
-        if (nativeResidualComposite_ && inputInitialized_) {
-            // The asynchronous runtime normally publishes the job started by the
-            // previous feed while this iteration submits the next one. Preserve
-            // that exact low-resolution feed so Compose can recover the network's
-            // correction without assuming the newest capture is its source.
-            context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
-            previousNeuralInputValid_ = true;
-        }
         // WGC surfaces which support SRVs can feed the existing exact BGRA
         // conversion directly. Keep this view only while its frame is checked
         // out; Compose/Drain releases it before the caller returns the frame.
@@ -317,8 +306,7 @@ public:
         // neural progress or strength. Keep them until SignalInput changes it.
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u) |
-                                (nativeResidualComposite_ ? 4u : 0u) |
-                                (previousNeuralInputValid_ ? 8u : 0u);
+                                (nativeResidualComposite_ ? 4u : 0u);
         const std::array<UINT, 8> parameters = {
             width_, height_, displayWidth_, displayHeight_, alpha, frameFlags, 0u, 0u
         };
@@ -328,20 +316,20 @@ public:
                                                                       : outputs_[historyOutputIndex_].view.Get();
         ID3D11ShaderResourceView* inputs[] = {
             input_.view.Get(), outputs_[outputIndex_].view.Get(), source, history,
-            nullptr, previousNeuralInputView_.Get()
+            nullptr
         };
         ID3D11UnorderedAccessView* outputs[] = {composedUav_.Get(), nullptr, tileStatisticsUav_.Get()};
         ID3D11Buffer* constants[] = {parameters_.Get()};
         context_->CSSetShader(composeShader_.Get(), nullptr, 0);
         context_->CSSetConstantBuffers(0, 1, constants);
-        context_->CSSetShaderResources(0, 6, inputs);
+        context_->CSSetShaderResources(0, 5, inputs);
         ID3D11SamplerState* samplers[] = {resizeSampler_.Get()};
         context_->CSSetSamplers(0, 1, samplers);
         context_->CSSetUnorderedAccessViews(0, 3, outputs, nullptr);
         context_->Dispatch((displayWidth_ + 15) / 16, (displayHeight_ + 15) / 16, 1);
-        ID3D11ShaderResourceView* noInputs[6]{};
+        ID3D11ShaderResourceView* noInputs[5]{};
         ID3D11UnorderedAccessView* noOutputs[3]{};
-        context_->CSSetShaderResources(0, 6, noInputs);
+        context_->CSSetShaderResources(0, 5, noInputs);
         ID3D11SamplerState* noSamplers[] = {nullptr};
         context_->CSSetSamplers(0, 1, noSamplers);
         context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
@@ -355,7 +343,7 @@ public:
         context_->CSSetShaderResources(4, 1, tileInputs);
         context_->CSSetUnorderedAccessViews(1, 1, reducedOutputs, nullptr);
         context_->Dispatch(1, 1, 1);
-        context_->CSSetShaderResources(0, 6, noInputs);
+        context_->CSSetShaderResources(0, 5, noInputs);
         context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
         context_->CSSetShader(nullptr, nullptr, 0);
         context_->CopyResource(counterReadback_.Get(), counters_.Get());
@@ -674,9 +662,7 @@ private:
     UINT sourceWidth_ = 0, sourceHeight_ = 0;
     UINT capturedWidth_ = 0, capturedHeight_ = 0;
     ComPtr<ID3D11Texture2D> capturedTexture_, sourceTexture_, composedTexture_, historyTexture_;
-    ComPtr<ID3D11Texture2D> previousNeuralInputTexture_;
     ComPtr<ID3D11ShaderResourceView> capturedView_, sourceView_, composedView_, historyView_;
-    ComPtr<ID3D11ShaderResourceView> previousNeuralInputView_;
     ComPtr<ID3D11RenderTargetView> inputTarget_, sourceTarget_;
     ComPtr<ID3D11UnorderedAccessView> composedUav_, counterUav_, tileStatisticsUav_;
     ComPtr<ID3D11ShaderResourceView> tileStatisticsView_;
@@ -689,7 +675,6 @@ private:
     ComPtr<ID3D11SamplerState> resizeSampler_;
     bool historyValid_ = false;
     bool inputInitialized_ = false;
-    bool previousNeuralInputValid_ = false;
     UINT displayAlpha_ = 256;
     bool sourceStatisticsValid_ = false;
     bool sourceMeaningfullyNonblack_ = false;
