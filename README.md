@@ -1,6 +1,6 @@
 # NR Auto Scale — experimental visual-clarity branch
 
-This is the `experimental-soft-cheat` branch, currently **v0.1.0-pre.3-soft-cheat.2**. It now carries the same dev.14 transport, pacing and anti-flicker work as the main branch, but uses a different whole-frame compositor aimed at stronger visual clarity.
+This is the `experimental-soft-cheat` branch, currently **v0.1.0-pre.3-soft-cheat.3**. It carries the dev.14 transport and pacing foundation, with a separate whole-frame compositor aimed at stronger visual clarity.
 
 The visible image stays at the captured application's native resolution while only the expensive neural branch is capped to **480 pixels high** by default. A 2560×1440 source therefore remains 2560×1440 for presentation while Neural Rendering works at about 854×480.
 
@@ -42,7 +42,7 @@ native
   - small bright-neutral veil term
 ```
 
-The source-derived clarity term always comes from the frame being displayed, so it does not inherit stale-frame chromatic trails. Neural color information is reduced as motion rises, while the current source detail remains active.
+The source-derived clarity term comes from the frame being displayed. Soft-cheat.3 also removes blind duplicate-frame correction reuse, expands native-resolution motion rejection around moving edges, and strengthens stale-residual suppression as effect strength rises.
 
 ## Install from this branch
 
@@ -89,9 +89,9 @@ When you press **Scale** in Lossless Scaling, the proxy launches the bridge auto
 
 ## Verification for this branch
 
-The soft-cheat.2 Release bridge and proxy build successfully, the bridge pixel tests pass, and the full auto-scale/setup harness passes on a clean rerun. The local validation build includes the same HIP 7 timing/pacing support used by the accepted dev.14 main build.
+The soft-cheat.3 Release bridge builds successfully and the bridge pixel tests pass. The proxy and full auto-scale/setup harness were already verified for soft-cheat.2 and are unchanged by this compositor-only update. The local validation build includes the same HIP 7 timing/pacing support used by the accepted dev.14 main build.
 
-I have not yet done a new manual visual acceptance pass for soft-cheat.2, so the stronger clarity/haze behavior remains an experimental target rather than a measured claim. No new screenshots were added.
+Manual testing of soft-cheat.3 found that the previous smothering and long-lived movement trails were fixed. Slight flicker returned, so this remains an experimental checkpoint. No new screenshots were added.
 
 ## Public-file boundary
 

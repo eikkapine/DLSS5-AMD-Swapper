@@ -1,6 +1,6 @@
 # Performance
 
-`v0.1.0-pre.3-soft-cheat.2` keeps the accepted dev.14 performance layout: native visible output with only the neural branch capped to **480 pixels high**. A 2560×1440 source uses roughly **854×480** for neural work while the bridge stays 2560×1440.
+`v0.1.0-pre.3-soft-cheat.3` keeps the accepted dev.14 performance layout: native visible output with only the neural branch capped to **480 pixels high**. A 2560×1440 source uses roughly **854×480** for neural work while the bridge stays 2560×1440.
 
 The branch also carries dev.14's shared D3D11/D3D12 transport, inference-aware HIP pacing, direct WGC capture path and high-rate visible submissions. Duplicate visible presents remain available for Lossless Scaling cadence without rewriting correction history.
 
@@ -26,7 +26,7 @@ Strength starts at `1.0` and can be raised to `4.0`. The current-frame clarity a
 
 ## Measurement boundary
 
-No fresh numeric game-FPS benchmark has been recorded for soft-cheat.2. The accepted main dev.14 build retained good performance in manual testing, and this branch preserves that transport/pacing implementation, but bridge feed or submit cadence is not a game-FPS measurement.
+No fresh numeric game-FPS benchmark has been recorded for soft-cheat.3. This update changes compositor motion/history gating rather than the neural resolution or transport/pacing layout, but bridge feed or submit cadence is not a game-FPS measurement.
 
 Lossless Scaling provides this bridge with the final color frame, not engine depth or motion vectors. The clarity/dehaze behavior is therefore image-space processing rather than reconstruction of hidden scene data.
 

@@ -107,13 +107,10 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                 const float3 lumaWeights = float3(0.2126, 0.7152, 0.0722);
                 float3 correction = 0.0;
 
-                // A repeated evaluation of the exact same captured frame can reuse
-                // its accepted correction. No motion has occurred in this case.
-                if (repeatedSourceCorrection && hasHistory)
-                {
-                    correction = previousVisible - originalNative;
-                }
-                else
+                // Always recompute duplicate presentations from the current neural
+                // output. Reusing the previously corrected image here can freeze a
+                // stale edge correction indefinitely when WGC has no new source
+                // frame to deliver after movement stops.
                 {
                     // The AMD compatibility runtime exposes only colour here: no
                     // game depth, motion vectors or exposure. Its asynchronous
@@ -155,15 +152,22 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                     float safeBroadLuma = clamp(lowLuma, -maxBroadLuma, maxBroadLuma);
                     float3 filteredResidual = detailResidual * 1.30 + safeBroadLuma.xxx * 1.15;
 
-                    // Add a current-frame-only clarity term. This is deliberately
-                    // derived from the source being presented, so it cannot trail an
-                    // older neural frame. It increases local luminance separation and
-                    // mildly suppresses bright neutral veiling, which can make haze
-                    // easier to see through without changing geometry or targeting
-                    // any object class.
-                    float3 inputBlur =
-                        (currentInput * 4.0 + inputLeft + inputRight + inputUp + inputDown) / 8.0;
-                    float localLuma = dot(currentInput - inputBlur, lumaWeights);
+                    // Add a current-frame-only clarity term from the native source.
+                    // Keeping this calculation at native resolution prevents the
+                    // 480p neural input from creating a soft halo around moving edges.
+                    int nativeX = int(position.x);
+                    int nativeY = int(position.y);
+                    int leftX = max(nativeX - 1, 0);
+                    int rightX = min(nativeX + 1, int(imageWidth) - 1);
+                    int upY = max(nativeY - 1, 0);
+                    int downY = min(nativeY + 1, int(imageHeight) - 1);
+                    float3 nativeLeft = sourceImage.Load(int3(leftX, nativeY, 0)).rgb;
+                    float3 nativeRight = sourceImage.Load(int3(rightX, nativeY, 0)).rgb;
+                    float3 nativeUp = sourceImage.Load(int3(nativeX, upY, 0)).rgb;
+                    float3 nativeDown = sourceImage.Load(int3(nativeX, downY, 0)).rgb;
+                    float3 nativeBlur =
+                        (originalNative * 4.0 + nativeLeft + nativeRight + nativeUp + nativeDown) / 8.0;
+                    float localLuma = dot(originalNative - nativeBlur, lumaWeights);
                     float localClarity = clamp(localLuma * 0.70, -0.024, 0.024);
                     float maxChannel = max(originalNative.r, max(originalNative.g, originalNative.b));
                     float minChannel = min(originalNative.r, min(originalNative.g, originalNative.b));
@@ -188,17 +192,40 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                             smoothstep(1.5 / 255.0, 10.0 / 255.0, absoluteMotion),
                             smoothstep(0.025, 0.12, relativeMotion));
 
+                        // The low-resolution neural input can blur a moving edge
+                        // enough that its temporal delta looks smaller than the
+                        // real native-resolution motion. Fold the native pixel delta
+                        // into the rejection mask so those edge pixels do not keep
+                        // a faint correction from the previous scene position.
+                        float3 previousNative = previousSourceImage.Load(location).rgb;
+                        float3 previousNativeLeft = previousSourceImage.Load(int3(leftX, nativeY, 0)).rgb;
+                        float3 previousNativeRight = previousSourceImage.Load(int3(rightX, nativeY, 0)).rgb;
+                        float3 previousNativeUp = previousSourceImage.Load(int3(nativeX, upY, 0)).rgb;
+                        float3 previousNativeDown = previousSourceImage.Load(int3(nativeX, downY, 0)).rgb;
+                        float nativeDelta = max(abs(originalNative.r - previousNative.r),
+                            max(abs(originalNative.g - previousNative.g),
+                                abs(originalNative.b - previousNative.b)));
+                        float nativeLeftDelta = max(abs(nativeLeft.r - previousNativeLeft.r),
+                            max(abs(nativeLeft.g - previousNativeLeft.g), abs(nativeLeft.b - previousNativeLeft.b)));
+                        float nativeRightDelta = max(abs(nativeRight.r - previousNativeRight.r),
+                            max(abs(nativeRight.g - previousNativeRight.g), abs(nativeRight.b - previousNativeRight.b)));
+                        float nativeUpDelta = max(abs(nativeUp.r - previousNativeUp.r),
+                            max(abs(nativeUp.g - previousNativeUp.g), abs(nativeUp.b - previousNativeUp.b)));
+                        float nativeDownDelta = max(abs(nativeDown.r - previousNativeDown.r),
+                            max(abs(nativeDown.g - previousNativeDown.g), abs(nativeDown.b - previousNativeDown.b)));
+                        float nativeNeighborhoodDelta = max(nativeDelta,
+                            max(max(nativeLeftDelta, nativeRightDelta), max(nativeUpDelta, nativeDownDelta)));
+                        float nativeMotion = smoothstep(1.0 / 255.0, 8.0 / 255.0, nativeNeighborhoodDelta);
+                        motion = max(motion, nativeMotion);
+
                         // Cross-frame reuse is permitted only for a literally
-                        // unchanged native pixel. Near matches are deliberately not
-                        // accepted: those were enough to leave colour fringes and
-                        // ghost silhouettes during camera movement.
-                        if (historyMatchesPreviousSource && hasHistory)
+                        // unchanged native pixel whose low-resolution input is also
+                        // locally static. This keeps the stationary anti-flicker
+                        // benefit without carrying a previous correction through a
+                        // moving edge that happens to quantize to the same RGB value.
+                        if (!repeatedSourceCorrection && historyMatchesPreviousSource && hasHistory)
                         {
-                            float3 previousNative = previousSourceImage.Load(location).rgb;
-                            float nativeDelta = max(abs(originalNative.r - previousNative.r),
-                                max(abs(originalNative.g - previousNative.g),
-                                    abs(originalNative.b - previousNative.b)));
-                            if (nativeDelta < (0.5 / 255.0))
+                            if (nativeNeighborhoodDelta < (0.5 / 255.0) && motion < 0.02)
                             {
                                 correction = previousVisible - previousNative;
                                 reusedExactStaticCorrection = true;
@@ -210,12 +237,19 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                     {
                         // Stale colour residuals are the source of the weak
                         // chromatic-aberration trail. As motion rises, keep only
-                        // luminance detail and rapidly reduce stale correction
-                        // magnitude. Static pixels retain the complete filtered
-                        // neural detail.
+                        // luminance detail and drive stale neural correction all the
+                        // way to zero at strong motion. Static pixels retain the
+                        // complete filtered neural detail.
                         float filteredLuma = dot(filteredResidual, lumaWeights);
-                        filteredResidual = lerp(filteredResidual, filteredLuma.xxx, motion);
-                        filteredResidual *= lerp(1.0, 0.12, motion);
+                        float strengthMotionBoost = lerp(
+                            1.0, 1.75, saturate((amount - 1.0) / 3.0));
+                        float effectiveMotion = saturate(motion * strengthMotionBoost);
+                        float chromaReject = saturate(effectiveMotion * 1.50);
+                        float staleResidualWeight =
+                            1.0 - smoothstep(0.04, 0.55, effectiveMotion);
+                        staleResidualWeight *= staleResidualWeight;
+                        filteredResidual = lerp(filteredResidual, filteredLuma.xxx, chromaReject);
+                        filteredResidual *= staleResidualWeight;
 
                         // Neural correction is motion-gated; the source-derived
                         // clarity component stays active because it belongs to the

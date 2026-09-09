@@ -2,9 +2,9 @@
 
 `DlssNrBridge.exe` captures one selected window with Windows Graphics Capture, feeds a reduced color image to the AMD DLSS-NR compatibility runtime, and presents a native-resolution D3D11 bridge window for Lossless Scaling.
 
-This branch is **v0.1.0-pre.3-soft-cheat.2**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
+This branch is **v0.1.0-pre.3-soft-cheat.3**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
 
-The experimental compositor uses the dev.14 spatial residual filter and motion rejection, retains extra local neural structure/luminance, then adds a current-frame local-contrast and neutral-veil adjustment. Broad unstable chroma is still rejected to preserve the anti-flicker behavior.
+The experimental compositor uses the dev.14 spatial residual filter, retains extra local neural structure/luminance, then adds a current-frame local-contrast and neutral-veil adjustment. Soft-cheat.3 tightens motion rejection around native-resolution edges and prevents duplicate frames from indefinitely holding an old corrected image.
 
 ## Keyboard shortcuts
 
@@ -61,4 +61,4 @@ The Windows SDK shader compiler embeds the transport shaders into the production
 
 ## Verification boundary
 
-The soft-cheat.2 bridge compiles successfully with HIP 7 pacing support, the bridge pixel tests pass, and the auto-scale/setup harness passes on a clean rerun. No automated gameplay/computer-use visual test or new screenshot capture was run for this branch.
+The soft-cheat.3 bridge compiles successfully with HIP 7 pacing support and the bridge pixel tests pass. Manual testing found the smothering and long-lived motion trails fixed, with some flicker returning. No automated gameplay/computer-use visual test or new screenshot capture was run for this checkpoint.

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-soft-cheat.2",
+  "version": "0.1.0-pre.3-soft-cheat.3",
   "tag": null,
   "status": "experimental-branch",
   "date": "2026-09-09",
@@ -12,8 +12,8 @@
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "05f43c47b0bec363d52a6683a09621b84057f07bb2b9a3f947dff74025480bf0",
-      "bytes": 295936,
+      "sha256": "def206f8b5882e116efebefe039ce15690244702cc38d39c0e2165b2a9dc1b1a",
+      "bytes": 302080,
       "local_validation_build": true,
       "published_binary": false
     },
@@ -29,9 +29,9 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "5130cbb8295065040d52a82dcfca5bf32523ee2f76f12b288f96b6051eb7acca",
+      "bridge/src/main.cpp": "09d173b1ce1b5d8cb8f9d90204f0d418bf90e964dd862bcb1444bb12b0c701aa",
       "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
-      "bridge/shaders/gpu_transport.hlsl": "f89c2b9087acc4c2c8a5268b879d25a0f1cfe3e6b5c5c579bde59418c5f5bfe1",
+      "bridge/shaders/gpu_transport.hlsl": "bb4fcb08e0d484fe8b7e644b4aba1e7886a6a13a383bd9aa99f20e20d9f45ca6",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
@@ -39,14 +39,14 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "96e253f7fb5ec205db69527f9a5e368ea2512774d992fdb020127f1bad43ae6b"
+      "VERSION": "db00928366728099d68f513e929a3ef3a13501f973dd426156f39bb7e324767a"
     }
   },
   "implementation": {
     "visible_output": "native captured source resolution",
     "neural_max_height": 480,
     "composition": "native source + motion-gated neural structure/luminance residual + current-frame local clarity",
-    "gpu_filter": "dev.14 async residual spatial filter with uniform clarity and bounded neutral-veil reduction",
+    "gpu_filter": "dev.14 async residual spatial filter with native-neighborhood motion rejection, strength-aware stale-residual suppression, uniform clarity and bounded neutral-veil reduction",
     "strength_baseline": 1.0,
     "strength_max": 4.0,
     "hotkeys": "Ctrl+Alt+F6 toggle, Ctrl+Alt+F7 decrease, Ctrl+Alt+F8 increase"
@@ -61,13 +61,13 @@
     "bridge_pixel_tests_passed": true,
     "auto_scale_harness_passed": true,
     "installer_setup_tests_passed": true,
-    "manual_visual_acceptance": "pending for soft-cheat.2",
+    "manual_visual_acceptance": "soft-cheat.3 fixed the previous smothering and long-lived transparent motion trails; slight flicker returned and remains a known issue",
     "new_gameplay_automation_run": false,
     "new_computer_use_test_run": false,
     "new_screenshots_added": false,
     "player_or_object_specific_logic_added": false,
     "optional_hip_host_timing_available_in_local_bridge_build": true,
-    "clean_rerun_note": "The first auto-scale harness run hit the known cold-start activation flake; the clean rerun passed the harness plus installer-default, setup-default, setup-custom and setup-native cases."
+    "clean_rerun_note": "The full auto-scale/setup suite passed on the clean soft-cheat.2 rerun. Soft-cheat.3 changes only the bridge compositor/history gating; the proxy and setup path are unchanged."
   },
   "public_boundary": {
     "redistributes_lossless_scaling_files": false,

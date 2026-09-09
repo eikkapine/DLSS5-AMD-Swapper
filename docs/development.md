@@ -6,7 +6,7 @@ The project currently has three useful processing paths:
 2. **legacy reduced source-relative processing** using `WorkingScale`
 3. **full 1:1 neural processing** for quality/reference work
 
-The current experimental checkpoint, **v0.1.0-pre.3-soft-cheat.2**, uses the first path. The captured source stays at native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
+The current experimental checkpoint, **v0.1.0-pre.3-soft-cheat.3**, uses the first path. The captured source stays at native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
 
 This branch starts from the accepted dev.14 transport and anti-flicker implementation, then biases the compositor toward whole-frame local clarity, bounded luminance/shading separation and mild neutral-veil reduction.
 

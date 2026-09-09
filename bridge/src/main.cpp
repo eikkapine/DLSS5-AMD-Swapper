@@ -2198,7 +2198,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=experimental_uniform_clarity_dehaze_dev14_stability\n"
+                   << "gpu_transport_revision=experimental_uniform_clarity_dehaze_motion_trail_rejection_v2\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")

@@ -1,6 +1,6 @@
 # Verification
 
-This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.2` on the `experimental-soft-cheat` branch.
+This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.3` on the `experimental-soft-cheat` branch.
 
 ## Verified locally
 
@@ -18,7 +18,7 @@ This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.2`
 
 ## Visual acceptance status
 
-The new soft-cheat.2 visual layer has not yet been manually accepted. Its intended behavior is stronger local detail/contrast, bounded neural lighting separation and reduced bright neutral veil while retaining the dev.14 anti-flicker behavior. Those are implementation goals until a manual visual test confirms them.
+Manual testing of soft-cheat.3 found that the previous smothering and long-lived transparent motion trails were fixed. Some flicker returned, especially as the image changes, so this checkpoint is preserved as an improvement to motion clarity rather than a final flicker solution.
 
 ## Not established
 
