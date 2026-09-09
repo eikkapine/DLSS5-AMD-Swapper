@@ -111,7 +111,7 @@ public:
         if (nativeResidualComposite_) {
             CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                                D3D11_BIND_SHADER_RESOURCE,
-                               width_, height_, previousNeuralInputTexture_, previousNeuralInputView_);
+                               width_, height_, previousInputTexture_, previousInputView_);
             CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                                D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
                                displayWidth_, displayHeight_, sourceTexture_, sourceView_);
@@ -255,13 +255,9 @@ public:
             throw std::runtime_error("Prior direct capture has not completed its consumer fence");
         }
         if (nativeResidualComposite_ && inputInitialized_) {
-            // Preserve both representations of the source that is about to be
-            // replaced. The low-resolution copy matches asynchronous neural output;
-            // the native copy lets temporal stabilization isolate the prior neural
-            // correction from ordinary scene/camera/exposure changes.
-            context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
-            previousNeuralInputValid_ = true;
-            previousNeuralInputValue_ = inputValue_;
+            // Keep exactly one prior source only for motion rejection and exact
+            // static-pixel validation. It is never blended into a changed pixel.
+            context_->CopyResource(previousInputTexture_.Get(), input_.texture.Get());
             context_->CopyResource(previousSourceTexture_.Get(), sourceTexture_.Get());
             previousSourceValid_ = true;
             previousSourceInputValue_ = inputValue_;
@@ -316,23 +312,7 @@ public:
         Require(context_->Wait(outputReady11_.Get(), value), "D3D11 wait for neural output copy");
     }
 
-    void CommitSubmittedNeuralInput() {
-        if (!nativeResidualComposite_ || !inputInitialized_) {
-            return;
-        }
-        // Inline=0 is one submitted job ahead of the published backbuffer. The
-        // next Compose must therefore subtract the input used by this exact feed.
-        // A capture may be fed multiple times between WGC updates, so recording
-        // history only when UpdateInput() runs is insufficient and caused the
-        // compositor to subtract an older frame from a newer neural output.
-        if (!previousNeuralInputValid_ || previousNeuralInputValue_ != inputValue_) {
-            context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
-            previousNeuralInputValid_ = true;
-            previousNeuralInputValue_ = inputValue_;
-        }
-    }
-
-    FrameStatistics Compose(UINT alpha, bool preferPreviousNeuralInput = false) {
+    FrameStatistics Compose(UINT alpha) {
         const UINT maxAlpha = nativeResidualComposite_ ? 1024u : 256u;
         if (alpha > maxAlpha) {
             throw std::runtime_error("GPU transport blend alpha is out of range");
@@ -340,24 +320,18 @@ public:
         // Input statistics depend only on this exact input upload, not on
         // neural progress or strength. Keep them until SignalInput changes it.
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
-        const UINT64 neuralInputValue = preferPreviousNeuralInput && previousNeuralInputValid_
-            ? previousNeuralInputValue_ : inputValue_;
-        const bool sameStrengthHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
-                                         historyMappingValid_;
-        const bool historySourceIsCurrent = sameStrengthHistory &&
-                                            historySourceInputValue_ == inputValue_;
-        const bool historySourceIsPrevious = sameStrengthHistory && previousSourceValid_ &&
-                                             historySourceInputValue_ == previousSourceInputValue_;
-        const bool correctionHistoryValid = historySourceIsCurrent || historySourceIsPrevious;
-        const bool repeatedNeuralMapping = correctionHistoryValid && historySourceIsCurrent &&
-                                           historyNeuralInputValue_ == neuralInputValue;
+        const UINT64 neuralInputValue = inputValue_;
+        const bool repeatedSourceCorrection = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
+                                              historySourceInputValue_ == inputValue_ &&
+                                              historyNeuralInputValue_ == neuralInputValue;
+        const bool historyMatchesPreviousSource = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
+                                                  previousSourceValid_ &&
+                                                  historySourceInputValue_ == previousSourceInputValue_;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u) |
                                 (nativeResidualComposite_ ? 4u : 0u) |
-                                (previousNeuralInputValid_ ? 8u : 0u) |
-                                (preferPreviousNeuralInput ? 16u : 0u) |
-                                (correctionHistoryValid ? 32u : 0u) |
-                                (historySourceIsCurrent ? 64u : 0u) |
-                                (repeatedNeuralMapping ? 128u : 0u);
+                                (repeatedSourceCorrection ? 8u : 0u) |
+                                (previousSourceValid_ ? 16u : 0u) |
+                                (historyMatchesPreviousSource ? 32u : 0u);
         const std::array<UINT, 8> parameters = {
             width_, height_, displayWidth_, displayHeight_, alpha, frameFlags, 0u, 0u
         };
@@ -367,7 +341,7 @@ public:
                                                                       : outputs_[historyOutputIndex_].view.Get();
         ID3D11ShaderResourceView* inputs[] = {
             input_.view.Get(), outputs_[outputIndex_].view.Get(), source, history,
-            nullptr, previousNeuralInputView_.Get(), previousSourceView_.Get()
+            nullptr, previousInputView_.Get(), previousSourceView_.Get()
         };
         ID3D11UnorderedAccessView* outputs[] = {composedUav_.Get(), nullptr, tileStatisticsUav_.Get()};
         ID3D11Buffer* constants[] = {parameters_.Get()};
@@ -426,7 +400,6 @@ public:
         }
         lastComposedSourceInputValue_ = inputValue_;
         lastComposedNeuralInputValue_ = neuralInputValue;
-        lastComposedMappingValid_ = true;
         return {values[0] != 0, values[1] != 0, sourceMeaningfullyNonblack_};
     }
 
@@ -453,7 +426,6 @@ public:
             historyAlpha_ = displayAlpha_;
             historySourceInputValue_ = lastComposedSourceInputValue_;
             historyNeuralInputValue_ = lastComposedNeuralInputValue_;
-            historyMappingValid_ = lastComposedMappingValid_;
             historyValid_ = true;
             return;
         }
@@ -472,7 +444,6 @@ public:
         }
         historyOutputIndex_ = outputIndex_;
         historyAlpha_ = displayAlpha_;
-        historyMappingValid_ = false;
         historyValid_ = true;
     }
 
@@ -493,7 +464,7 @@ public:
     uint64_t historyCopies() const { return historyCopies_; }
     uint64_t sourceHistoryCopies() const { return sourceHistoryCopies_; }
 
-    void InvalidateHistory() { historyValid_ = false; historyMappingValid_ = false; }
+    void InvalidateHistory() { historyValid_ = false; }
 
 private:
     struct SharedTexture {
@@ -723,9 +694,9 @@ private:
     UINT sourceWidth_ = 0, sourceHeight_ = 0;
     UINT capturedWidth_ = 0, capturedHeight_ = 0;
     ComPtr<ID3D11Texture2D> capturedTexture_, sourceTexture_, composedTexture_, historyTexture_;
-    ComPtr<ID3D11Texture2D> previousNeuralInputTexture_, previousSourceTexture_;
+    ComPtr<ID3D11Texture2D> previousInputTexture_, previousSourceTexture_;
     ComPtr<ID3D11ShaderResourceView> capturedView_, sourceView_, composedView_, historyView_;
-    ComPtr<ID3D11ShaderResourceView> previousNeuralInputView_, previousSourceView_;
+    ComPtr<ID3D11ShaderResourceView> previousInputView_, previousSourceView_;
     ComPtr<ID3D11RenderTargetView> inputTarget_, sourceTarget_;
     ComPtr<ID3D11UnorderedAccessView> composedUav_, counterUav_, tileStatisticsUav_;
     ComPtr<ID3D11ShaderResourceView> tileStatisticsView_;
@@ -738,14 +709,10 @@ private:
     ComPtr<ID3D11SamplerState> resizeSampler_;
     bool historyValid_ = false;
     bool inputInitialized_ = false;
-    bool previousNeuralInputValid_ = false;
-    UINT64 previousNeuralInputValue_ = 0;
     bool previousSourceValid_ = false;
     UINT64 previousSourceInputValue_ = 0;
     UINT64 lastComposedSourceInputValue_ = 0, lastComposedNeuralInputValue_ = 0;
-    bool lastComposedMappingValid_ = false;
     UINT64 historySourceInputValue_ = 0, historyNeuralInputValue_ = 0;
-    bool historyMappingValid_ = false;
     UINT displayAlpha_ = 256;
     UINT historyAlpha_ = 256;
     bool sourceStatisticsValid_ = false;

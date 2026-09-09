@@ -1680,8 +1680,14 @@ public:
             repaintRequired_ = true;
             ++occludedSubmissions_;
         } else {
-            if (stats.changed) ++changedRgbUpdates_;
-            transport.AcceptPresentation();
+            if (stats.changed) {
+                ++changedRgbUpdates_;
+                // Duplicate forced presents are cadence only. Do not rewrite
+                // history for the same pixels; that keeps the high-rate source
+                // stream cheap and leaves correction history tied to a real
+                // image change.
+                transport.AcceptPresentation();
+            }
             repaintRequired_ = false;
             hasPresentedFrame_ = false; // A later CPU fallback must refresh its own history.
         }
@@ -2192,7 +2198,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=source_matched_stable_neural_delta\n"
+                   << "gpu_transport_revision=async_residual_spatial_filter_motion_rejection\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2363,10 +2369,6 @@ int wmain(int argc, wchar_t** argv) {
                         prefetchedFrame = nullptr;
                         capturedTexture = std::move(prefetchedTexture);
                     }
-                    if (progress.available) seenReturnedWaits = progress.returnedWaits;
-                    if (completionHint) ++completionHintFeeds;
-                    if (progress.available && progress.activeWaits && keepaliveDue) ++keepaliveFeeds;
-                    lastGpuFeedAt = now;
                     stageTimes[1] = PerformanceStats::Clock::now();
                     if (capturedFrame) {
                         gpuTransport->UpdateInput(capturedTexture.Get());
@@ -2375,12 +2377,16 @@ int wmain(int argc, wchar_t** argv) {
                     nrPresenter.PresentGpu(*gpuTransport);
                     stageTimes[3] = PerformanceStats::Clock::now();
                     nrPresenter.CopyOutputGpu(*gpuTransport);
+                    if (progress.available) seenReturnedWaits = progress.returnedWaits;
+                    if (completionHint) ++completionHintFeeds;
+                    if (progress.available && progress.activeWaits && keepaliveDue) ++keepaliveFeeds;
+                    lastGpuFeedAt = now;
                     const float gpuStrength = options.neuralMaxHeight > 0
                         ? std::clamp(strength, 0.0f, 4.0f)
                         : std::clamp(strength, 0.0f, 1.0f);
                     const UINT alpha = effectEnabled
                         ? static_cast<UINT>(std::lround(gpuStrength * 256.0f)) : 0;
-                    auto stats = gpuTransport->Compose(alpha, asyncOutputUsesPreviousInput);
+                    auto stats = gpuTransport->Compose(alpha);
                     // Compose's bounded D3D11 consumer fence follows its wait
                     // on the D3D12 output copy. That copy follows the feed and
                     // input-ready wait, so all reads of this WGC surface have
@@ -2394,14 +2400,16 @@ int wmain(int argc, wchar_t** argv) {
                     const bool wasEnabled = effectEnabled;
                     guardBlackOutput(stats.sourceMeaningfullyNonblack, stats.neuralNonblack);
                     if (wasEnabled && !effectEnabled) {
-                        stats = gpuTransport->Compose(0, asyncOutputUsesPreviousInput);
+                        stats = gpuTransport->Compose(0);
                     }
-                    // Record the input used by this feed only after Compose has
-                    // consumed the prior-feed texture needed for the current output.
-                    gpuTransport->CommitSubmittedNeuralInput();
                     stageTimes[5] = PerformanceStats::Clock::now();
+                    // Lossless Scaling observes this bridge window as its source.
+                    // Keep presenting at the neural/feed cadence even when the
+                    // pixels are identical; suppressing those presents made the
+                    // source stream collapse to WGC's ~60 changed frames/s.
+                    const bool cadencePresent = asyncBackbufferRuntime && effectEnabled;
                     const bool visibleSubmitted = visiblePresenter.PresentGpu(
-                        *gpuTransport, stats, !readyWritten || pendingHotkeySnapshot);
+                        *gpuTransport, stats, !readyWritten || pendingHotkeySnapshot || cadencePresent);
                     stageTimes[6] = PerformanceStats::Clock::now();
                     performance.Record(stageTimes);
                     ++gpuTransportFrames;
