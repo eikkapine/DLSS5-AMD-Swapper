@@ -120,6 +120,9 @@ public:
             CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                                D3D11_BIND_SHADER_RESOURCE,
                                displayWidth_, displayHeight_, historyTexture_, historyView_);
+            CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
+                               D3D11_BIND_SHADER_RESOURCE,
+                               displayWidth_, displayHeight_, previousSourceTexture_, previousSourceView_);
         }
         CreateLocalTexture(DXGI_FORMAT_R8G8B8A8_UNORM,
                            D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS,
@@ -252,12 +255,17 @@ public:
             throw std::runtime_error("Prior direct capture has not completed its consumer fence");
         }
         if (nativeResidualComposite_ && inputInitialized_) {
-            // Preserve the input from the immediately preceding feed before a new
-            // capture replaces it. Repeated feeds of the same capture are handled
-            // by CommitSubmittedNeuralInput() after composition.
+            // Preserve both representations of the source that is about to be
+            // replaced. The low-resolution copy matches asynchronous neural output;
+            // the native copy lets temporal stabilization isolate the prior neural
+            // correction from ordinary scene/camera/exposure changes.
             context_->CopyResource(previousNeuralInputTexture_.Get(), input_.texture.Get());
             previousNeuralInputValid_ = true;
             previousNeuralInputValue_ = inputValue_;
+            context_->CopyResource(previousSourceTexture_.Get(), sourceTexture_.Get());
+            previousSourceValid_ = true;
+            previousSourceInputValue_ = inputValue_;
+            ++sourceHistoryCopies_;
         }
         // WGC surfaces which support SRVs can feed the existing exact BGRA
         // conversion directly. Keep this view only while its frame is checked
@@ -334,14 +342,22 @@ public:
         const bool analyzeSource = !sourceStatisticsValid_ || sourceStatisticsInput_ != inputValue_;
         const UINT64 neuralInputValue = preferPreviousNeuralInput && previousNeuralInputValid_
             ? previousNeuralInputValue_ : inputValue_;
-        const bool matchedHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
-            lastComposedMappingValid_ && lastComposedSourceInputValue_ == inputValue_ &&
-            lastComposedNeuralInputValue_ == neuralInputValue;
+        const bool sameStrengthHistory = historyValid_ && alpha != 0 && historyAlpha_ == alpha &&
+                                         historyMappingValid_;
+        const bool historySourceIsCurrent = sameStrengthHistory &&
+                                            historySourceInputValue_ == inputValue_;
+        const bool historySourceIsPrevious = sameStrengthHistory && previousSourceValid_ &&
+                                             historySourceInputValue_ == previousSourceInputValue_;
+        const bool correctionHistoryValid = historySourceIsCurrent || historySourceIsPrevious;
+        const bool repeatedNeuralMapping = correctionHistoryValid && historySourceIsCurrent &&
+                                           historyNeuralInputValue_ == neuralInputValue;
         const UINT frameFlags = (historyValid_ ? 1u : 0u) | (analyzeSource ? 2u : 0u) |
                                 (nativeResidualComposite_ ? 4u : 0u) |
                                 (previousNeuralInputValid_ ? 8u : 0u) |
                                 (preferPreviousNeuralInput ? 16u : 0u) |
-                                (matchedHistory ? 32u : 0u);
+                                (correctionHistoryValid ? 32u : 0u) |
+                                (historySourceIsCurrent ? 64u : 0u) |
+                                (repeatedNeuralMapping ? 128u : 0u);
         const std::array<UINT, 8> parameters = {
             width_, height_, displayWidth_, displayHeight_, alpha, frameFlags, 0u, 0u
         };
@@ -351,20 +367,20 @@ public:
                                                                       : outputs_[historyOutputIndex_].view.Get();
         ID3D11ShaderResourceView* inputs[] = {
             input_.view.Get(), outputs_[outputIndex_].view.Get(), source, history,
-            nullptr, previousNeuralInputView_.Get()
+            nullptr, previousNeuralInputView_.Get(), previousSourceView_.Get()
         };
         ID3D11UnorderedAccessView* outputs[] = {composedUav_.Get(), nullptr, tileStatisticsUav_.Get()};
         ID3D11Buffer* constants[] = {parameters_.Get()};
         context_->CSSetShader(composeShader_.Get(), nullptr, 0);
         context_->CSSetConstantBuffers(0, 1, constants);
-        context_->CSSetShaderResources(0, 6, inputs);
+        context_->CSSetShaderResources(0, 7, inputs);
         ID3D11SamplerState* samplers[] = {resizeSampler_.Get()};
         context_->CSSetSamplers(0, 1, samplers);
         context_->CSSetUnorderedAccessViews(0, 3, outputs, nullptr);
         context_->Dispatch((displayWidth_ + 15) / 16, (displayHeight_ + 15) / 16, 1);
-        ID3D11ShaderResourceView* noInputs[6]{};
+        ID3D11ShaderResourceView* noInputs[7]{};
         ID3D11UnorderedAccessView* noOutputs[3]{};
-        context_->CSSetShaderResources(0, 6, noInputs);
+        context_->CSSetShaderResources(0, 7, noInputs);
         ID3D11SamplerState* noSamplers[] = {nullptr};
         context_->CSSetSamplers(0, 1, noSamplers);
         context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
@@ -378,7 +394,7 @@ public:
         context_->CSSetShaderResources(4, 1, tileInputs);
         context_->CSSetUnorderedAccessViews(1, 1, reducedOutputs, nullptr);
         context_->Dispatch(1, 1, 1);
-        context_->CSSetShaderResources(0, 6, noInputs);
+        context_->CSSetShaderResources(0, 7, noInputs);
         context_->CSSetUnorderedAccessViews(0, 3, noOutputs, nullptr);
         context_->CSSetShader(nullptr, nullptr, 0);
         context_->CopyResource(counterReadback_.Get(), counters_.Get());
@@ -435,6 +451,9 @@ public:
             context_->CopyResource(historyTexture_.Get(), image);
             ++historyCopies_;
             historyAlpha_ = displayAlpha_;
+            historySourceInputValue_ = lastComposedSourceInputValue_;
+            historyNeuralInputValue_ = lastComposedNeuralInputValue_;
+            historyMappingValid_ = lastComposedMappingValid_;
             historyValid_ = true;
             return;
         }
@@ -453,6 +472,7 @@ public:
         }
         historyOutputIndex_ = outputIndex_;
         historyAlpha_ = displayAlpha_;
+        historyMappingValid_ = false;
         historyValid_ = true;
     }
 
@@ -471,8 +491,9 @@ public:
     uint64_t scaledCaptureCount() const { return scaledCaptureCount_; }
     uint64_t historyCopiesAvoided() const { return historyCopiesAvoided_; }
     uint64_t historyCopies() const { return historyCopies_; }
+    uint64_t sourceHistoryCopies() const { return sourceHistoryCopies_; }
 
-    void InvalidateHistory() { historyValid_ = false; }
+    void InvalidateHistory() { historyValid_ = false; historyMappingValid_ = false; }
 
 private:
     struct SharedTexture {
@@ -702,9 +723,9 @@ private:
     UINT sourceWidth_ = 0, sourceHeight_ = 0;
     UINT capturedWidth_ = 0, capturedHeight_ = 0;
     ComPtr<ID3D11Texture2D> capturedTexture_, sourceTexture_, composedTexture_, historyTexture_;
-    ComPtr<ID3D11Texture2D> previousNeuralInputTexture_;
+    ComPtr<ID3D11Texture2D> previousNeuralInputTexture_, previousSourceTexture_;
     ComPtr<ID3D11ShaderResourceView> capturedView_, sourceView_, composedView_, historyView_;
-    ComPtr<ID3D11ShaderResourceView> previousNeuralInputView_;
+    ComPtr<ID3D11ShaderResourceView> previousNeuralInputView_, previousSourceView_;
     ComPtr<ID3D11RenderTargetView> inputTarget_, sourceTarget_;
     ComPtr<ID3D11UnorderedAccessView> composedUav_, counterUav_, tileStatisticsUav_;
     ComPtr<ID3D11ShaderResourceView> tileStatisticsView_;
@@ -719,8 +740,12 @@ private:
     bool inputInitialized_ = false;
     bool previousNeuralInputValid_ = false;
     UINT64 previousNeuralInputValue_ = 0;
+    bool previousSourceValid_ = false;
+    UINT64 previousSourceInputValue_ = 0;
     UINT64 lastComposedSourceInputValue_ = 0, lastComposedNeuralInputValue_ = 0;
     bool lastComposedMappingValid_ = false;
+    UINT64 historySourceInputValue_ = 0, historyNeuralInputValue_ = 0;
+    bool historyMappingValid_ = false;
     UINT displayAlpha_ = 256;
     UINT historyAlpha_ = 256;
     bool sourceStatisticsValid_ = false;
@@ -731,7 +756,7 @@ private:
     uint64_t sourceAnalysisCount_ = 0;
     uint64_t directCaptureCount_ = 0, copiedCaptureCount_ = 0;
     uint64_t scaledCaptureCount_ = 0;
-    uint64_t historyCopiesAvoided_ = 0, historyCopies_ = 0;
+    uint64_t historyCopiesAvoided_ = 0, historyCopies_ = 0, sourceHistoryCopies_ = 0;
 };
 
 } // namespace bridge_gpu

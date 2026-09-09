@@ -6,6 +6,7 @@ Texture2D<float4> sourceImage : register(t2);
 Texture2D<float4> previousImage : register(t3);
 ByteAddressBuffer tileStatistics : register(t4);
 Texture2D<float4> previousNeuralInput : register(t5);
+Texture2D<float4> previousSourceImage : register(t6);
 RWTexture2D<unorm float4> composedImage : register(u0);
 RWByteAddressBuffer counters : register(u1);
 RWByteAddressBuffer tileStatisticsOutput : register(u2);
@@ -18,7 +19,7 @@ cbuffer FrameParameters : register(b0)
     uint imageWidth;
     uint imageHeight;
     uint blendAlpha; // 0..256 normally; native-detail mode allows up to 1024 (4x).
-    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native neural-delta; bit 3: prior neural input; bit 4: async output uses prior input; bit 5: feed-matched stable history.
+    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native neural-delta; bit 3: prior neural input; bit 4: async output uses prior input; bit 5: valid correction history; bit 6: history source is current source; bit 7: repeated neural mapping.
     uint reserved0;
     uint reserved1;
 };
@@ -70,7 +71,9 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
     bool nativeResidualComposite = (frameFlags & 4u) != 0;
     bool hasPreviousNeuralInput = (frameFlags & 8u) != 0;
     bool preferPreviousNeuralInput = (frameFlags & 16u) != 0;
-    bool stabilizeMatchedHistory = (frameFlags & 32u) != 0;
+    bool hasCorrectionHistory = (frameFlags & 32u) != 0;
+    bool historySourceIsCurrent = (frameFlags & 64u) != 0;
+    bool repeatedNeuralMapping = (frameFlags & 128u) != 0;
     uint laneChanged = 0;
     uint laneNonblack = 0;
     uint laneSourceSum = 0;
@@ -119,20 +122,33 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
                 float amount = (float)blendAlpha / 256.0;
                 float3 correction = (neuralLow - neuralInput) * amount * temporalConfidence;
 
-                // Anti-flicker operates only on the neural correction. The current
-                // native source remains untouched, so temporal accumulation cannot
-                // soften source detail. Reuse the history sample already required
-                // for changed-RGB detection and clamp its correction contribution to
-                // the current correction before blending. This adds arithmetic only:
-                // no extra texture fetch, neural pass, dispatch, or full-frame copy.
-                if (stabilizeMatchedHistory && hasPreviousNeuralInput)
+                // Temporal stability is applied to the neural correction only.
+                // Keep the previous native source separately so ordinary camera or
+                // exposure changes cannot be mistaken for neural history. Repeated
+                // inference of the exact same source/mapping may still contain tiny
+                // stochastic changes, so it slews toward the new correction at about
+                // one 8-bit level per feed at 1x instead of flashing between results.
+                // Real new source frames can move faster in locally stable regions.
+                // The current native source is never temporally blended.
+                if (hasCorrectionHistory && hasPreviousNeuralInput)
                 {
-                    float stability = 1.0 - smoothstep(0.012, 0.065, motionAmount);
-                    float3 previousCorrection = previousVisible - originalNative;
-                    float3 historyRange = 0.02 + abs(correction) * 0.50;
-                    float3 boundedPrevious = clamp(
-                        previousCorrection, correction - historyRange, correction + historyRange);
-                    correction = lerp(correction, boundedPrevious, stability * 0.55);
+                    float3 previousSourceNative = historySourceIsCurrent
+                        ? originalNative : previousSourceImage.Load(location).rgb;
+                    float3 previousCorrection = previousVisible - previousSourceNative;
+                    if (repeatedNeuralMapping)
+                    {
+                        float repeatedStep = (1.0 / 255.0) * max(1.0, amount);
+                        correction = clamp(
+                            correction, previousCorrection - repeatedStep, previousCorrection + repeatedStep);
+                    }
+                    else
+                    {
+                        float stability = 1.0 - smoothstep(0.018, 0.105, motionAmount);
+                        float stepLimit = (0.018 + 0.10 * motionAmount) * max(1.0, amount);
+                        float3 boundedCurrent = clamp(
+                            correction, previousCorrection - stepLimit, previousCorrection + stepLimit);
+                        correction = lerp(correction, boundedCurrent, stability);
+                    }
                 }
 
                 float3 nativeResult = saturate(originalNative + correction);

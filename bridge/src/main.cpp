@@ -2192,7 +2192,7 @@ int wmain(int argc, wchar_t** argv) {
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=feed_matched_stable_neural_delta\n"
+                   << "gpu_transport_revision=source_matched_stable_neural_delta\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2246,7 +2246,8 @@ int wmain(int argc, wchar_t** argv) {
                            << " total_copied_captures=" << gpuTransport->copiedCaptureCount()
                            << " total_scaled_captures=" << gpuTransport->scaledCaptureCount()
                            << " total_history_copies_avoided=" << gpuTransport->historyCopiesAvoided()
-                           << " total_history_copies=" << gpuTransport->historyCopies();
+                           << " total_history_copies=" << gpuTransport->historyCopies()
+                           << " total_source_history_copies=" << gpuTransport->sourceHistoryCopies();
             }
             constexpr const char* stageNames[] = {"capture", "prepare", "nr_present", "output_handoff", "guard_blend", "visible_present"};
             const uint64_t iterations = performance.frames - cadenceIterations;
