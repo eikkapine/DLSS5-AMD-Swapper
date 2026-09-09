@@ -96,6 +96,7 @@ struct Config {
     // Missing key keeps older installations on their prior behavior. New
     // installs write the current performance preset explicitly.
     float workingScale = 0.0f;
+    int neuralMaxHeight = 0;
     int width = 1280;
     int height = 720;
     int startupDelayMs = 2000;
@@ -223,6 +224,10 @@ bool UsesReducedWorkingResolution(const Config& config) {
     return config.workingScale >= 0.25f && config.workingScale < 0.999f;
 }
 
+bool UsesNativeResidualComposite(const Config& config) {
+    return config.neuralMaxHeight >= 64;
+}
+
 std::filesystem::path ResolvePath(const std::wstring& value, const std::filesystem::path& base) {
     std::filesystem::path path(value);
     if (path.is_relative()) {
@@ -280,6 +285,9 @@ Config LoadConfig() {
         } else if (key == L"workingscale") {
             const float parsed = ParseFloat(value, config.workingScale);
             config.workingScale = parsed <= 0.0f ? 0.0f : std::clamp(parsed, 0.25f, 1.0f);
+        } else if (key == L"neuralmaxheight") {
+            const int parsed = ParseInt(value, config.neuralMaxHeight);
+            config.neuralMaxHeight = parsed <= 0 ? 0 : std::clamp(parsed, 64, 2160);
         } else if (key == L"width") {
             config.width = ParseInt(value, config.width);
         } else if (key == L"height") {
@@ -399,7 +407,9 @@ std::wstring BuildCommandLine(const Config& config,
         << L" --ready-file " << QuoteArg(readyFile.wstring())
         << L" --stop-event " << QuoteArg(stopEventName)
         << L" --parent-pid " << GetCurrentProcessId();
-    if (UsesReducedWorkingResolution(config)) {
+    if (UsesNativeResidualComposite(config)) {
+        cmd << L" --neural-max-height " << config.neuralMaxHeight;
+    } else if (UsesReducedWorkingResolution(config)) {
         cmd << L" --working-scale " << std::fixed << std::setprecision(3) << config.workingScale;
     } else if (config.nativeResolution) {
         cmd << L" --native-resolution";
@@ -616,8 +626,14 @@ void ApplyBridgeSettings(SettingsSnapshot settings) {
         return;
     }
 
-    const bool reducedWorkingResolution = UsesReducedWorkingResolution(g_config);
-    if (g_config.nativeResolution && !reducedWorkingResolution) {
+    const bool nativeResidualComposite = UsesNativeResidualComposite(g_config);
+    const bool reducedWorkingResolution = UsesReducedWorkingResolution(g_config) && !nativeResidualComposite;
+    if (nativeResidualComposite) {
+        std::wstringstream message;
+        message << L"Applying native-resolution source output with neural max height "
+                << g_config.neuralMaxHeight << L"; preserving the selected Lossless Scaling scaler state";
+        Log(message.str());
+    } else if (g_config.nativeResolution && !reducedWorkingResolution) {
         settings.scalingMode = 1;
         settings.scalingType = 0;
         settings.scaleFactor = 1.0f;

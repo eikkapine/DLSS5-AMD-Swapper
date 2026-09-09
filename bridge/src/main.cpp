@@ -70,6 +70,9 @@ struct Options {
     bool freezeSource = false;
     bool nativeResolution = false;
     float workingScale = 0.0f;
+    UINT neuralMaxHeight = 0;
+    UINT displayWidth = 0;
+    UINT displayHeight = 0;
     bool preciseScheduling = true;
     bool repeatPresentations = false;
     bool completionPacing = true;
@@ -421,6 +424,12 @@ Options ParseOptions(int argc, wchar_t** argv) {
                 throw std::runtime_error("--working-scale must be between 0.25 and 1.0");
             }
             options.workingScale = value;
+        } else if (arg == L"--neural-max-height") {
+            const unsigned long value = std::stoul(needValue(L"--neural-max-height"));
+            if (value < 64 || value > 2160) {
+                throw std::runtime_error("--neural-max-height must be between 64 and 2160");
+            }
+            options.neuralMaxHeight = static_cast<UINT>(value);
         } else if (arg == L"--default-scheduling") {
             options.preciseScheduling = false;
         } else if (arg == L"--repeat-presentations") {
@@ -449,7 +458,12 @@ Options ParseOptions(int argc, wchar_t** argv) {
             throw std::runtime_error(NarrowAscii(ws.str()));
         }
     }
-    if (options.workingScale > 0.0f && options.workingScale < 0.999f) {
+    if (options.neuralMaxHeight > 0) {
+        // Native-detail mode owns the source-relative resolution choice. Keep
+        // the legacy controls available as explicit rollback modes.
+        options.nativeResolution = false;
+        options.workingScale = 0.0f;
+    } else if (options.workingScale > 0.0f && options.workingScale < 0.999f) {
         // Reduced NR must leave the final scaler active. It intentionally
         // takes precedence if both switches were supplied.
         options.nativeResolution = false;
@@ -790,6 +804,73 @@ UINT ScaledEvenDimension(UINT source, float scale) {
     result = std::max<UINT>(64, result);
     result &= ~1u;
     return std::max<UINT>(64, result);
+}
+
+std::pair<UINT, UINT> FitNeuralDimensions(UINT sourceWidth, UINT sourceHeight, UINT maxHeight) {
+    if (sourceWidth == 0 || sourceHeight == 0 || maxHeight < 64) {
+        throw std::runtime_error("Cannot derive neural dimensions from an empty source");
+    }
+    const double scale = std::min({1.0,
+                                   static_cast<double>(maxHeight) / sourceHeight,
+                                   3840.0 / sourceWidth});
+    if (scale >= 0.999999) {
+        return {sourceWidth, sourceHeight};
+    }
+    auto nearestEven = [](double value) {
+        UINT result = static_cast<UINT>(std::lround(value / 2.0) * 2.0);
+        return std::max<UINT>(64, result);
+    };
+    UINT width = nearestEven(sourceWidth * scale);
+    UINT height = nearestEven(sourceHeight * scale);
+    while (height > maxHeight && height > 64) height -= 2;
+    while (width > 3840 && width > 64) width -= 2;
+    return {width, height};
+}
+
+FramePixels ComposeNativeDetailCpu(const FramePixels& nativeSource,
+                                   const FramePixels& neuralInput,
+                                   const FramePixels& neuralOutput,
+                                   float strength,
+                                   bool enabled) {
+    if (!enabled || strength <= 0.0f) {
+        return nativeSource;
+    }
+    if (neuralOutput.width == 0 || neuralOutput.height == 0 || neuralOutput.rgba.empty()) {
+        throw std::runtime_error("Neural output is empty during native-detail fallback");
+    }
+    if (neuralInput.width != neuralOutput.width || neuralInput.height != neuralOutput.height ||
+        neuralInput.rgba.size() != neuralOutput.rgba.size()) {
+        throw std::runtime_error("Neural input/output dimensions differ during native-detail fallback");
+    }
+    FramePixels result = nativeSource;
+    const float amount = std::clamp(strength, 0.0f, 4.0f);
+    auto sampleAt = [](const FramePixels& frame, UINT x, UINT y, size_t channel) -> int {
+        x = std::min(x, frame.width - 1);
+        y = std::min(y, frame.height - 1);
+        return frame.rgba[(static_cast<size_t>(y) * frame.width + x) * 4 + channel];
+    };
+    auto neuralAt = [&](UINT x, UINT y, size_t channel) -> int {
+        x = std::min(x, neuralOutput.width - 1);
+        y = std::min(y, neuralOutput.height - 1);
+        return sampleAt(neuralOutput, x, y, channel);
+    };
+    for (UINT y = 0; y < nativeSource.height; ++y) {
+        const UINT ny = std::min<UINT>(neuralOutput.height - 1,
+            static_cast<UINT>(static_cast<uint64_t>(y) * neuralOutput.height / nativeSource.height));
+        for (UINT x = 0; x < nativeSource.width; ++x) {
+            const UINT nx = std::min<UINT>(neuralOutput.width - 1,
+                static_cast<UINT>(static_cast<uint64_t>(x) * neuralOutput.width / nativeSource.width));
+            const size_t offset = (static_cast<size_t>(y) * nativeSource.width + x) * 4;
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const int neural = neuralAt(nx, ny, channel);
+                const int input = sampleAt(neuralInput, nx, ny, channel);
+                const int value = static_cast<int>(nativeSource.rgba[offset + channel]) +
+                                  static_cast<int>(std::lround((neural - input) * amount));
+                result.rgba[offset + channel] = static_cast<uint8_t>(std::clamp(value, 0, 255));
+            }
+        }
+    }
+    return result;
 }
 
 const FramePixels& SelectInputFrame(const FramePixels& src,
@@ -1638,7 +1719,7 @@ private:
 void UpdateBridgeTitle(HWND hwnd, bool enabled, float strength, bool frozenSource) {
     std::wstringstream title;
     title << L"DLSS NR Bridge [" << (enabled ? L"on" : L"off") << L" "
-          << std::fixed << std::setprecision(1) << strength;
+          << std::fixed << std::setprecision(2) << strength;
     if (frozenSource) {
         title << L" frozen-source diagnostic";
     }
@@ -1662,10 +1743,13 @@ void WriteReport(const std::filesystem::path& path,
     std::ofstream report(path, std::ios::binary);
     report << "source_hwnd=0x" << std::hex << reinterpret_cast<uintptr_t>(source) << std::dec << "\n";
     report << "source_title=" << NarrowAscii(WindowTitle(source)) << "\n";
-    report << "output_width=" << options.width << "\n";
-    report << "output_height=" << options.height << "\n";
+    report << "output_width=" << options.displayWidth << "\n";
+    report << "output_height=" << options.displayHeight << "\n";
+    report << "neural_width=" << options.width << "\n";
+    report << "neural_height=" << options.height << "\n";
     report << "native_resolution=" << (options.nativeResolution ? 1 : 0) << "\n";
     report << "working_scale=" << options.workingScale << "\n";
+    report << "neural_max_height=" << options.neuralMaxHeight << "\n";
     report << "source_actual_width=" << sourceActualWidth << "\n";
     report << "source_actual_height=" << sourceActualHeight << "\n";
     report << "frames_captured=" << captured << "\n";
@@ -1816,9 +1900,12 @@ int wmain(int argc, wchar_t** argv) {
             if (!capture.TryCapture(captureFrame)) {
                 return false;
             }
-            // The first native frame establishes the dimensions below.
-            if (options.nativeResolution && lastInputFrame) {
-                ValidateNativeDimensions(captureFrame, options.width, options.height);
+            // Source-relative modes lock to the first captured dimensions so a
+            // resolution change cannot silently mismatch neural/native history.
+            if ((options.nativeResolution || options.neuralMaxHeight > 0 ||
+                 (options.workingScale > 0.0f && options.workingScale < 0.999f)) &&
+                lastInputFrame && sourceActualWidth != 0 && sourceActualHeight != 0) {
+                ValidateNativeDimensions(captureFrame, sourceActualWidth, sourceActualHeight);
             }
             sourceActualWidth = captureFrame.width;
             sourceActualHeight = captureFrame.height;
@@ -1848,7 +1935,7 @@ int wmain(int argc, wchar_t** argv) {
             return true;
         };
 
-        const bool sourceRelativeDimensions = options.nativeResolution ||
+        const bool sourceRelativeDimensions = options.neuralMaxHeight > 0 || options.nativeResolution ||
             (options.workingScale > 0.0f && options.workingScale < 0.999f);
         if (sourceRelativeDimensions) {
             const auto firstFrameDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -1870,7 +1957,14 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
-            if (options.nativeResolution) {
+            if (options.neuralMaxHeight > 0) {
+                options.displayWidth = lastInputFrame->width;
+                options.displayHeight = lastInputFrame->height;
+                const auto neural = FitNeuralDimensions(
+                    lastInputFrame->width, lastInputFrame->height, options.neuralMaxHeight);
+                options.width = neural.first;
+                options.height = neural.second;
+            } else if (options.nativeResolution) {
                 options.width = lastInputFrame->width;
                 options.height = lastInputFrame->height;
             } else {
@@ -1883,6 +1977,10 @@ int wmain(int argc, wchar_t** argv) {
                    << " is outside supported bounds 64..3840 x 64..2160";
                 throw std::runtime_error(os.str());
             }
+        }
+        if (options.displayWidth == 0 || options.displayHeight == 0) {
+            options.displayWidth = options.width;
+            options.displayHeight = options.height;
         }
 
         HWND nrWindow = CreateRenderWindow(instance, L"DLSS NR Bridge NR Feed", options.width, options.height, true, false);
@@ -1965,8 +2063,8 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         ShowWindow(nrWindow, SW_HIDE);
-        HWND bridge = CreateRenderWindow(instance, L"DLSS NR Bridge", options.width, options.height, true, true);
-        D3D11Presenter visiblePresenter(bridge, options.width, options.height, !suppressIdenticalRgb,
+        HWND bridge = CreateRenderWindow(instance, L"DLSS NR Bridge", options.displayWidth, options.displayHeight, true, true);
+        D3D11Presenter visiblePresenter(bridge, options.displayWidth, options.displayHeight, !suppressIdenticalRgb,
                                        capture.device(), capture.context());
         std::unique_ptr<bridge_gpu::FrameTransport> gpuTransport;
         std::string transportDetail = "cpu: diagnostic, bypass, or explicit compatibility mode";
@@ -1974,14 +2072,22 @@ int wmain(int argc, wchar_t** argv) {
             !options.saveCaptures && !options.freezeSource) {
             try {
                 gpuTransport = std::make_unique<bridge_gpu::FrameTransport>(
-                    capture.device(), capture.context(), nrPresenter.device(), options.width, options.height);
+                    capture.device(), capture.context(), nrPresenter.device(), options.width, options.height,
+                    options.displayWidth, options.displayHeight, options.neuralMaxHeight > 0);
                 const FramePixels& initial = SelectInputFrame(*lastInputFrame, options, preparedInputFrame, false);
                 gpuTransport->SeedInput(initial.rgba.data(), options.width * 4);
+                if (options.neuralMaxHeight > 0) {
+                    gpuTransport->SeedNativeSource(lastInputFrame->rgba.data(), options.displayWidth * 4);
+                }
                 std::ostringstream detail;
                 detail << "gpu_shared: d3d11_nt textures imported into D3D12; WGC "
                        << sourceActualWidth << 'x' << sourceActualHeight << " -> neural "
-                       << options.width << 'x' << options.height
-                       << "; GPU bilinear resize only when dimensions differ; 16-byte status readback per compose";
+                       << options.width << 'x' << options.height << " -> visible "
+                       << options.displayWidth << 'x' << options.displayHeight
+                       << (options.neuralMaxHeight > 0
+                           ? "; native source retained + low-res neural delta composite"
+                           : "; GPU bilinear resize only when dimensions differ")
+                       << "; 16-byte status readback per compose";
                 transportDetail = detail.str();
             } catch (const std::exception& error) {
                 gpuTransport.reset();
@@ -1995,6 +2101,7 @@ int wmain(int argc, wchar_t** argv) {
         Hotkeys hotkeys;
         bool effectEnabled = true;
         float strength = 1.0f;
+        const float maxStrength = options.neuralMaxHeight > 0 ? 4.0f : 1.0f;
         UpdateBridgeTitle(bridge, effectEnabled, strength, options.freezeSource);
 
         auto guardBlackOutput = [&](bool sourceIsNonblack, bool neuralIsNonblack) {
@@ -2075,14 +2182,16 @@ int wmain(int argc, wchar_t** argv) {
         std::ofstream cadenceLog("bridge-cadence-" + std::to_string(GetCurrentProcessId()) + ".log");
         cadenceLog << "width=" << options.width << " height=" << options.height
                    << " source_width=" << sourceActualWidth << " source_height=" << sourceActualHeight
+                   << " display_width=" << options.displayWidth << " display_height=" << options.displayHeight
                    << " working_scale=" << options.workingScale
+                   << " neural_max_height=" << options.neuralMaxHeight
                    << " suppress_identical_rgb=" << suppressIdenticalRgb
                    << " minimum_feed_interval_ms=" << std::chrono::duration<double, std::milli>(frameInterval).count()
                    << " transport=" << (gpuTransport ? "gpu_shared" : "cpu")
                    << " runtime_scheduling=unchanged\n"
                    << "transport_detail=" << transportDetail << '\n'
                    << "bridge_version=" << BRIDGE_BUILD_VERSION << '\n'
-                   << "gpu_transport_revision=ring_history_direct_capture_gpu_resize\n"
+                   << "gpu_transport_revision=native_source_temporally_matched_neural_delta\n"
                    << "effect_state_sample=end_of_interval\n"
                    << "hip_host_timing=" << hipTimingStatus << '\n'
                    << "completion_pacing=" << (asyncBackbufferRuntime ? "worker_wait_hints" : "fixed_feed_fallback")
@@ -2172,9 +2281,13 @@ int wmain(int argc, wchar_t** argv) {
                     if (msg.wParam == Hotkeys::ToggleId) {
                         effectEnabled = !effectEnabled;
                     } else if (msg.wParam == Hotkeys::DecreaseId) {
-                        strength = std::max(0.0f, strength - 0.1f);
+                        const float step = strength > 1.0f ? 0.25f : 0.1f;
+                        strength = std::max(0.0f, strength - step);
+                        if (strength < 1.0f && strength > 0.95f) strength = 1.0f;
                     } else if (msg.wParam == Hotkeys::IncreaseId) {
-                        strength = std::min(1.0f, strength + 0.1f);
+                        const float step = strength >= 1.0f && maxStrength > 1.0f ? 0.25f : 0.1f;
+                        strength = std::min(maxStrength, strength + step);
+                        if (strength > 0.95f && strength < 1.0f) strength = 1.0f;
                     }
                     UpdateBridgeTitle(bridge, effectEnabled, strength, options.freezeSource);
                     pendingHotkeySnapshot = true;
@@ -2259,8 +2372,11 @@ int wmain(int argc, wchar_t** argv) {
                     nrPresenter.PresentGpu(*gpuTransport);
                     stageTimes[3] = PerformanceStats::Clock::now();
                     nrPresenter.CopyOutputGpu(*gpuTransport);
+                    const float gpuStrength = options.neuralMaxHeight > 0
+                        ? std::clamp(strength, 0.0f, 4.0f)
+                        : std::clamp(strength, 0.0f, 1.0f);
                     const UINT alpha = effectEnabled
-                        ? static_cast<UINT>(std::lround(std::clamp(strength, 0.0f, 1.0f) * 256.0f)) : 0;
+                        ? static_cast<UINT>(std::lround(gpuStrength * 256.0f)) : 0;
                     auto stats = gpuTransport->Compose(alpha);
                     // Compose's bounded D3D11 consumer fence follows its wait
                     // on the D3D12 output copy. That copy follows the feed and
@@ -2337,19 +2453,29 @@ int wmain(int argc, wchar_t** argv) {
                 lastNrFrame = nrFrame;
             }
             if (!sourceNonBlack.has_value()) {
-                sourceNonBlack = SourceMeaningfullyNonBlack(original);
+                sourceNonBlack = SourceMeaningfullyNonBlack(
+                    options.neuralMaxHeight > 0 ? *lastInputFrame : original);
             }
             const bool nrNonBlack = FrameHasNonBlackPixels(nrFrame);
             guardBlackOutput(*sourceNonBlack, nrNonBlack);
-            // Full-strength NR and bypass need no extra full-frame copy. The
-            // visible upload still forces opaque alpha, exactly as before.
+            // Native-detail fallback preserves the captured source as the base
+            // image and applies the network's low-resolution correction to it.
+            FramePixels nativeResidual;
             FramePixels blended;
-            const FramePixels* display = &original;
-            if (effectEnabled && strength >= 1.0f) {
-                display = &nrFrame;
-            } else if (effectEnabled && strength > 0.0f) {
-                blended = BlendFrames(original, nrFrame, strength, true);
-                display = &blended;
+            const FramePixels* display = options.neuralMaxHeight > 0 ? &*lastInputFrame : &original;
+            if (options.neuralMaxHeight > 0) {
+                if (effectEnabled && strength > 0.0f) {
+                    nativeResidual = ComposeNativeDetailCpu(
+                        *lastInputFrame, original, nrFrame, strength, true);
+                    display = &nativeResidual;
+                }
+            } else {
+                if (effectEnabled && strength >= 1.0f) {
+                    display = &nrFrame;
+                } else if (effectEnabled && strength > 0.0f) {
+                    blended = BlendFrames(original, nrFrame, strength, true);
+                    display = &blended;
+                }
             }
             if (options.saveCaptures) {
                 lastDisplayFrame = *display;

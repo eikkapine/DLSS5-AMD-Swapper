@@ -1,113 +1,97 @@
-# Installation
+# Install and build
 
-NR Auto Scale is still a preview. The installer is designed to work with a normal private Lossless Scaling installation while keeping every paid/vendor file out of the public package.
-
-## What you need
-
-- Windows 11
-- Lossless Scaling installed from an official source
-- An AMD Radeon GPU supported by your chosen compatibility runtime
-- AMD HIP available for the current bridge compute path
-- Your own `version.dll` from the AMD DLSS-NR compatibility project
-- Your own `nvngx_dlssnr.dll`
-
-The release package does not contain those external runtime files.
+NR Auto Scale is experimental tooling for using an AMD DLSS Neural Rendering compatibility runtime through Lossless Scaling. The current preview keeps the visible output at the captured source resolution and caps only the neural branch at **480 pixels high** by default.
 
 ## Install the preview
 
-1. Download the latest ZIP from the [GitHub Releases page](https://github.com/eikkapine/NR-Auto-Scale/releases).
-2. Extract it somewhere outside the Lossless Scaling installation folder.
-3. Close Lossless Scaling if it is running.
-4. Run `Setup.cmd`.
-5. Select the Lossless Scaling install folder if setup cannot detect it.
-6. Select your own `version.dll` when prompted.
-7. Select your own `nvngx_dlssnr.dll` when prompted.
-8. Choose the HIP device index for the AMD GPU you want to use.
-9. Launch Lossless Scaling normally and press **Scale** on the source window you want to process.
+1. Install Lossless Scaling from its official store page.
+2. Download the latest preview ZIP from <https://github.com/eikkapine/NR-Auto-Scale/releases>.
+3. Extract the ZIP somewhere outside the Lossless Scaling folder.
+4. Run:
 
-`HIP_VISIBLE_DEVICES` is machine-specific. The correct AMD index depends on how HIP enumerates the GPUs on that machine.
+   ```powershell
+   .\Setup.cmd
+   ```
 
-## Default performance mode
+5. Pick the Lossless Scaling install folder when prompted.
+6. Supply your own local AMD compatibility proxy and NVIDIA DLSS-NR DLL when prompted. Supply the HIP runtime required by that compatibility runtime using its upstream instructions.
+7. Focus a capturable game/browser/video window and press **Scale** in Lossless Scaling.
 
-New setup writes:
+The release ZIP does not contain NVIDIA DLLs, AMD proxy binaries, model files, HIP installers, paid Lossless Scaling files, private logs or local configuration.
+
+## Default processing mode
+
+Fresh setup writes:
 
 ```ini
-[AutoScale]
 NativeResolution=0
-WorkingScale=0.75
-Width=1280
-Height=720
-ReadyTimeoutMs=180000
-DefaultScalingTypeIfOff=1
-ForceCaptureApi=1
+WorkingScale=0
+NeuralMaxHeight=480
 ```
 
-`WorkingScale=0.75` takes 75% of each source axis for the neural working image. A 2560×1440 source therefore runs NR at 1920×1080, then Lossless Scaling applies the selected scaler. If the selected scaler is Off, `DefaultScalingTypeIfOff=1` can select LS1.
+`NeuralMaxHeight=480` takes precedence. The bridge captures the source at its real size, creates a reduced neural texture with the same aspect ratio, and keeps the visible bridge at the source size.
 
-Existing installations without a `WorkingScale` key keep their previous behavior. To opt into the new path, add:
+Examples:
+
+| Source | Neural branch | Visible bridge |
+| ---: | ---: | ---: |
+| 2560×1440 | ~854×480 | 2560×1440 |
+| 1920×1080 | ~854×480 | 1920×1080 |
+| 1440×1080 | 640×480 | 1440×1080 |
+
+Sources below the cap are not enlarged for neural processing.
+
+The legacy modes remain available:
 
 ```ini
+# Reduced source-relative mode
+NeuralMaxHeight=0
 WorkingScale=0.75
-```
 
-while Lossless Scaling is closed.
-
-## Native-resolution mode
-
-To return to 1:1 neural processing, disable the working scale and enable native mode:
-
-```ini
+# Full 1:1 neural processing
+NeuralMaxHeight=0
 WorkingScale=0
 NativeResolution=1
-```
 
-or run setup with:
-
-```powershell
-.\Setup.cmd -WorkingScale 0 -NativeResolution 1
-```
-
-The bridge currently supports native dimensions up to 3840×2160 and stops if the source size changes during a native session.
-
-## Fixed-size fallback
-
-With both source-relative and native modes disabled:
-
-```ini
+# Fixed fallback
+NeuralMaxHeight=0
 WorkingScale=0
 NativeResolution=0
 Width=1280
 Height=720
 ```
 
-the bridge uses the explicit fixed bounds.
+If you already have an installation, stop scaling before changing `NrAutoScale.ini` or replacing the bridge executable. Do not replace your Lossless Scaling profile or neural runtime INI just to update the project.
 
-## Live controls
+## Runtime controls
 
-| Shortcut | Action |
+| Hotkey | Action |
 | --- | --- |
-| `Ctrl+Alt+F6` | Toggle original / processed output |
-| `Ctrl+Alt+F7` | Reduce live blend by `0.1` |
-| `Ctrl+Alt+F8` | Increase live blend by `0.1` |
+| `Ctrl+Alt+F6` | Toggle processed output on/off |
+| `Ctrl+Alt+F7` | Decrease strength |
+| `Ctrl+Alt+F8` | Increase strength |
 
-## Uninstall
+Dev.6 neural-delta mode supports `0.0..4.0` strength. The baseline is `1.0`.
 
-Close Lossless Scaling first, then run:
+## Runtime requirements
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Uninstall-AutoScale.ps1 -LsDir "<Lossless Scaling folder>"
-```
-
-The installer uses its local manifest/backups to restore the original private Lossless Scaling DLL.
+- Windows 11
+- Lossless Scaling installed from an official source
+- AMD Radeon GPU; development is focused on RX 9070 XT / RDNA4
+- User-supplied AMD compatibility proxy
+- User-supplied NVIDIA DLSS-NR DLL/model payload required by that proxy
+- HIP runtime required by the chosen compatibility runtime
+- Visual C++ x64 runtime when required by the built binaries
 
 ## Build from source
 
-Requirements:
+Source builds additionally require CMake 3.20+, MSVC C++ build tools and a Windows SDK with the required WGC/D3D headers.
 
-- Visual Studio 2022 with the C++ desktop workload
-- CMake
-- .NET 8 SDK for the optional controls helper
-- Windows SDK with Direct3D 11/12 and Windows Graphics Capture headers
+Build the proxy:
+
+```powershell
+.\auto-scale\build.ps1
+```
 
 Build the bridge:
 
@@ -115,42 +99,51 @@ Build the bridge:
 .\bridge\build.ps1
 ```
 
-Build the auto-scale proxy:
+The project-built proxy artifact is also named `Lossless.dll`; it is separate from the paid application's original DLL.
 
-```powershell
-.\auto-scale\build.ps1
-```
+## Developer setup
 
-Source-tree setup:
+The source-tree wrapper is:
 
 ```powershell
 .\auto-scale\scripts\Setup.cmd
 ```
 
-## Non-interactive setup
+For explicit private paths:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\auto-scale\scripts\Setup.ps1 `
-  -NonInteractive `
-  -LsDir "<Lossless Scaling folder>" `
-  -ProxyVersionSource "<path to version.dll>" `
-  -NrSource "<path to nvngx_dlssnr.dll>" `
-  -HipVisibleDevices "0" `
-  -WorkingScale 0.75
+.\auto-scale\scripts\Install-AutoScale.ps1 `
+  -LsDir "<Lossless Scaling install folder>" `
+  -ProxyVersionSource "<private AMD proxy version.dll>" `
+  -NrSource "<private nvngx_dlssnr.dll>" `
+  -NeuralMaxHeight 480 `
+  -WorkingScale 0
 ```
 
-## What setup changes
+The installer privately preserves the user's original Lossless Scaling DLL as `Lossless_original.dll` so the project proxy can forward to it. That paid original must never be copied into the public repository or release ZIP.
 
-Setup installs only the project wrapper/bridge and the external runtime files you explicitly select. It creates an `nr-bridge` runtime folder beside the Lossless Scaling installation files, preserves the original local Lossless Scaling DLL as a private backup/forwarding target, and writes `NrAutoScale.ini`.
+## Uninstall
 
-The public repository and release ZIP must never contain:
+Use the release/source uninstall script while scaling is stopped:
 
-- the paid Lossless Scaling original DLL or executables
+```powershell
+.\scripts\Uninstall-AutoScale.ps1
+```
+
+or, from the source tree:
+
+```powershell
+.\auto-scale\scripts\Uninstall-AutoScale.ps1
+```
+
+## Public release boundary
+
+Do not publish:
+
+- paid Lossless Scaling binaries or app assets
 - `Lossless_original.dll`
-- Lossless Scaling assets/config copied from the paid app
-- the AMD proxy binary or installer
-- NVIDIA runtime/model/SDK files
-- private logs, backups, config, machine paths, or runtime configuration
-- screenshots beyond the two already reviewed comparison crops under `docs/images/`
+- AMD compatibility proxy/runtime binaries
+- NVIDIA DLLs, models or weights
+- private INIs, logs, backups, captures or machine-specific paths
 
-See [Licensing](licensing.md) for the third-party boundary and [Verification](verification.md) for the current test status.
+The public ZIP contains only project-built artifacts, setup/uninstall scripts, approved existing comparison images and documentation.

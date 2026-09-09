@@ -12,7 +12,8 @@ param(
     [int]$WarmupFrames = 320,
     [int]$ReadyTimeoutMs = 180000,
     [int]$NativeResolution = 0,
-    [double]$WorkingScale = 0.75
+    [double]$WorkingScale = 0,
+    [int]$NeuralMaxHeight = 480
 )
 
 $ErrorActionPreference = "Stop"
@@ -266,6 +267,7 @@ WarmupFrames=$WarmupFrames
 ReadyTimeoutMs=$ReadyTimeoutMs
 NativeResolution=$NativeResolution
 WorkingScale=$WorkingScale
+NeuralMaxHeight=$NeuralMaxHeight
 DefaultScalingTypeIfOff=1
 ForceCaptureApi=1
 "@

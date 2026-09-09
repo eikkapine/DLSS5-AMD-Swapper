@@ -1,66 +1,46 @@
 # Verification
 
-This page separates what I have actually exercised from what is still unknown.
+This page separates the exercised dev.6 behavior from things the project does not claim.
 
-## Verified on the current dev.3 checkpoint
+## Verified for v0.1.0-pre.3-dev.6
 
-- The bridge version in the manual run was `0.1.0-pre.3-dev.3`.
-- The source was 2560×1440 and the neural working size was 1920×1080 with `WorkingScale=0.75`.
-- The cadence log reported `transport=gpu_shared`.
-- Direct shader-capable WGC capture was used; the tested run did not fall back to copied capture surfaces.
-- GPU resize was active for the reduced neural path.
-- Bounded HIP kernel sampling was off during the performance run.
-- The neural effect stayed enabled at full strength in the captured cadence rows.
-- The selected full-effect non-FG window recorded 1,417 changed RGB submissions in 49.127 seconds, about 28.84/s.
-- I observed about 30 FPS base output in the exercised setup.
-- In a separate session with Lossless Scaling 2× frame generation enabled, I observed about 60 FPS output.
-- The production dev.3 bridge and wrapper hashes match the locally installed binaries used for the checkpoint.
+- The production bridge and proxy builds completed successfully before publication.
+- The installed `DlssNrBridge.exe` exactly matched the final dev.6 build by SHA-256.
+- The installed project proxy `Lossless.dll` exactly matched its production build by SHA-256.
+- Fresh setup defaults are `WorkingScale=0` and `NeuralMaxHeight=480`.
+- The automatic proxy forwards `--neural-max-height 480` when Lossless Scaling activates the bridge.
+- `Ctrl+Alt+F6` toggles processed output.
+- `Ctrl+Alt+F7` decreases strength.
+- `Ctrl+Alt+F8` increases strength, with native neural-delta mode supporting up to `4.0`.
+- Existing runtime evidence showed the 2560×1440 source using an approximately 854×480 neural feed with native-sized visible output.
+- Existing runtime evidence also showed real completed neural jobs while the color-only path had no motion/depth guide buffers.
+- After the dev.6 temporally matched neural-delta compositor was installed, the user manually confirmed that it now works as intended visually through Lossless Scaling.
+- No new screenshots were added for this release.
 
-The bridge does not count generated LSFG frames. The 60 FPS figure is therefore a manual Lossless Scaling observation, while the ~28.84/s figure comes from the selected full-effect bridge cadence window.
+## Performance evidence
 
-## Also verified from earlier checkpoints
+The earlier dev.4 version of the same native-visible/480p-neural layout was manually reported at about 60 FPS without frame generation in World of Tanks. Dev.6 keeps the same neural-resolution cap but changes the lightweight compositor.
 
-- The bridge can capture a normal visible source window through Windows Graphics Capture.
-- The neural runtime can produce non-black output on the tested RX 9070 XT path.
-- The bridge can show original, neural and blended output.
-- `Ctrl+Alt+F6` toggles original/processed output live.
-- `Ctrl+Alt+F7` and `Ctrl+Alt+F8` change the live blend in `0.1` steps.
-- The auto-scale wrapper can start the bridge, wait for readiness and activate Lossless Scaling.
-- Unscale can stop the bridge cleanly in the exercised integration path.
-- Native bridge capture at 2560×1440 can preserve the source frame exactly before neural processing (`max error = 0`).
-- The approved native comparison shows a real neural image difference with no geometry resize in that frozen comparison.
-- The public package boundary excludes paid Lossless Scaling files and external vendor/runtime files.
+The acceptance message for dev.6 did not include a fresh numeric FPS value, so this release does **not** claim a newly measured 60 FPS dev.6 benchmark.
 
 ## Not established
 
-- 60 FPS **base** Neural Rendering on the RX 9070 XT
-- pixel-identical quality between 0.75 working scale and native NR
-- broad AMD GPU compatibility outside the hardware tested so far
+- full equivalence to an in-game DLSS-NR integration with real engine depth/motion vectors
+- pixel-identical output versus full-resolution Neural Rendering
+- universal compatibility across AMD GPUs, games or protected-content capture paths
 - competitive-game latency suitability
-- compatibility with every protected-content/game capture scenario
-- legal permission for every possible third-party runtime use case
+- a fresh measured dev.6 FPS value
+- legal permission to redistribute every possible third-party runtime component
 
-## Approved image comparison
+## Approved images
 
-The only public gameplay images are:
+The only public gameplay images remain the previously reviewed files:
 
 - `docs/images/cs2-native-off.png`
 - `docs/images/cs2-native-on.png`
 
-They are matching 640×750 crops from the same frozen 2560×1440 native-mode frame. The crop was not resized, sharpened, color-adjusted or fabricated. PNG metadata was cleared and the crop excludes account details, usernames, chat and desktop/browser UI.
+They are historical native-mode comparison crops. No dev.6 screenshot was added or changed.
 
-No new screenshots are added by the dev.3 publication.
+## Release boundary
 
-## Reading the numbers correctly
-
-I keep these measurements separate:
-
-- game/source FPS
-- changed RGB submissions
-- bridge presentation rate
-- neural job duration
-- HIP waits
-- LSFG output
-- displayed FPS
-
-See [Performance](performance.md) for the current numbers and [Licensing](licensing.md) for the release boundary.
+The public repo and ZIP exclude paid Lossless Scaling files, `Lossless_original.dll`, AMD proxy/runtime binaries, NVIDIA DLLs/models/weights, private INIs, raw logs, backups and machine-specific development files.

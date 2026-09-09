@@ -1,67 +1,70 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-dev.3",
-  "tag": "v0.1.0-pre.3-dev.3",
+  "version": "0.1.0-pre.3-dev.6",
+  "tag": "v0.1.0-pre.3-dev.6",
   "status": "experimental-preview",
   "date": "2026-09-09",
   "published": true,
-  "previous_published_version": "0.1.0-pre.2",
+  "previous_published_version": "0.1.0-pre.3-dev.3",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "6ec7dd060eff947346bba3194d932a6616fd7d7a469b54c526e9350c7b163414",
-      "bytes": 265216,
+      "sha256": "bca17eef25fa5802ed91bf92b55c0b95ef464e9dd743811ec7df62645857586c",
+      "bytes": 277504,
       "matches_manually_exercised_installation": true
     },
     {
       "name": "Lossless.dll",
       "package_path": "bin/Lossless.dll",
-      "sha256": "4f329839dacd16e99b7b94941e8c27b669dc86d5276310120b17a3a9c63843e7",
-      "bytes": 128512,
+      "sha256": "22590575827a0de3a07787cf16ba407e116794cb31e8be7082780e21b283bd78",
+      "bytes": 129536,
       "matches_manually_exercised_installation": true
     }
   ],
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "ee53c8d0c6f44e33468df8c95185c49c6ebd3904067df09a03e28137cf6b70ee",
+      "bridge/src/main.cpp": "8ce759b697d8f1a2d61bd01516eb82a164c4f56d36db946e606671a45e3f7ca6",
+      "bridge/src/gpu_transport.h": "32fbf6b9e290331a424fbb5d2ee11bb334895d8a0f8bbfb1010535a09d1bf47b",
+      "bridge/shaders/gpu_transport.hlsl": "b982d4f17d73417ac1fb3d32306eba41096bb37d090dbebd290a679610070a60",
+      "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
-      "bridge/src/gpu_transport.h": "d9463cdf300f2afd42ff06a850dc2d63780e9e61820b0971930ffca0796a50a5",
-      "bridge/shaders/gpu_transport.hlsl": "947f87b0fb6970db13140dc2122c594adf75580ceb73541aab1a73b5933b7fe1",
-      "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
-      "auto-scale/src/auto_scale_proxy.cpp": "7aae2d3c14365a56ce64f1a0cd4a7a352d0fcc101a059f2c05d38c079787d61a",
-      "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e"
+      "auto-scale/src/auto_scale_proxy.cpp": "49ba93c9570cf87c88eaefb56216bf70de613d75903fa4fe57362641cf222177",
+      "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
+      "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
+      "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
+      "VERSION": "93177d6ce449c2358465aa766a5e8b6f3105224969b882f2957c271b3a6d1f3a"
     }
   },
   "verification": {
     "production_bridge_build_passed": true,
     "production_proxy_build_passed": true,
-    "manual_working_scale_observed": true,
-    "manual_gpu_sharing_observed": true,
-    "manual_gpu_resize_observed": true,
-    "manual_direct_capture_observed": true,
-    "manual_full_strength_observed": true,
-    "kernel_sampling_disabled_during_manual_run": true,
-    "user_reported_base_fps": 30.0,
-    "user_reported_output_fps_with_2x_lsfg": 60.0,
-    "bridge_independently_counts_lsfg_frames": false,
+    "installed_hash_verified": true,
+    "bridge_version_stamp_verified": true,
+    "manual_dev6_visual_behavior_accepted": true,
+    "automatic_scale_workflow_accepted": true,
+    "native_visible_output_path_accepted": true,
+    "neural_height_cap": 480,
+    "new_dev6_numeric_fps_recorded": false,
     "automated_tests_run_for_release": false,
     "automated_playback_run_for_release": false,
-    "pixel_identical_to_native_nr_claimed": false
+    "new_screenshots_added": false,
+    "full_engine_guide_buffer_equivalence_claimed": false
   },
   "working_resolution": {
-    "source_width": 2560,
-    "source_height": 1440,
-    "neural_width": 1920,
-    "neural_height": 1080,
-    "working_scale": 0.75,
-    "relative_neural_pixels": 0.5625,
-    "transport": "gpu_shared",
-    "resize": "GPU bilinear only when source and neural dimensions differ"
+    "mode": "native visible output + capped neural branch",
+    "neural_max_height": 480,
+    "example_source": "2560x1440",
+    "example_neural": "854x480",
+    "visible_output": "2560x1440",
+    "composition": "native source + temporally matched neural delta",
+    "strength_baseline": 1.0,
+    "strength_max": 4.0
   },
-  "measurements": [
+  "performance_note": "The earlier dev.4 version of the same 480p-neural/native-output layout was manually reported at about 60 FPS without frame generation. The final dev.6 acceptance did not include a fresh numeric FPS value.",
+  "historical_measurements": [
     "docs/measurements/20260909-dev3-no-fg.json",
     "docs/measurements/20260909-dev3-lsfg2x.json",
     "docs/measurements/20260907-native-pacing.json",
@@ -72,7 +75,7 @@
     "tested_version": "v0.2.15",
     "redistributed": false,
     "latest_checked_version": "v0.2.16",
-    "latest_checked_note": "v0.2.16 listed compatibility/proxy/RDNA3 fixes rather than a performance-specific change, so the manually tested v0.2.15 runtime was retained for this checkpoint."
+    "guide_buffer_note": "Lossless Scaling color-only path uses UseFsrInputs=0 and does not provide engine motion/depth guide buffers."
   },
-  "configuration_note": "The manually exercised dev.3 path used a 2560x1440 source, WorkingScale=0.75, 1920x1080 neural processing, full effect strength and the selected Lossless Scaling scaler for final enlargement."
+  "configuration_note": "Fresh setup defaults to WorkingScale=0 and NeuralMaxHeight=480. NeuralMaxHeight keeps visible output at the captured source resolution while capping only the neural branch."
 }

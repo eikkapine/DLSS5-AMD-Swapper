@@ -6,7 +6,8 @@ param(
     [int]$Width = 1280,
     [int]$Height = 720,
     [int]$NativeResolution = 0,
-    [double]$WorkingScale = 0.75,
+    [double]$WorkingScale = 0,
+    [int]$NeuralMaxHeight = 480,
     [int]$ReadyTimeoutMs = 180000,
     [string]$BuiltAutoScaleDllPath,
     [string]$BridgeExe,
@@ -170,7 +171,7 @@ if ($ValidateOnly) {
     Write-Host "AMD proxy version.dll: $proxyPath"
     Write-Host "NVIDIA nvngx_dlssnr.dll: $nrPath"
     Write-Host "HIP_VISIBLE_DEVICES=$HipVisibleDevices (machine-specific)"
-    Write-Host "WorkingScale=$WorkingScale; NativeResolution=$NativeResolution; fixed fallback bounds=${Width}x${Height}."
+    Write-Host "NeuralMaxHeight=$NeuralMaxHeight; WorkingScale=$WorkingScale; NativeResolution=$NativeResolution; fixed fallback bounds=${Width}x${Height}."
     Write-Host "ReadyTimeoutMs=$ReadyTimeoutMs"
     exit 0
 }
@@ -184,6 +185,7 @@ if ($ValidateOnly) {
     -Height $Height `
     -NativeResolution $NativeResolution `
     -WorkingScale $WorkingScale `
+    -NeuralMaxHeight $NeuralMaxHeight `
     -ReadyTimeoutMs $ReadyTimeoutMs `
     -BuiltAutoScaleDllPath $wrapperPath `
     -BridgeExe $bridgePath

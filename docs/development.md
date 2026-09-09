@@ -1,49 +1,48 @@
 # Development
 
-There are now two performance targets:
+The project currently has three useful processing paths:
 
-1. **practical output performance** using the pre-upscale `WorkingScale` path, and
-2. **native 1:1 Neural Rendering** for maximum image fidelity and future kernel/runtime work.
+1. **native visible output + capped neural branch** using `NeuralMaxHeight` — current default
+2. **legacy reduced source-relative processing** using `WorkingScale`
+3. **full 1:1 neural processing** for quality/reference work
 
-The current public checkpoint, `v0.1.0-pre.3-dev.3`, is the first one focused on the practical path. It runs a 2560×1440 source at 1920×1080 neural resolution with `WorkingScale=0.75`, keeping the same model, weights, neural precision/settings and full effect strength. The final enlargement is handled by Lossless Scaling.
+The current public checkpoint, **v0.1.0-pre.3-dev.6**, focuses on the first path. The captured source stays at its native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
 
-On the RX 9070 XT test system this reached about 30 FPS base output and about 60 FPS with Lossless Scaling 2× frame generation. The selected full-effect bridge window was 28.84 changed RGB submissions/s.
+Dev.6 keeps the native source as the image base and applies a temporally matched neural correction over it. This replaces the dev.5 high-frequency-only compositor that made the result look mostly like sharpening.
 
-## Invariants I keep for normal performance work
+## Invariants for normal performance work
 
-- full neural effect strength unless I am explicitly testing the live blend
-- the same compatibility runtime model/weights and neural precision/settings
-- `Inline=0` / asynchronous path where the current setup requires it
-- GPU ownership/fence ordering and failure-drain lifetime rules
-- exact 1:1 texel handling whenever the source and neural dimensions match
-- paid/vendor/private runtime files outside Git
+- keep the same neural model/weights and precision/settings
+- keep the normal baseline effect at `1.0`
+- keep `Inline=0` for the current asynchronous Lossless Scaling path
+- preserve GPU ownership/fence ordering and failure-drain lifetime rules
+- keep the visible source at native resolution in `NeuralMaxHeight` mode
+- keep paid/vendor/private runtime files outside Git
 
-`WorkingScale` is an explicit quality/performance control. A value below 1.0 is a deliberate resolution tradeoff and is documented as such rather than being described as a same-quality native optimization.
+The F7/F8 strength control can amplify the already-produced neural correction up to `4.0`; it does not change the model or neural inference settings.
 
-## Current optimization order
+## Current optimization direction
 
-The work so far has reduced host-side overhead with shared GPU transport, duplicate suppression, inference-aware feeding, direct WGC SRV use and output/history copy elision.
+The work so far has reduced host-side overhead with shared GPU transport, duplicate suppression, inference-aware feeding, direct WGC SRV use and output/history copy reduction. The biggest practical gain then came from reducing only the neural pixel count while preserving the native visible source.
 
-The largest remaining native-resolution cost is still inside the neural GPU workload. Current research points toward:
+The remaining quality/performance work is mainly about:
 
-- fewer neural pixels before final upscale
-- kernel fusion to reduce memory round-trips
-- lower VGPR/LDS pressure on RDNA4
-- better occupancy / wave-level tuning
-- avoiding synchronization bubbles between compute stages
+- retaining more useful neural reconstruction without showing the low-resolution neural frame as the base image
+- improving temporal alignment without real engine motion/depth buffers
+- reducing composition and synchronization overhead
+- investigating upstream/runtime kernel improvements when they can be applied without changing model quality
 
-The external compatibility runtime does not currently expose enough source here to safely rewrite those neural kernels inside NR Auto Scale, so dev.3 implements the largest architecture-level lever available in this project: running NR before the final upscale.
+A Lossless Scaling screen-capture bridge does not have the same guide buffers as an in-game FSR hook. The project therefore treats full guided temporal parity as a separate problem instead of pretending those inputs exist.
 
 ## Validation discipline
 
-I keep these numbers separate:
+I keep these observations separate:
 
 - user-observed base FPS
 - user-observed LSFG/display output
 - changed RGB submissions
 - bridge feed/presentation rate
 - HIP waits and runtime timing
+- manual image-quality acceptance
 
-Raw logs remain private. Public measurement JSON contains only hashes and sanitized aggregates.
-
-Before publishing a checkpoint I build the production bridge/wrapper, verify artifact hashes, inspect the staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, external vendor runtime, private config/log or unreviewed screenshot.
+Raw logs remain private. Before publishing a checkpoint I build the production bridge/wrapper, verify hashes, inspect the staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, external vendor runtime, private config/log or unreviewed screenshot.

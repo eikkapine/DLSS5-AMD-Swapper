@@ -2,8 +2,10 @@
 // reduced-working-resolution path uses one hardware bilinear sample per pixel.
 Texture2D<float4> inputImage : register(t0);
 Texture2D<float4> neuralImage : register(t1);
-Texture2D<float4> previousImage : register(t2);
-ByteAddressBuffer tileStatistics : register(t3);
+Texture2D<float4> sourceImage : register(t2);
+Texture2D<float4> previousImage : register(t3);
+ByteAddressBuffer tileStatistics : register(t4);
+Texture2D<float4> previousNeuralInput : register(t5);
 RWTexture2D<unorm float4> composedImage : register(u0);
 RWByteAddressBuffer counters : register(u1);
 RWByteAddressBuffer tileStatisticsOutput : register(u2);
@@ -11,10 +13,14 @@ SamplerState resizeSampler : register(s0);
 
 cbuffer FrameParameters : register(b0)
 {
+    uint neuralWidth;
+    uint neuralHeight;
     uint imageWidth;
     uint imageHeight;
-    uint blendAlpha; // Same integer blend as BlendFrames: 0..256.
-    uint frameFlags; // Bit 0: history valid; bit 1: compute source RGB sum.
+    uint blendAlpha; // 0..256 normally; native-detail mode allows up to 1024 (4x).
+    uint frameFlags; // Bit 0: display history; bit 1: source RGB sum; bit 2: native neural-delta; bit 3: prior neural input.
+    uint reserved0;
+    uint reserved1;
 };
 
 struct FullscreenVertex
@@ -61,6 +67,8 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
 {
     bool hasHistory = (frameFlags & 1u) != 0;
     bool computeSourceSum = (frameFlags & 2u) != 0;
+    bool nativeResidualComposite = (frameFlags & 4u) != 0;
+    bool hasPreviousNeuralInput = (frameFlags & 8u) != 0;
     uint laneChanged = 0;
     uint laneNonblack = 0;
     uint laneSourceSum = 0;
@@ -73,22 +81,64 @@ void ComposeCS(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint i
         if (position.x < imageWidth && position.y < imageHeight)
         {
             int3 location = int3(position, 0);
-            // The neural nonblack guard applies even when blendAlpha is zero.
-            uint3 neural = (uint3)round(neuralImage.Load(location).rgb * 255.0);
             uint3 original = uint3(0, 0, 0);
-            [branch]
-            if (computeSourceSum || blendAlpha < 256)
-                original = (uint3)round(inputImage.Load(location).rgb * 255.0);
+            uint3 neural = uint3(0, 0, 0);
+            uint3 result = uint3(0, 0, 0);
 
-            uint3 result = neural;
-            if (blendAlpha == 0)
-                result = original;
-            else if (blendAlpha < 256)
+            if (nativeResidualComposite)
             {
-                result = (original * (256 - blendAlpha) + neural * blendAlpha + 128) >> 8;
-                composedImage[position] = float4((float3)result / 255.0, 1.0);
+                // Keep every native source texel. The asynchronous backbuffer route
+                // can expose a completed neural frame from the prior feed, so match
+                // the output against current/prior low-resolution inputs before
+                // extracting the network correction. Stable regions retain broad
+                // skin/material/shape changes; changed regions fade the stale delta
+                // instead of dragging an old image over the current native frame.
+                float3 originalNative = sourceImage.Load(location).rgb;
+                float2 uv = (float2(position) + 0.5) / float2(imageWidth, imageHeight);
+                float3 neuralLow = neuralImage.SampleLevel(resizeSampler, uv, 0.0).rgb;
+                float3 currentInput = inputImage.SampleLevel(resizeSampler, uv, 0.0).rgb;
+                float3 neuralInput = currentInput;
+                float temporalConfidence = 1.0;
+                if (hasPreviousNeuralInput)
+                {
+                    float3 priorInput = previousNeuralInput.SampleLevel(resizeSampler, uv, 0.0).rgb;
+                    const float3 perceptual = float3(0.299, 0.587, 0.114);
+                    float currentError = dot(abs(neuralLow - currentInput), perceptual);
+                    float priorError = dot(abs(neuralLow - priorInput), perceptual);
+                    bool usePrior = priorError < currentError;
+                    neuralInput = usePrior ? priorInput : currentInput;
+                    if (usePrior)
+                    {
+                        float3 frameDelta = abs(currentInput - priorInput);
+                        float motionAmount = max(frameDelta.r, max(frameDelta.g, frameDelta.b));
+                        temporalConfidence = 1.0 - smoothstep(0.03, 0.18, motionAmount);
+                    }
+                }
+                float amount = (float)blendAlpha / 256.0;
+                float3 nativeResult = saturate(
+                    originalNative + (neuralLow - neuralInput) * amount * temporalConfidence);
+                original = (uint3)round(originalNative * 255.0);
+                neural = (uint3)round(neuralLow * 255.0);
+                result = (uint3)round(nativeResult * 255.0);
+                composedImage[position] = float4(nativeResult, 1.0);
             }
-            // The parent displays the original/neural texture directly at endpoints.
+            else
+            {
+                // Legacy same-resolution behavior is retained for rollback and
+                // diagnostics which do not use the native residual path.
+                neural = (uint3)round(neuralImage.Load(location).rgb * 255.0);
+                if (computeSourceSum || blendAlpha < 256)
+                    original = (uint3)round(inputImage.Load(location).rgb * 255.0);
+
+                result = neural;
+                if (blendAlpha == 0)
+                    result = original;
+                else if (blendAlpha < 256)
+                {
+                    result = (original * (256 - blendAlpha) + neural * blendAlpha + 128) >> 8;
+                    composedImage[position] = float4((float3)result / 255.0, 1.0);
+                }
+            }
 
             bool changed = !hasHistory;
             if (hasHistory)
