@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "0.1.0-pre.3-soft-cheat.3",
+  "version": "0.1.0-pre.3-soft-cheat.4",
   "tag": null,
   "status": "experimental-branch",
   "date": "2026-09-09",
@@ -12,7 +12,7 @@
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "def206f8b5882e116efebefe039ce15690244702cc38d39c0e2165b2a9dc1b1a",
+      "sha256": "a0078e338423b24aa57e5bf8504e65083c0b83492d2306e7034e4982187191a5",
       "bytes": 302080,
       "local_validation_build": true,
       "published_binary": false
@@ -29,8 +29,8 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "09d173b1ce1b5d8cb8f9d90204f0d418bf90e964dd862bcb1444bb12b0c701aa",
-      "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
+      "bridge/src/main.cpp": "2326cbbccf2c57ea314f15bab5fc33e56112812df63e9e420b3882e804777db0",
+      "bridge/src/gpu_transport.h": "1db33627491b0e2464600beaf2f1d800d4051e9b7d3417a6a6516ff9f288d99a",
       "bridge/shaders/gpu_transport.hlsl": "bb4fcb08e0d484fe8b7e644b4aba1e7886a6a13a383bd9aa99f20e20d9f45ca6",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
       "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
@@ -39,7 +39,7 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "5c3ee9cef8204dd5acbc00adbadf439e447f34584700f58b6c59b81e3856e3a4",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "db00928366728099d68f513e929a3ef3a13501f973dd426156f39bb7e324767a"
+      "VERSION": "ff047a9e574c5ab2db0b8121d37f1d077bd41a2ef6e9e09987960f37abe80c39"
     }
   },
   "implementation": {
@@ -61,13 +61,19 @@
     "bridge_pixel_tests_passed": true,
     "auto_scale_harness_passed": true,
     "installer_setup_tests_passed": true,
-    "manual_visual_acceptance": "soft-cheat.3 fixed the previous smothering and long-lived transparent motion trails; slight flicker returned and remains a known issue",
+    "visual_acceptance": "soft-cheat.4 keeps the motion clarity accepted in soft-cheat.3; slight flicker remains a known issue",
     "new_gameplay_automation_run": false,
     "new_computer_use_test_run": false,
     "new_screenshots_added": false,
     "player_or_object_specific_logic_added": false,
     "optional_hip_host_timing_available_in_local_bridge_build": true,
-    "clean_rerun_note": "The full auto-scale/setup suite passed on the clean soft-cheat.2 rerun. Soft-cheat.3 changes only the bridge compositor/history gating; the proxy and setup path are unchanged."
+    "direct_game_synthetic_install_config_remove_passed": true,
+    "direct_game_real_game_rich_fsr_path_observed": true,
+    "direct_game_presentmon_smoke_captured": true,
+    "direct_game_controlled_benchmark_published": false,
+    "publication_provenance_check_passed": true,
+    "markdown_local_link_audit_passed": true,
+    "clean_rerun_note": "The Lossless Scaling compositor state is preserved from soft-cheat.3. Soft-cheat.4 adds direct-game, measurement/provenance and documentation tooling; the fresh Release bridge/proxy builds and bridge pixel tests pass."
   },
   "public_boundary": {
     "redistributes_lossless_scaling_files": false,

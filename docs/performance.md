@@ -1,6 +1,6 @@
 # Performance
 
-`v0.1.0-pre.3-soft-cheat.3` keeps the accepted dev.14 performance layout: native visible output with only the neural branch capped to **480 pixels high**. A 2560×1440 source uses roughly **854×480** for neural work while the bridge stays 2560×1440.
+`v0.1.0-pre.3-soft-cheat.4` keeps the accepted dev.14 performance layout: native visible output with only the neural branch capped to **480 pixels high**. A 2560×1440 source uses roughly **854×480** for neural work while the bridge stays 2560×1440.
 
 The branch also carries dev.14's shared D3D11/D3D12 transport, inference-aware HIP pacing, direct WGC capture path and high-rate visible submissions. Duplicate visible presents remain available for Lossless Scaling cadence without rewriting correction history.
 
@@ -26,7 +26,11 @@ Strength starts at `1.0` and can be raised to `4.0`. The current-frame clarity a
 
 ## Measurement boundary
 
-No fresh numeric game-FPS benchmark has been recorded for soft-cheat.3. This update changes compositor motion/history gating rather than the neural resolution or transport/pacing layout, but bridge feed or submit cadence is not a game-FPS measurement.
+No controlled PresentMon-backed Lossless Scaling game/display benchmark has been recorded for soft-cheat.4. The direct-game path has a private full-resolution runtime smoke capture, but it is not promoted as a benchmark. Bridge feed or submit cadence is not game/display frame rate.
+
+For future performance work I record actual game/display frame timing with `tools/Capture-Performance.ps1`. `bridge/scripts/Analyze-Run.py` accepts that PresentMon CSV plus the bridge/HIP/runtime logs and publishes only sanitized aggregates with SHA-256 hashes of every source log. Raw logs stay private.
+
+If a performance metric is not present in a hashed source log, I do not publish a number for it. `tools/Check-Publication.py` enforces this rule for the public tree.
 
 Lossless Scaling provides this bridge with the final color frame, not engine depth or motion vectors. The clarity/dehaze behavior is therefore image-space processing rather than reconstruction of hidden scene data.
 

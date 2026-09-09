@@ -485,7 +485,7 @@ private:
         // Allocate on the D3D11 consumer/capture device, where bind flags and
         // NT-handle sharing metadata are explicit. Import the same allocation
         // into D3D12 instead of reopening a D3D12-created allocation in D3D11:
-        // that reverse route returned E_INVALIDARG in the user's actual runs.
+        // that reverse route returned E_INVALIDARG in the captured validation runs.
         D3D11_TEXTURE2D_DESC description{};
         description.Width = width_;
         description.Height = height_;

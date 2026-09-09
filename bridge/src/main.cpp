@@ -2346,7 +2346,7 @@ int wmain(int argc, wchar_t** argv) {
                 continue;
             }
             // A returned wait can wake a feed immediately instead of waiting for
-            // the next 120 Hz poll. The user's explicit --max-fps still wins.
+            // the next 120 Hz poll. An explicit --max-fps still wins.
             const auto feedAt = completionHint ? lastGpuFeedAt + requestedInterval : nextFrameAt;
             if (now < feedAt) {
                 waitForActivity(std::chrono::ceil<std::chrono::milliseconds>(feedAt - now), paceForInference);

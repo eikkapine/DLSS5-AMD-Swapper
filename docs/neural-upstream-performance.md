@@ -1,42 +1,47 @@
-# Reduced neural working resolution
+# Neural Rendering upstream of the upscaler
 
-## Why this candidate changes the pipeline
+This is the architecture I am using for the direct-game AMD path.
 
-The remaining RX 9070 XT measurements point to the neural GPU job, not host submission, as the dominant cost. Recent DLSS 5 community work reached the same conclusion from the NVIDIA side: running Neural Rendering before the final Super Resolution pass reduces the number of pixels evaluated by the neural network and produces much larger gains than small host-side changes.
+## Why the Lossless Scaling path cannot reproduce the full look
 
-Relevant current references checked on 9 September 2026:
+The screen-capture bridge receives a finished colour image. It does not receive the game engine's true motion vectors, depth, jitter, exposure buffer or pre-upscale colour input.
 
-- TechPowerUp summary of the Neural Upstream performance work: <https://www.techpowerup.com/352476/modders-rework-dlss-5s-rendering-pipeline-for-a-big-performance-boost>
-- `danielblnc/DLSS-NR-on-AMD` current project and its roughly 33 FPS 1080p RX 9070 XT note: <https://github.com/danielblnc/DLSS-NR-on-AMD>
-- The latest checked upstream release is v0.2.16 (8 September 2026). Its listed changes are compatibility/proxy/RDNA3 fixes rather than a performance-specific kernel change, so dev.3 keeps the already-installed v0.2.15 runtime to avoid mixing an unrelated runtime update into the first working-scale comparison: <https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.2.16>
-- RX 9070 XT resolution scaling report showing roughly 15 FPS at 3440x1440 versus a 30 FPS cap at 2016x840: <https://github.com/danielblnc/DLSS-NR-on-AMD/issues/116>
-- Adjustable-resolution feeder documenting the square relationship between axis scale and neural pixel count: <https://github.com/Phroster/DLSS5-Feeder-Adjustable-Resolution>
-- OptiScaler pre-SR experiments using a separate `WorkingScale`: <https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass>
+That matters because Neural Rendering is temporal. Broad changes to lighting, material response, skin structure and local tone have to stay attached to the same surfaces from frame to frame. In the Lossless Scaling path, preserving too much of that broad correction causes flicker, trails or stale colour because the bridge has to infer motion from colour alone.
 
-Those projects are references for the architecture. This implementation uses the existing NR Auto Scale capture/transport code and does not copy the GPL OptiScaler implementation.
+The current bridge therefore keeps the stable part of the neural result and rejects or limits broad unstable residuals. That is why it can look closer to a strong detail/shading pass than the much larger changes visible in native DLSS 5 examples.
 
-## dev.3 implementation
+## Direct-game target
 
-`WorkingScale=0.75` is the new install preset. For a 2560x1440 source this resolves to 1920x1080, so the neural pass sees 2,073,600 pixels instead of 3,686,400: 56.25% of the native workload before fixed overheads.
+The direct-game route runs inside the game's existing temporal/upscaler flow. For AMD, the first supported route is a 64-bit DirectX 12 game with FSR, using the user's own `DLSS-NR-on-AMD` installation.
 
-The steady-state path is:
+The important change is placement:
 
 ```text
-WGC source at native size
-        -> D3D11 SRV
-        -> one hardware bilinear draw into the smaller shared neural texture
-        -> DLSS-NR-on-AMD / HIP neural evaluation
-        -> bridge output at neural working size
-        -> selected Lossless Scaling scaler
-        -> display size
+game render-resolution colour
+        + depth / motion / jitter / exposure from the game/upscaler path
+        -> Neural Rendering
+        -> game's normal FSR reconstruction
+        -> native output
 ```
 
-If source and neural dimensions are identical, the existing exact `Load` path is retained. If WGC cannot expose the capture surface directly as an SRV, the fallback copy is allocated at source size and is still resized on the GPU. Full-frame CPU capture/readback is reserved for diagnostics and compatibility fallback.
+Running the neural pass before the final upscale also means the expensive model sees the render-resolution image instead of the final output-resolution image. That is the same high-level direction used by `matiasLombo/neural-upstream`.
 
-The model, weights, neural precision/settings and full effect strength are unchanged. Reduced working resolution is therefore a deliberate resolution/performance tradeoff, not a weaker neural preset. `WorkingScale=0` disables it; `WorkingScale=0` plus `NativeResolution=1` restores the native 1:1 path.
+The current `DLSS-NR-on-AMD` setup generated for this route enables `UseFsrInputs=1`, `UseDepth=1`, `Temporal=1`, `Interop=1` and inline gameplay mode. Runtime diagnostics then verify whether FidelityFX dispatches and real color/motion/depth staging actually appeared in the game's log. That distinction matters: a compatible-looking game folder is not proof that the rich temporal path ran.
 
-Kernel timing diagnostics are now opt-in with `--hip-kernel-timing` so normal performance candidates do not pay instrumentation overhead that is no longer needed for every run.
+For the intended native-output/low-processing-resolution setup, keep the game's output at native resolution and let its FSR quality mode choose a lower render resolution. The neural pass then works on the FSR input image and FSR reconstructs the native output. If the logged FSR input dimensions equal the swapchain dimensions, the neural pass is effectively running at output resolution and will cost more.
 
-## Validation boundary
+## Current research references
 
-Production compilation and static inspection are used for this candidate. Automated gameplay or synthetic visual acceptance is not part of this workflow; image quality, base FPS and normal Lossless Scaling behavior are checked manually after deployment.
+- `matiasLombo/neural-upstream` hooks the game's DLSS evaluate, runs Neural Rendering at render resolution, then gives the result back to the game's upscaler. It also documents why cadence must be anchored to game-owned temporal state and why reusing a previous full image causes ghosting: <https://github.com/matiasLombo/neural-upstream>
+- `jlrouzies-fr/DLSS5-Feeder` demonstrates the opposite limitation clearly: when a game has no native DLSS contract, depth plus estimated motion vectors can create a synthetic one, but temporal quality depends directly on those estimated vectors: <https://github.com/jlrouzies-fr/DLSS5-Feeder>
+- `Kizzuwatnaa/DLSS5-Autopilot` is a useful routing/installer reference for choosing native, neural-upstream, OptiScaler, bridge or feeder paths without bundling third-party vendor payloads: <https://github.com/Kizzuwatnaa/DLSS5-Autopilot>
+- `danielblnc/DLSS-NR-on-AMD` supplies the AMD execution path used by the first direct-game route: <https://github.com/danielblnc/DLSS-NR-on-AMD>
+- `Dagherbou/OptiScaler_DLSSNR` is relevant for future games where an upscaler interception layer gives cleaner access to render/output extents and temporal inputs: <https://github.com/Dagherbou/OptiScaler_DLSSNR>
+
+## Performance evidence policy
+
+External articles and upstream README benchmark numbers are research context, not NR Auto Scale benchmark data. I do not copy those FPS claims into this repository as project results.
+
+For this project, actual FPS and frame-time numbers are published only from PresentMon logs captured by `tools/Capture-Performance.ps1` and converted to sanitized JSON by `bridge/scripts/Analyze-Run.py`.
+
+Bridge cadence, HIP job timing and actual game/display FPS remain separate metrics.

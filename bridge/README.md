@@ -2,7 +2,7 @@
 
 `DlssNrBridge.exe` captures one selected window with Windows Graphics Capture, feeds a reduced color image to the AMD DLSS-NR compatibility runtime, and presents a native-resolution D3D11 bridge window for Lossless Scaling.
 
-This branch is **v0.1.0-pre.3-soft-cheat.3**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
+This branch is **v0.1.0-pre.3-soft-cheat.4**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
 
 The experimental compositor uses the dev.14 spatial residual filter, retains extra local neural structure/luminance, then adds a current-frame local-contrast and neutral-veil adjustment. Soft-cheat.3 tightens motion rejection around native-resolution edges and prevents duplicate frames from indefinitely holding an old corrected image.
 
@@ -61,4 +61,4 @@ The Windows SDK shader compiler embeds the transport shaders into the production
 
 ## Verification boundary
 
-The soft-cheat.3 bridge compiles successfully with HIP 7 pacing support and the bridge pixel tests pass. Manual testing found the smothering and long-lived motion trails fixed, with some flicker returning. No automated gameplay/computer-use visual test or new screenshot capture was run for this checkpoint.
+The soft-cheat.4 bridge compiles successfully with HIP 7 pacing support and the bridge pixel tests pass. The accepted branch state keeps the motion clarity of soft-cheat.3; some flicker remains. No new screenshot was added for this checkpoint.

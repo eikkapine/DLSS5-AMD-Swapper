@@ -27,8 +27,11 @@ function Test-ForbiddenPackageEntry {
         '(^|\\)Lossless_original\.dll$',
         '(^|\\)LosslessScaling.*\.(dll|exe)$',
         '(^|\\)version\.dll$',
+        '(^|\\)dlssnr_on_amd_setup\.exe$',
+        '(^|\\)amdhip64[^\\]*\.dll$',
         '(^|\\)nvngx_dlssnr\.dll$',
         '(^|\\)dlssnr_on_amd_weights\.bin$',
+        '(^|\\)\.nr-auto-scale-direct\.json$',
         '(^|\\)NrAutoScale\.ini$',
         '(^|\\)dlssnr_on_amd\.ini$',
         '(^|\\)install-manifest\.json$',
@@ -83,6 +86,10 @@ $installDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "install.md") -Nam
 $licensingDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "licensing.md") -Name "licensing.md"
 $verificationDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "verification.md") -Name "verification.md"
 $performanceDoc = Resolve-RequiredFile -Path (Join-Path $docsRoot "performance.md") -Name "performance.md"
+$directGameScript = Resolve-RequiredFile -Path (Join-Path $repoRoot "direct-game\amd_dlss5.py") -Name "direct-game amd_dlss5.py"
+$directGameReadme = Resolve-RequiredFile -Path (Join-Path $repoRoot "direct-game\README.md") -Name "direct-game README.md"
+$capturePerformance = Resolve-RequiredFile -Path (Join-Path $repoRoot "tools\Capture-Performance.ps1") -Name "Capture-Performance.ps1"
+$publicationCheck = Resolve-RequiredFile -Path (Join-Path $repoRoot "tools\Check-Publication.py") -Name "Check-Publication.py"
 $comparisonOffImage = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\cs2-native-off.png") -Name "cs2-native-off.png"
 $comparisonOnImage = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\cs2-native-on.png") -Name "cs2-native-on.png"
 $comparisonJson = Resolve-RequiredFile -Path (Join-Path $docsRoot "images\comparison.json") -Name "comparison.json"
@@ -128,6 +135,10 @@ Add-PackageFile -Source $installDoc -RelativePath "docs\install.md" -Entries $en
 Add-PackageFile -Source $licensingDoc -RelativePath "docs\licensing.md" -Entries $entries
 Add-PackageFile -Source $verificationDoc -RelativePath "docs\verification.md" -Entries $entries
 Add-PackageFile -Source $performanceDoc -RelativePath "docs\performance.md" -Entries $entries
+Add-PackageFile -Source $directGameScript -RelativePath "direct-game\amd_dlss5.py" -Entries $entries
+Add-PackageFile -Source $directGameReadme -RelativePath "direct-game\README.md" -Entries $entries
+Add-PackageFile -Source $capturePerformance -RelativePath "tools\Capture-Performance.ps1" -Entries $entries
+Add-PackageFile -Source $publicationCheck -RelativePath "tools\Check-Publication.py" -Entries $entries
 Add-PackageFile -Source $comparisonOffImage -RelativePath "docs\images\cs2-native-off.png" -Entries $entries
 Add-PackageFile -Source $comparisonOnImage -RelativePath "docs\images\cs2-native-on.png" -Entries $entries
 Add-PackageFile -Source $comparisonJson -RelativePath "docs\images\comparison.json" -Entries $entries
@@ -152,7 +163,7 @@ $manifest = [pscustomobject]@{
     created_at = (Get-Date).ToString("o")
     contents_are_allowlisted = $true
     contains_vendor_runtime_or_lossless_scaling_files = $false
-    note = "Users must provide their own AMD proxy version.dll and NVIDIA nvngx_dlssnr.dll at setup time. The package does not include Lossless Scaling binaries or vendor DLSS/AMD runtime files."
+    note = "External AMD/NVIDIA runtime files are user supplied. The package does not include Lossless Scaling binaries, DLSS-NR-on-AMD, NVIDIA model/runtime files, or other vendor runtime payloads."
     files = @($entries | Sort-Object path)
 }
 $manifestPath = Join-Path $stageRoot "CHECKSUMS.json"

@@ -6,7 +6,7 @@ The project currently has three useful processing paths:
 2. **legacy reduced source-relative processing** using `WorkingScale`
 3. **full 1:1 neural processing** for quality/reference work
 
-The current experimental checkpoint, **v0.1.0-pre.3-soft-cheat.3**, uses the first path. The captured source stays at native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
+The current experimental checkpoint, **v0.1.0-pre.3-soft-cheat.4**, uses the first path. The captured source stays at native visible resolution while only the neural branch is capped at 480 pixels high. On a 2560×1440 source that means about 854×480 for Neural Rendering and 2560×1440 for the final bridge image.
 
 This branch starts from the accepted dev.14 transport and anti-flicker implementation, then biases the compositor toward whole-frame local clarity, bounded luminance/shading separation and mild neutral-veil reduction.
 
@@ -36,13 +36,14 @@ A Lossless Scaling screen-capture bridge does not have the same guide buffers as
 
 ## Validation discipline
 
-I keep these observations separate:
+I keep each metric tied to the subsystem that produced it:
 
-- user-observed base FPS
-- user-observed LSFG/display output
+- PresentMon game/display frame timing
 - changed RGB submissions
 - bridge feed/presentation rate
 - HIP waits and runtime timing
-- manual image-quality acceptance
+- visual acceptance
 
-Raw logs remain private. Before publishing a checkpoint I build the production bridge/wrapper, verify hashes, inspect the staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, external vendor runtime, private config/log or unreviewed screenshot.
+Public performance numbers come only from sanitized analyzer output backed by source-log SHA-256 values. If a metric is not logged yet, I add instrumentation before publishing a number for it.
+
+Raw logs remain private. Before publishing a checkpoint I build the production bridge/wrapper, verify hashes, run `tools/Check-Publication.py`, inspect the staged files, create the allowlisted ZIP, and confirm it contains no paid Lossless Scaling file, external vendor runtime, private config/log or unreviewed screenshot.

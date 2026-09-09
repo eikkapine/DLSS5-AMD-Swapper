@@ -1,6 +1,6 @@
 # Verification
 
-This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.3` on the `experimental-soft-cheat` branch.
+This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.4` on the `experimental-soft-cheat` branch.
 
 ## Verified locally
 
@@ -16,16 +16,18 @@ This page records what has actually been checked for `v0.1.0-pre.3-soft-cheat.3`
 - `NeuralMaxHeight=480` keeps visible output at source size while capping only the neural branch.
 - No new screenshot was added or changed.
 
-## Visual acceptance status
+The direct-game helper was also exercised against a locally installed x64 DX12/FidelityFX title with the official `DLSS-NR-on-AMD` v0.2.17 setup. The live runtime log showed FidelityFX dispatch interception, full color/motion/depth staging, zero-copy input/output interop and completed Neural Rendering jobs with no logged fault/GPU-error markers in the sampled run. A PresentMon capture and the runtime log were hashed and sanitized with `Analyze-Run.py`; raw logs remain private.
 
-Manual testing of soft-cheat.3 found that the previous smothering and long-lived transparent motion trails were fixed. Some flicker returned, especially as the image changes, so this checkpoint is preserved as an improvement to motion clarity rather than a final flicker solution.
+## Visual status
+
+At the current checkpoint, the previous smothering and long-lived transparent motion trails are no longer present in the accepted branch state. Some flicker remains as the image changes, so this checkpoint is preserved for its motion clarity rather than treated as the final temporal solution.
 
 ## Not established
 
 - full equivalence to an in-game DLSS-NR integration with real engine depth/motion vectors
 - pixel-identical output versus full-resolution Neural Rendering
 - universal compatibility across AMD GPUs, games or protected-content capture paths
-- a new controlled FPS benchmark for this branch
+- a controlled direct-game A/B performance benchmark; the current PresentMon capture is a runtime smoke measurement rather than a like-for-like benchmark
 - a measured haze/fog reduction amount
 
 ## Approved images

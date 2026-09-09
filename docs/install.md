@@ -1,6 +1,36 @@
 # Install and build
 
-NR Auto Scale is experimental tooling for using an AMD DLSS Neural Rendering compatibility runtime through Lossless Scaling. On the `experimental-soft-cheat` branch, the visible output stays at the captured source resolution, the neural branch is capped to **480 pixels high** by default, and the dev.14 stable neural residual is combined with a uniform local-clarity/dehaze-style image filter.
+NR Auto Scale has a direct-game AMD route for supported DX12/FSR games and a separate Lossless Scaling compatibility route.
+
+## Direct-game AMD route
+
+Use this path first for a supported single-player/offline game. Download `dlssnr_on_amd_setup.exe` yourself from the [official DLSS-NR-on-AMD releases](https://github.com/danielblnc/DLSS-NR-on-AMD/releases), and provide your own legitimate `nvngx_dlssnr.dll`.
+
+Check the target:
+
+```powershell
+py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
+```
+
+Install:
+
+```powershell
+py .\direct-game\amd_dlss5.py `
+  --game "D:\Games\Example\Game.exe" `
+  --install `
+  --upstream-setup "C:\Downloads\dlssnr_on_amd_setup.exe" `
+  --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
+```
+
+The helper requires x64 plus FSR and DirectX 12 evidence, blocks common anti-cheat targets, verifies the upstream setup against GitHub's published SHA-256 digest, verifies the created runtime state and rich FSR/depth/temporal configuration, and rolls back partial changes if setup fails. The upstream installer and NVIDIA DLL stay user-supplied and private.
+
+The current upstream requirement is **AMD Software: Adrenalin Edition 26.1.1 or newer**. Do not install a separate ROCm/HIP stack for the direct-game route; the compatibility runtime uses the HIP runtime delivered with the AMD driver.
+
+See [Direct-game AMD route](../direct-game/README.md) for update, diagnose and removal commands.
+
+## Lossless Scaling route
+
+On the `experimental-soft-cheat` branch, the visible output stays at the captured source resolution, the neural branch is capped to **480 pixels high** by default, and the dev.14 stable neural residual is combined with a uniform local-clarity/dehaze-style image filter.
 
 ## Install the preview
 
@@ -14,7 +44,7 @@ NR Auto Scale is experimental tooling for using an AMD DLSS Neural Rendering com
    ```
 
 5. Pick the Lossless Scaling install folder when prompted.
-6. Supply your own local AMD compatibility proxy and NVIDIA DLSS-NR DLL when prompted. Supply the HIP runtime required by that compatibility runtime using its upstream instructions.
+6. Supply your own local AMD compatibility proxy and NVIDIA DLSS-NR DLL when prompted. Use the AMD driver version required by that compatibility runtime; do not add a second HIP/ROCm installation unless its upstream documentation explicitly requires one.
 7. Focus a capturable game/browser/video window and press **Scale** in Lossless Scaling.
 
 The release ZIP does not contain NVIDIA DLLs, AMD proxy binaries, model files, HIP installers, paid Lossless Scaling files, private logs or local configuration.
@@ -80,7 +110,7 @@ The experimental clarity mode supports `0.0..4.0` strength. The baseline is `1.0
 - AMD Radeon GPU; development is focused on RX 9070 XT / RDNA4
 - User-supplied AMD compatibility proxy
 - User-supplied NVIDIA DLSS-NR DLL/model payload required by that proxy
-- HIP runtime required by the chosen compatibility runtime
+- AMD driver/runtime required by the chosen compatibility runtime
 - Visual C++ x64 runtime when required by the built binaries
 
 ## Build from source

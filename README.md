@@ -1,12 +1,37 @@
-# NR Auto Scale — experimental visual-clarity branch
+# NR Auto Scale
 
-This is the `experimental-soft-cheat` branch, currently **v0.1.0-pre.3-soft-cheat.3**. It carries the dev.14 transport and pacing foundation, with a separate whole-frame compositor aimed at stronger visual clarity.
+NR Auto Scale is my AMD Neural Rendering experiment. It now has two separate paths:
 
-The visible image stays at the captured application's native resolution while only the expensive neural branch is capped to **480 pixels high** by default. A 2560×1440 source therefore remains 2560×1440 for presentation while Neural Rendering works at about 854×480.
+- **Direct game** — the preferred path for supported 64-bit DirectX 12 games with FSR. Neural Rendering runs inside the game/upscaler flow where depth, motion, jitter, exposure and render-resolution colour are available.
+- **Lossless Scaling bridge** — the compatibility path for arbitrary capturable windows. It works from the final colour frame and keeps the existing automatic Scale workflow and hotkeys.
 
-The experimental compositor keeps stable neural structure and luminance/shading information, rejects broad unstable chroma, boosts local luminance separation from the current source frame, and applies a mild neutral-veil reduction. The filter is uniform across the image; it does not classify or target players, characters or any other object type.
+The direct-game path is where I am putting the full DLSS 5-style quality work. The Lossless Scaling path remains useful, but a finished desktop frame cannot supply the same temporal and engine information as an in-game integration.
 
-The branch keeps the existing automatic Lossless Scaling integration and hotkeys:
+## Direct-game AMD install
+
+The first route targets x64 DX12 games with an FSR runtime. It uses the user's own copy of `DLSS-NR-on-AMD` and the user's own legitimately obtained `nvngx_dlssnr.dll`.
+
+```powershell
+py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
+
+py .\direct-game\amd_dlss5.py `
+  --game "D:\Games\Example\Game.exe" `
+  --install `
+  --upstream-setup "C:\Downloads\dlssnr_on_amd_setup.exe" `
+  --nr-dll "C:\MyDlls\nvngx_dlssnr.dll"
+```
+
+The helper verifies the upstream setup file against the SHA-256 digest published by GitHub, checks the game for FSR and common anti-cheat markers, installs into the game folder, verifies the created runtime files and records a local hash manifest for safe removal.
+
+I do not bundle or download `DLSS-NR-on-AMD`. Its current licence forbids redistribution inside another installer/package, so the user downloads it directly from the [official releases page](https://github.com/danielblnc/DLSS-NR-on-AMD/releases). The project also never contains NVIDIA model/runtime files.
+
+See [Direct-game AMD route](direct-game/README.md).
+
+## Lossless Scaling route
+
+The current `experimental-soft-cheat` checkpoint is **v0.1.0-pre.3-soft-cheat.4**. The visible image stays at the captured application's source resolution while the neural branch can be capped independently.
+
+Default controls:
 
 | Shortcut | Action |
 | --- | --- |
@@ -14,61 +39,17 @@ The branch keeps the existing automatic Lossless Scaling integration and hotkeys
 | `Ctrl+Alt+F7` | Reduce strength |
 | `Ctrl+Alt+F8` | Increase strength |
 
-Strength starts at `1.0` and can be pushed to `4.0`. Above `1.0`, F7/F8 use 0.25 steps. From `0.0` to `1.0`, they use 0.1 steps.
+Strength starts at `1.0` and can be increased to `4.0`. The filter remains uniform across the frame; there is no player, character or object-specific targeting.
 
-## What this branch does
-
-- Starts automatically when Lossless Scaling activates a source.
-- Captures the selected window with Windows Graphics Capture.
-- Keeps the visible output at the source resolution.
-- Caps only the neural working image with `NeuralMaxHeight=480` by default.
-- Keeps the dev.14 D3D11/D3D12 shared-resource, asynchronous pacing and high-rate visible-presentation path.
-- Keeps the dev.14 motion rejection and exact-static correction reuse that removed most flicker from the main branch.
-- Preserves stable neural detail plus bounded luminance/shading changes while rejecting broad unstable color shifts.
-- Adds current-frame local-contrast enhancement and a small neutral-veil reduction for a stronger clarity/dehaze-style look.
-- Adds the result to the untouched native source instead of using the low-resolution neural image as the visible base.
-- Keeps the bridge outside the target application's process.
-
-For a 2560×1440 source, the visible bridge remains 2560×1440 while the neural branch is approximately 854×480.
-
-## How the experimental compositor differs
-
-The main dev.14 branch is tuned for balanced Neural Rendering reconstruction. This branch biases the same stable residual path toward clarity:
-
-```text
-native
-  + motion-gated neural structure/luminance residual
-  + current-frame local luminance contrast
-  - small bright-neutral veil term
-```
-
-The source-derived clarity term comes from the frame being displayed. Soft-cheat.3 also removes blind duplicate-frame correction reuse, expands native-resolution motion rejection around moving edges, and strengthens stale-residual suppression as effect strength rises.
-
-## Install from this branch
-
-You need your own legitimate Lossless Scaling installation plus the external compatibility/runtime files described in [Installation](docs/install.md). Those files are not included here.
-
-Clone this branch:
-
-```powershell
-git clone --branch experimental-soft-cheat https://github.com/eikkapine/NR-Auto-Scale.git
-cd NR-Auto-Scale
-```
-
-Build the proxy and bridge:
+Build and install from source:
 
 ```powershell
 .\auto-scale\build.ps1
 .\bridge\build.ps1
-```
-
-Then run the source-tree setup:
-
-```powershell
 .\auto-scale\scripts\Setup.cmd
 ```
 
-Fresh setup should use:
+Fresh setup uses:
 
 ```ini
 NativeResolution=0
@@ -76,52 +57,87 @@ WorkingScale=0
 NeuralMaxHeight=480
 ```
 
-When you press **Scale** in Lossless Scaling, the proxy launches the bridge automatically and targets the bridge output.
+Pressing **Scale** in Lossless Scaling launches the bridge automatically.
+
+## Performance measurements
+
+I do not publish hand-entered FPS claims. Public performance values must come from hashed logs.
+
+For actual game/display frame timing, record a PresentMon CSV:
+
+```powershell
+.\tools\Capture-Performance.ps1 -ProcessName Game.exe -Seconds 30
+```
+
+Then feed that CSV to `bridge/scripts/Analyze-Run.py` together with the bridge/runtime logs. The analyzer writes a sanitized JSON report containing source SHA-256 values. Raw logs, process paths, captures and private runtime files stay local.
+
+The publication check enforces this rule:
+
+```powershell
+py .\tools\Check-Publication.py
+```
+
+## Why the direct-game path can look much stronger
+
+The dramatic Neural Rendering examples are not simple sharpening. A real in-game path can use the scene's temporal/upscaler contract and preserve broad neural changes to materials, local lighting, skin structure and shading.
+
+The Lossless Scaling bridge starts after the game has already produced a finished frame. It has no true engine motion vectors, depth, jitter, exposure or pre-upscale colour buffer. To keep that path stable, the compositor rejects or limits broad unstable residuals, which also removes much of the large appearance change visible in native/direct integrations.
+
+The direct-game route moves the work back into the game/upscaler flow so the neural result can be preserved with the data needed to keep it temporally aligned. See [Neural upstream research](docs/neural-upstream-performance.md).
 
 ## Requirements
 
+### Direct-game route
+
+- Windows 11
+- 64-bit DirectX 12 game with FSR for the first route
+- supported AMD Radeon GPU and AMD Software: Adrenalin Edition 26.1.1+ for the current direct-game upstream
+- user-downloaded official `dlssnr_on_amd_setup.exe`
+- user-supplied legitimate `nvngx_dlssnr.dll`
+
+The current direct-game upstream uses the HIP runtime supplied by the AMD driver. A separate ROCm install is not required.
+
+Targets containing common anti-cheat markers are blocked by default. The direct-game route is intended mainly for single-player/offline games.
+
+### Lossless Scaling route
+
 - Windows 11
 - Lossless Scaling from an official source
-- AMD Radeon GPU; development has focused on RDNA4 / RX 9070 XT
-- CMake 3.20+, MSVC C++ build tools and a Windows SDK when building from source
-- The AMD HIP/runtime pieces required by the chosen compatibility runtime
-- User-supplied compatibility/runtime files described in [Installation](docs/install.md)
+- AMD Radeon GPU
+- CMake, MSVC C++ build tools and Windows SDK when building from source
+- user-supplied compatibility/runtime files described in [Installation](docs/install.md)
 
-## Verification for this branch
+## Repository boundary
 
-The soft-cheat.3 Release bridge builds successfully and the bridge pixel tests pass. The proxy and full auto-scale/setup harness were already verified for soft-cheat.2 and are unchanged by this compositor-only update. The local validation build includes the same HIP 7 timing/pacing support used by the accepted dev.14 main build.
-
-Manual testing of soft-cheat.3 found that the previous smothering and long-lived movement trails were fixed. Slight flicker returned, so this remains an experimental checkpoint. No new screenshots were added.
-
-## Public-file boundary
-
-This repository contains project source code and documentation. It does not include:
+This repository contains my source code, scripts, documentation and sanitized measurement JSON. It does not contain:
 
 - paid Lossless Scaling binaries or `Lossless_original.dll`
+- `DLSS-NR-on-AMD` binaries/installers
 - NVIDIA DLSS-NR DLLs, models or weights
-- AMD compatibility proxy/runtime binaries
-- private INI files, logs, backups or machine-specific runtime files
+- AMD runtime/proxy binaries from third parties
+- private INI files, logs, manifests, backups or machine-specific paths
 - personal files or secrets
-
-The project-built proxy is also named `Lossless.dll`, but it is my own forwarding wrapper. The paid original stays in the local Lossless Scaling installation and is never included here.
-
-This branch does not contain anti-cheat bypasses or in-process game injection.
 
 ## Documentation
 
+- [Direct-game AMD route](direct-game/README.md)
 - [Installation](docs/install.md)
 - [Architecture](docs/architecture.md)
-- [Performance](docs/performance.md)
+- [Performance and log provenance](docs/performance.md)
+- [Neural upstream research](docs/neural-upstream-performance.md)
 - [Verification](docs/verification.md)
 - [Licensing](docs/licensing.md)
 - [Bridge internals](bridge/README.md)
 
 ## Credits
 
-The project builds on compatibility work and ideas from:
+The project builds on public research and compatibility work from:
 
 - [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD)
-- [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
+- [matiasLombo/neural-upstream](https://github.com/matiasLombo/neural-upstream)
+- [Kizzuwatnaa/DLSS5-Autopilot](https://github.com/Kizzuwatnaa/DLSS5-Autopilot)
+- [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR)
 - [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
+- [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
 
-My original project code is released under the [MIT License](LICENSE). Third-party components keep their own licenses and terms.
+My original project code is released under the [MIT License](LICENSE). Third-party components keep their own licences and terms.
