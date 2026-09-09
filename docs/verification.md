@@ -1,44 +1,65 @@
 # Verification
 
-This page records what I actually exercised for **v0.1.0-pre.3-dev.14** and keeps unverified claims out of the release.
+This page records the checks behind **v0.1.0-pre.3-dev.15** and keeps unsupported claims out of the release.
 
-## Verified for v0.1.0-pre.3-dev.14
+## Lossless Scaling path
 
-- The production bridge and proxy builds completed successfully.
-- `BridgePixelTests` passed, including blend bytes, SIMD tails, channel order, alpha, bypass, native identity and black-guard cases.
-- The auto-scale harness passed on a fresh rerun, including setup defaults/custom/native cases.
-- The installed `DlssNrBridge.exe` matched the final dev.14 build by SHA-256.
-- Fresh setup defaults remain `WorkingScale=0` and `NeuralMaxHeight=480`.
-- Automatic activation still forwards the source into the bridge when Lossless Scaling scales it.
-- `Ctrl+Alt+F6` toggles the effect; F7/F8 change strength; native residual mode supports up to `4.0`.
-- A 2560×1440 source used an approximately 854×480 neural feed while the visible output stayed native-sized.
-- The AMD compatibility runtime completed real neural jobs on the RX 9070 XT and reported the color-only path as asynchronous, with no motion/depth/exposure inputs and runtime history off.
-- The standalone dev.14 probe kept high-rate visible submissions instead of regressing to capture-rate duplicate suppression. Bridge cadence is diagnostic and is not a game-FPS measurement.
-- After installing dev.14, I manually confirmed that stationary flicker was fixed, flicker during movement was barely noticeable, and performance still felt good.
-- No new screenshots were added.
+The main branch retains the accepted dev.14 compositor and automatic Scale workflow:
 
-## Performance evidence
+- visible output stays at the captured source resolution while `NeuralMaxHeight=480` caps only the neural branch
+- the current native source remains the visible base
+- broad unstable residual color/luminance is filtered
+- stale chroma and correction magnitude are reduced as source motion rises
+- accepted correction history is reused only where the source is effectively unchanged
+- duplicate visible submissions remain independent from neural completion cadence
+- `Ctrl+Alt+F6` toggles the effect
+- `Ctrl+Alt+F7` decreases strength
+- `Ctrl+Alt+F8` increases strength up to `4.0` in native neural-residual mode
 
-Earlier gameplay sessions established the large performance gain from capping only the neural branch at 480p while keeping native visible output. I did not record a fresh numeric game-FPS value for dev.14, so this release makes no new FPS claim from the standalone bridge cadence.
-
-## Not established
-
-- full equivalence to an in-game DLSS-NR integration with real engine depth/motion vectors
-- pixel-identical output versus full-resolution Neural Rendering
-- universal compatibility across AMD GPUs, games or protected-content capture paths
-- competitive-game latency suitability
-- a fresh measured dev.14 game-FPS value
-- legal permission to redistribute every possible third-party runtime component
-
-## Approved images
-
-The only public gameplay images remain the previously reviewed files:
+No new screenshot was added for dev.15. The only public gameplay images remain the two previously reviewed CS2 crops:
 
 - `docs/images/cs2-native-off.png`
 - `docs/images/cs2-native-on.png`
 
-They are historical native-mode comparison crops. No dev.14 screenshot was added or changed.
+## Direct-game AMD path
 
-## Release boundary
+The direct-game helper was exercised against a locally installed x64 DX12/FidelityFX title using the official `DLSS-NR-on-AMD` v0.2.17 setup.
 
-The public repo and ZIP exclude paid Lossless Scaling files, `Lossless_original.dll`, AMD proxy/runtime binaries, NVIDIA DLLs/models/weights, private INIs, raw logs, backups and machine-specific development files.
+The live runtime log showed:
+
+- FidelityFX upscaler/loader dispatch interception
+- FSR color, motion, and depth staging
+- inverted-Z depth detection
+- zero-copy input and output interop
+- inline same-frame mode
+- completed Neural Rendering jobs
+- HIP selecting the RX 9070 XT (`gfx1201`)
+- no logged fault/GPU-error markers in the sampled run
+
+The same run produced a private PresentMon capture and hash-backed analyzer JSON. It was a startup/runtime smoke validation at full-resolution FSR input rather than a controlled A/B benchmark, so it is not promoted as an optimized-performance result.
+
+The managed remove path deleted the files it could prove were created by the managed install. A post-install runtime log and manifest were intentionally preserved when their hashes no longer matched the install-time manifest; the public repository/package never contains those private files.
+
+## Reference-image comparison
+
+`bridge/tests/Compare-DlssReference.py` compares static reference pairs without publishing the source images. It always emits unaligned metrics and only emits aligned metrics when registration confidence is high.
+
+The supplied references confirmed that the current color-only Lossless Scaling bridge explains only a small fraction of the large appearance change seen in full DLSS 5-style examples. That result is consistent with the architectural limitation: the desktop bridge lacks true game motion/depth/jitter/exposure and render-resolution color inputs.
+
+## Performance evidence
+
+Public performance values must come from hashed logs. `tools/Capture-Performance.ps1` records PresentMon data and `bridge/scripts/Analyze-Run.py` keeps game/display timing separate from bridge cadence and HIP/runtime timing.
+
+`tools/Check-Publication.py` rejects concrete FPS numbers in prose and measurement JSON that lacks source-hash/schema provenance.
+
+## Not established
+
+- universal compatibility across AMD GPUs or games
+- pixel-identical parity with a native NVIDIA DLSS 5 implementation
+- a controlled direct-game A/B performance benchmark for dev.15
+- competitive-game latency suitability for the injected direct-game route
+- permission to redistribute third-party runtime binaries outside their own licenses
+
+## Public release boundary
+
+The public repository and ZIP exclude paid Lossless Scaling files, `Lossless_original.dll`, third-party AMD proxy/runtime binaries or installers, NVIDIA DLLs/models/weights, raw logs, private INIs/manifests, backups, captures, secrets, and machine-specific development files.

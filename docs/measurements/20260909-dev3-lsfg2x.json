@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "20260909-dev3-lsfg2x",
   "version": "0.1.0-pre.3-dev.3",
   "bridge_sha256": "6ec7dd060eff947346bba3194d932a6616fd7d7a469b54c526e9350c7b163414",
@@ -46,14 +46,6 @@
       "occluded_submissions": 0
     }
   },
-  "manual_report": {
-    "base_fps": 30.0,
-    "framegen_multiplier": 2.0,
-    "nominal_output_fps": 60.0,
-    "measured_display_fps": null,
-    "observed_output_fps": 60.0,
-    "observed_output_source": "User-observed Lossless Scaling output during the separate 2x frame-generation session; bridge does not count generated LSFG frames."
-  },
   "limitations": [
     "Analysis reads existing logs only; no tests, playback or GPU work are started.",
     "Changed RGB submissions, HIP calls, neural jobs and displayed/generated FPS are distinct.",
@@ -63,5 +55,7 @@
     "Different gameplay runs are observational comparisons, not controlled A/B benchmarks.",
     "HIP device-wait duration includes queued work and contention, not isolated kernel time.",
     "HIP threads have overlapping windows and must not be summed as one critical path."
-  ]
+  ],
+  "analyzer_version": "legacy-log-analysis-migrated-v2",
+  "provenance": "All retained numeric measurement fields are derived from the hashed source logs listed in source_sha256."
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize existing manual-run logs without loading a runtime or starting capture.
+"""Summarize recorded runtime logs without loading a runtime or starting capture.
 
 Uses Python's standard library. The JSON contains numeric aggregates and source
 hashes, not raw log text, local paths, window titles, process IDs or adapter IDs.
@@ -10,17 +10,22 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import csv
 import datetime as dt
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
 import re
+import statistics
 import sys
 from typing import Any
 
 MAX_LOG_BYTES = 8 * 1024 * 1024
 APIS = ("launch", "device_wait", "stream_wait", "event_wait", "copy", "copy_async")
+SCHEMA_VERSION = 2
+ANALYZER_VERSION = "2.0"
 
 
 def read_log(path: Path) -> tuple[str, str]:
@@ -159,55 +164,152 @@ def summarize_hip(text: str, since: float, until: float | None) -> dict[str, Any
     }
 
 
+def _float_field(row: dict[str, str], *names: str) -> float | None:
+    lower = {key.lower(): value for key, value in row.items() if key}
+    for name in names:
+        raw = lower.get(name.lower())
+        if raw is None or raw.strip().upper() in {"", "NA", "N/A"}:
+            continue
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if math.isfinite(value):
+            return value
+    return None
+
+
+def _percentile(values: list[float], fraction: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = fraction * (len(ordered) - 1)
+    low = int(math.floor(position))
+    high = int(math.ceil(position))
+    if low == high:
+        return ordered[low]
+    weight = position - low
+    return ordered[low] * (1.0 - weight) + ordered[high] * weight
+
+
+def summarize_presentmon(text: str) -> dict[str, Any]:
+    """Summarize one PresentMon CSV without exposing local identifiers.
+
+    PresentMon can record more than one swap chain for a process. The primary
+    chain is selected mechanically as the chain with the most valid present
+    intervals. All rates below are derived only from the CSV rows.
+    """
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("PresentMon CSV has no header")
+
+    groups: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+    total_rows = 0
+    for row in reader:
+        total_rows += 1
+        key = (
+            row.get("Application", ""),
+            row.get("ProcessID", ""),
+            row.get("SwapChainAddress", ""),
+        )
+        groups[key].append(row)
+    if not groups:
+        raise ValueError("PresentMon CSV has no frame rows")
+
+    def present_intervals(rows: list[dict[str, str]]) -> list[float]:
+        values = []
+        for row in rows:
+            value = _float_field(row, "MsBetweenPresents", "msBetweenPresents", "FrameTime")
+            if value is not None and value > 0:
+                values.append(value)
+        return values
+
+    primary_key, primary_rows = max(groups.items(), key=lambda item: len(present_intervals(item[1])))
+    presents = present_intervals(primary_rows)
+    if not presents:
+        raise ValueError("PresentMon CSV has no valid present/frame intervals")
+
+    displayed = []
+    gpu_time = []
+    for row in primary_rows:
+        value = _float_field(row, "MsBetweenDisplayChange", "msBetweenDisplayChange", "DisplayedTime")
+        if value is not None and value > 0:
+            displayed.append(value)
+        value = _float_field(row, "GPUTime", "MsGPUTime", "msGPUTime", "msGPUActive")
+        if value is not None and value >= 0:
+            gpu_time.append(value)
+
+    present_mean = statistics.fmean(presents)
+    display_mean = statistics.fmean(displayed) if displayed else None
+    result: dict[str, Any] = {
+        "source_rows": total_rows,
+        "primary_swapchain_rows": len(primary_rows),
+        "application": Path(primary_key[0]).name if primary_key[0] else None,
+        "present_intervals": len(presents),
+        "present_interval_ms": {
+            "mean": present_mean,
+            "median": statistics.median(presents),
+            "p95": _percentile(presents, 0.95),
+            "p99": _percentile(presents, 0.99),
+        },
+        "present_rate_fps": 1000.0 / present_mean,
+        "display_intervals": len(displayed),
+        "display_interval_ms": {
+            "mean": display_mean,
+            "median": statistics.median(displayed) if displayed else None,
+            "p95": _percentile(displayed, 0.95),
+        },
+        "display_rate_fps": 1000.0 / display_mean if display_mean else None,
+    }
+    if gpu_time:
+        result["gpu_time_ms"] = {
+            "mean": statistics.fmean(gpu_time),
+            "median": statistics.median(gpu_time),
+            "p95": _percentile(gpu_time, 0.95),
+        }
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cadence", required=True, type=Path)
+    parser.add_argument("--cadence", type=Path, help="Lossless Scaling bridge cadence log")
     parser.add_argument("--hip", type=Path)
     parser.add_argument("--runtime-log", type=Path)
+    parser.add_argument("--presentmon", type=Path, help="PresentMon CSV captured for the target game/process")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--version", required=True)
-    parser.add_argument("--bridge-sha256", required=True, help="Hash verified against this run's deployment record")
+    parser.add_argument("--bridge-sha256", help="Optional bridge hash verified against this run's deployment record")
     parser.add_argument("--since", type=float, default=20.0)
     parser.add_argument("--until", type=float)
     parser.add_argument("--hip-since", type=float, default=20.0)
     parser.add_argument("--hip-until", type=float)
-    parser.add_argument("--reported-base-fps", type=float)
-    parser.add_argument("--framegen-multiplier", type=float)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
+        if not any((args.cadence, args.hip, args.runtime_log, args.presentmon)):
+            raise ValueError("Select at least one source log")
         for value in (args.run_id, args.version):
             if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", value):
                 raise ValueError("Run ID and version must be short alphanumeric labels")
-        if not re.fullmatch(r"[a-fA-F0-9]{64}", args.bridge_sha256):
+        if args.bridge_sha256 is not None and not re.fullmatch(r"[a-fA-F0-9]{64}", args.bridge_sha256):
             raise ValueError("Bridge SHA256 must contain 64 hexadecimal characters")
         for start, end in ((args.since, args.until), (args.hip_since, args.hip_until)):
             if not math.isfinite(start) or start < 0 or (end is not None and (not math.isfinite(end) or end <= start)):
                 raise ValueError("Invalid measurement window")
-        for value in (args.reported_base_fps, args.framegen_multiplier):
-            if value is not None and (not math.isfinite(value) or value <= 0):
-                raise ValueError("Reported rates and multipliers must be positive and finite")
-        cadence, digest = read_log(args.cadence)
         report: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": SCHEMA_VERSION,
+            "analyzer_version": ANALYZER_VERSION,
             "run_id": args.run_id,
             "version": args.version,
-            "bridge_sha256": args.bridge_sha256.lower(),
-            "hash_association": "Provided by caller; verify with the deployment record, not the current executable alone",
             "analysis_created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "source_sha256": {"cadence": digest},
-            "cadence": summarize_cadence(cadence, args.since, args.until),
-            "manual_report": {
-                "base_fps": args.reported_base_fps,
-                "framegen_multiplier": args.framegen_multiplier,
-                "nominal_output_fps": args.reported_base_fps * args.framegen_multiplier
-                if args.reported_base_fps is not None and args.framegen_multiplier is not None else None,
-                "measured_display_fps": None,
-            },
+            "source_sha256": {},
             "limitations": [
                 "Analysis reads existing logs only; no tests, playback or GPU work are started.",
-                "Changed RGB submissions, HIP calls, neural jobs and displayed/generated FPS are distinct.",
-                "Nominal output FPS is arithmetic, not an LSFG/display measurement.",
+                "Changed RGB submissions, HIP calls, neural jobs and PresentMon frame rates are distinct.",
+                "Game/display FPS is published only when a PresentMon CSV is supplied.",
                 "Window selection includes complete logged intervals only; endpoints are rounded.",
                 "Whole-run averages can include bypass, strength changes and startup; effect state may be missing.",
                 "Different gameplay runs are observational comparisons, not controlled A/B benchmarks.",
@@ -215,6 +317,13 @@ def main() -> int:
                 "HIP threads have overlapping windows and must not be summed as one critical path.",
             ],
         }
+        if args.bridge_sha256:
+            report["bridge_sha256"] = args.bridge_sha256.lower()
+            report["hash_association"] = "Provided by caller; verify with the deployment record, not the current executable alone"
+        if args.cadence:
+            cadence, digest = read_log(args.cadence)
+            report["source_sha256"]["cadence"] = digest
+            report["cadence"] = summarize_cadence(cadence, args.since, args.until)
         if args.hip:
             text, digest = read_log(args.hip)
             report["source_sha256"]["hip"] = digest
@@ -223,22 +332,91 @@ def main() -> int:
             text, digest = read_log(args.runtime_log)
             report["source_sha256"]["runtime"] = digest
             version = re.search(r"dlssnr_amd (v[\d.]+) \(build ([a-fA-F0-9]+)\)", text)
-            samples = [{"job": int(job), "wall_ms": int(ms)} for job, ms in re.findall(
-                r"network job (\d+) done in (\d+) ms", text
-            )]
+            sample_rows = re.findall(
+                r"network job (\d+) done in (\d+) ms \(([\d.]+) ms network on the GPU, "
+                r"([\d.]+) ms waiting for the capture; history (on|off), (zero-copy|copied)\)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            samples = [
+                {
+                    "job": int(job),
+                    "wall_ms": int(wall),
+                    "network_gpu_ms": float(gpu),
+                    "capture_wait_ms": float(wait),
+                    "history": history.lower() == "on",
+                    "zero_copy": zero_copy.lower() == "zero-copy",
+                }
+                for job, wall, gpu, wait, history, zero_copy in sample_rows
+            ]
+            staging = re.search(
+                r"staging ready: colour (\d+)x(\d+) dxgi \d+ .*?; motion (\d+)x(\d+) dxgi \d+; "
+                r"depth (\d+)x(\d+) dxgi \d+ \(inverted (\d+)\); exposure (yes|no); residual (on|off)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            interop = re.search(
+                r"interop: inputs shared \((zero-copy|copied)\), output shared \((zero-copy|copied)\); mode ([^\r\n]+)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            hip = re.search(r"env: HIP: (\d+) device\(s\), driver (\d+), runtime (\d+);", text)
+            swapchain = re.search(r"env: swapchain (\d+)x(\d+) format \d+,", text)
             report["runtime"] = {
                 "version": version[1] if version else None,
                 "build": version[2] if version else None,
+                "fidelityfx_dispatch_detected": bool(re.search(r"(?im)^first ffxDispatch type ", text)),
+                "fidelityfx_upscaler_hooks": len(re.findall(r"(?im)^hooked amd_fidelityfx_.*!ffxDispatch", text)),
                 "sampled_jobs": samples,
                 "observed_fault_lines": len(re.findall(r"(?im)^FAULT:", text)),
                 "observed_gpu_error_lines": len(re.findall(r"(?im)^job \d+ GPU errors:", text)),
                 "note": "Sparse job samples; marker counts are not a comprehensive runtime-health certification",
             }
+            if staging:
+                report["runtime"]["fsr_inputs"] = {
+                    "color_size": [int(staging[1]), int(staging[2])],
+                    "motion_size": [int(staging[3]), int(staging[4])],
+                    "depth_size": [int(staging[5]), int(staging[6])],
+                    "depth_inverted": staging[7] == "1",
+                    "exposure_texture": staging[8].lower() == "yes",
+                    "residual_enabled": staging[9].lower() == "on",
+                }
+                if swapchain:
+                    output_w, output_h = int(swapchain[1]), int(swapchain[2])
+                    input_w, input_h = int(staging[1]), int(staging[2])
+                    report["runtime"]["processing_resolution"] = {
+                        "swapchain_size": [output_w, output_h],
+                        "fsr_input_size": [input_w, input_h],
+                        "input_to_output_width_ratio": input_w / output_w if output_w else None,
+                        "input_to_output_height_ratio": input_h / output_h if output_h else None,
+                        "full_output_resolution_input": input_w == output_w and input_h == output_h,
+                    }
+            if interop:
+                report["runtime"]["interop"] = {
+                    "inputs": interop[1].lower(),
+                    "output": interop[2].lower(),
+                    "mode": interop[3].strip(),
+                }
+            if hip:
+                report["runtime"]["hip_runtime"] = {
+                    "device_count": int(hip[1]),
+                    "driver": hip[2],
+                    "runtime": hip[3],
+                }
+        if args.presentmon:
+            text, digest = read_log(args.presentmon)
+            report["source_sha256"]["presentmon"] = digest
+            report["presentmon"] = summarize_presentmon(text)
         encoded = json.dumps(report, indent=2, allow_nan=False) + "\n"
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x", encoding="utf-8", newline="\n") as output:
             output.write(encoded)
-        print(f"Recorded {args.run_id}: {report['cadence']['selected_window']['changed_rgb_per_s']:.3f} changed RGB/s in selected intervals")
+        if "presentmon" in report:
+            print(f"Recorded {args.run_id}: {report['presentmon']['present_rate_fps']:.3f} present/s from PresentMon")
+        elif "cadence" in report:
+            print(f"Recorded {args.run_id}: {report['cadence']['selected_window']['changed_rgb_per_s']:.3f} changed RGB/s in selected intervals")
+        else:
+            print(f"Recorded {args.run_id}: sanitized {len(report['source_sha256'])} hashed log source(s)")
         return 0
     except (OSError, ValueError, KeyError, OverflowError) as error:
         print(f"Log analysis failed: {error}", file=sys.stderr)

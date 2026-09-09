@@ -1,66 +1,57 @@
-# DLSS NR Bridge
+# DlssNrBridge
 
 `DlssNrBridge.exe` captures one selected window with Windows Graphics Capture, feeds a reduced color image to the AMD DLSS-NR compatibility runtime, and presents a native-resolution D3D11 bridge window for Lossless Scaling.
 
-The current checkpoint is **v0.1.0-pre.3-dev.14**. With `--neural-max-height 480`, the source remains native-sized for visible output while only the neural branch is reduced. A 2560×1440 source uses an approximately 854×480 neural texture.
+The current main checkpoint is **v0.1.0-pre.3-dev.15**. With `--neural-max-height 480`, the visible source stays native-sized while only the neural branch is reduced. A 2560×1440 source therefore uses about 854×480 for Neural Rendering while the bridge output remains 2560×1440.
 
-The AMD compatibility runtime exposes the color-only path as asynchronous output from an earlier frame. Dev.14 treats that output as a residual over the current low-resolution feed, removes broad unstable residual components spatially, and detects source motion from the previous reduced input. During movement it converts stale chroma toward luminance detail and rapidly reduces stale correction magnitude. Cross-frame correction reuse is allowed only when the native source pixel is effectively unchanged.
+The bridge keeps the accepted dev.14 compositor: the current native source is the image base, the asynchronous neural output is treated as a residual over the current reduced feed, broad unstable residual color/luminance is filtered, and stale chroma/magnitude is reduced as motion rises. Accepted correction history is reused only where the native source is effectively unchanged, avoiding the earlier long-lived trails and wet-paint smearing.
 
-The native source itself is never temporally blurred. Duplicate visible presents are still submitted at the fast feed cadence so Lossless Scaling does not collapse back to the capture rate.
+The native source itself is never temporally blurred over a changed pixel. Duplicate visible presents can continue at the fast feed cadence so Lossless Scaling does not collapse to capture cadence while neural work is still in flight.
 
 ## Keyboard shortcuts
 
-- `Ctrl+Alt+F6` toggles processed output on/off.
+- `Ctrl+Alt+F6` toggles original/processed output.
 - `Ctrl+Alt+F7` decreases strength.
 - `Ctrl+Alt+F8` increases strength.
 
-Native neural-delta mode starts at `1.0` and supports up to `4.0`. Above `1.0`, strength changes in 0.25 steps; from `0..1`, it changes in 0.1 steps. Legacy modes remain capped at `1.0`.
+Native neural-residual mode starts at `1.0` and supports up to `4.0`. Above `1.0`, strength changes in 0.25 steps; from `0..1`, it changes in 0.1 steps. Legacy modes remain capped at `1.0`.
 
 ## Main options
 
-- `--source-hwnd 0x...` selects a source window by handle.
-- `--source-title "partial title"` selects a visible source by title.
-- `--neural-max-height 480` keeps the visible source resolution and caps only neural processing height.
-- `--working-scale 0.75` enables the older reduced source-relative mode.
-- `--native-resolution` enables full 1:1 neural processing when no neural-height cap is set.
-- `--width` / `--height` configure the fixed fallback mode.
-- `--startup-delay-ms` and `--warmup-frames` control startup health gating.
-- `--ready-file` publishes the visible bridge HWND after healthy output is available.
-- `--stop-event` and `--parent-pid` provide bounded shutdown ownership.
-- `--cpu-transport` forces the compatibility fallback path.
-- `--hip-kernel-timing` enables optional diagnostic kernel sampling; it is off by default.
+- `--source-hwnd <HWND>` selects the captured window.
+- `--neural-max-height <N>` caps only the neural branch while keeping native visible output.
+- `--working-scale <0..1>` selects the legacy source-relative neural size when the neural-height cap is disabled.
+- `--native-resolution` enables full 1:1 neural processing when both reduced modes are disabled.
+- `--hip-kernel-timing` enables optional HIP timing instrumentation.
+
+Fresh setup uses `WorkingScale=0` and `NeuralMaxHeight=480`.
 
 ## GPU path
 
-The normal path keeps capture conversion, neural input resize, neural handoff, composition and visible display on the GPU. Shared D3D11/D3D12 textures and fences preserve producer/consumer ownership. Only the small status counters are read back continuously.
+The normal path keeps capture conversion, neural input resize, neural handoff, composition and presentation on GPU resources. D3D11/D3D12 shared textures and fences avoid steady-state full-frame CPU readback. Small status/timing buffers are used for diagnostics and pacing.
 
-The visible compositor always keeps the captured native source as the base in `NeuralMaxHeight` mode. It does not upscale the 480p neural output and replace the entire frame.
+The bridge still uses the color-only compatibility path for Lossless Scaling. It does not receive the game's real engine motion vectors, depth, jitter, exposure or pre-upscale color buffer. Dev.15 therefore keeps the stable residual filter rather than claiming full guided temporal parity with an in-game integration.
 
-The bridge still uses `UseFsrInputs=0` for the Lossless Scaling color-only path. That means it does not receive engine depth or motion-vector buffers, so it cannot reproduce the full guided temporal behavior of an in-game FSR hook. Dev.14 stabilizes the color-only asynchronous residual without claiming to recreate missing engine data.
+The separate `direct-game/` route exists for games where those temporal/upscaler inputs can be obtained inside the FSR/DX12 path.
 
 ## Runtime files
 
-Proxy mode expects user-supplied runtime files beside the private bridge installation, including the AMD proxy and the user's legally obtained NVIDIA DLSS-NR DLL. Those files are not part of this repository or release package.
+Proxy mode expects locally supplied runtime files beside the private bridge installation, including the AMD compatibility proxy and a legally obtained NVIDIA DLSS-NR DLL. Those files are not part of this repository or release package.
 
-The exercised runtime configuration keeps:
-
-```ini
-Enabled=1
-UseFsrInputs=0
-Inline=0
-Interop=1
-LocalStructure=1
-```
+The Lossless Scaling route keeps its asynchronous runtime configuration (`Inline=0`) because the bridge is designed around the compatibility runtime's completed-output cadence. The direct-game route uses its own upstream-generated rich temporal configuration separately.
 
 ## Build
 
 ```powershell
-cmake -S bridge -B bridge/build -G "Visual Studio 17 2022" -A x64
-cmake --build bridge/build --config Release --target DlssNrBridge
+.\bridge\build.ps1
 ```
 
-The Windows SDK shader compiler embeds the transport shaders into the production executable during the build.
+The Windows SDK shader compiler embeds the transport shaders into the production bridge build. Optional HIP timing support uses the locally available HIP headers when present; normal direct-game use does not require installing a separate ROCm SDK.
+
+## Measurement boundary
+
+`bridge/scripts/Analyze-Run.py` separates bridge cadence, HIP/runtime timing and actual game/display timing. PresentMon CSV input is required for a real game/display frame-rate measurement. Public analyzer JSON records SHA-256 hashes of the raw sources; raw logs stay private.
 
 ## Verification boundary
 
-The dev.14 production bridge compiled successfully, the pixel tests passed, the auto-scale/installer harness passed on a fresh rerun, and the installed bridge matched the built SHA-256. The AMD runtime completed the 480p color-only neural path successfully in the standalone probe. I then manually accepted the visual result through Lossless Scaling: stationary flicker was fixed and movement flicker was barely noticeable. No new screenshot was added.
+For dev.15 I verify the Release bridge build, bridge pixel tests, Release proxy build, publication provenance gate, release artifact hashes and allowlisted package contents before publishing. No new screenshot is added for this checkpoint.

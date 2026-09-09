@@ -13,6 +13,8 @@ runs/
 **/runtime/
 **/artifacts/
 probe/runs/
+__pycache__/
+*.pyc
 
 # Proprietary/runtime binaries and generated native outputs
 *.dll
@@ -42,6 +44,7 @@ screenshots/
 comparisons/
 wallpaper-tests/
 *.log
+*.csv
 *.dmp
 *.etl
 *.ppm
@@ -62,6 +65,7 @@ wallpaper-tests/
 *.pth
 *.safetensors
 *.engine
+.nr-auto-scale-direct.json
 
 # Upstream/local clones
 LosslessProxy/
