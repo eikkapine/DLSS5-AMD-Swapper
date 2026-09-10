@@ -5,6 +5,45 @@ using Dlss5AmdSwapper.Services;
 
 var failures = new List<string>();
 
+await RuntimeControlRegressionTests.RunAsync(RunAsync);
+await DiagnosticsRegressionTests.RunAsync();
+
+await RunAsync("Installer restore preserves changed and pre-existing files", async () =>
+{
+    using var temp = new TempDirectory();
+    var game = new GameEntry { Name = "Fixture", ExePath = Path.Combine(temp.Path, "FixtureGame.exe") };
+    var proxy = Path.Combine(temp.Path, "version.dll");
+    var original = Path.Combine(temp.Path, "dlssnr_on_amd.ini");
+    var changed = Path.Combine(temp.Path, "dlssnr_on_amd_weights.bin");
+    await File.WriteAllTextAsync(proxy, "managed proxy");
+    await File.WriteAllTextAsync(original, "original config");
+    await File.WriteAllTextAsync(changed, "modified weights");
+    var proxyState = new FileState(new FileInfo(proxy).Length, await DirectGameInstallerService.Sha256Async(proxy));
+    var originalState = new FileState(new FileInfo(original).Length, await DirectGameInstallerService.Sha256Async(original));
+    await File.WriteAllTextAsync(game.ManifestPath, System.Text.Json.JsonSerializer.Serialize(new
+    {
+        before = new Dictionary<string, FileState> { ["dlssnr_on_amd.ini"] = originalState },
+        after = new Dictionary<string, FileState> { ["version.dll"] = proxyState, ["dlssnr_on_amd_weights.bin"] = new(1, "old") },
+        installed_proxy_names = new[] { "version.dll" }
+    }));
+    var result = await new DirectGameInstallerService(new GameProbeService()).RemoveAsync(game, false);
+    Assert(!File.Exists(proxy), "Unchanged managed proxy was not removed.");
+    Assert(File.Exists(original) && File.Exists(changed), "Original or modified files were deleted.");
+    Assert(result.ManifestRetained && File.Exists(game.ManifestPath), "Changed files lost their ownership manifest.");
+    Assert(!game.Busy, "Restore left the game busy.");
+});
+
+await RunAsync("Installer refuses removal while a game is running", async () =>
+{
+    using var temp = new TempDirectory();
+    var game = new GameEntry { ExePath = Path.Combine(temp.Path, "FixtureGame.exe"), Running = true };
+    var installer = new DirectGameInstallerService(new GameProbeService());
+    try { await installer.RemoveAsync(game, false); throw new Exception("Running game was accepted."); }
+    catch (InvalidOperationException error) { Assert(error.Message.Contains("Close the game"), "Wrong rejection reason."); }
+    Assert(!game.Busy, "Rejected operation left the game busy.");
+});
+
+
 await RunAsync("INI preserves unrelated sections", async () =>
 {
     using var temp = new TempDirectory();

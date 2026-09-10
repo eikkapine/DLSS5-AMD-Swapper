@@ -4,8 +4,10 @@ using Microsoft.Win32;
 
 namespace Dlss5AmdSwapper.Services;
 
-public sealed class GameDiscoveryService(GameProbeService probe)
+public sealed class GameDiscoveryService
 {
+    public GameDiscoveryService(GameProbeService probe) { ArgumentNullException.ThrowIfNull(probe); }
+
     private static readonly string[] HotZoneNames =
     [
         "Games", "SteamLibrary", "GOG Games", "Epic Games", "Origin Games", "EA Games",
@@ -25,7 +27,9 @@ public sealed class GameDiscoveryService(GameProbeService probe)
     public async Task<IReadOnlyList<DiscoveredGame>> DiscoverAsync(
         bool includeHeuristics = true,
         IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? additionalFolders = null,
+        bool includeAllDrives = false)
     {
         return await Task.Run(() =>
         {
@@ -45,7 +49,8 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                 cancellationToken.ThrowIfCancellationRequested();
                 progress?.Report($"Scanning {scanner.Name}…");
                 try { all.AddRange(scanner.Scan(cancellationToken)); }
-                catch { /* One launcher must never abort the whole PC scan. */ }
+                catch (OperationCanceledException) { throw; }
+                catch { /* One inaccessible launcher must not abort discovery. */ }
             }
 
             var launcherResults = Deduplicate(all);
@@ -59,6 +64,18 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                 all.AddRange(ScanHotZones(knownRoots, progress, cancellationToken));
             }
 
+            var known = all.Select(game => NormalizePath(game.RootPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var folder in (additionalFolders ?? []).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                all.AddRange(ScanFolder(folder, known, progress, cancellationToken, maxDepth: 5));
+            }
+            if (includeAllDrives)
+            {
+                foreach (var drive in FixedDrives())
+                    all.AddRange(ScanFolder(drive, known, progress, cancellationToken, maxDepth: 6));
+            }
+            cancellationToken.ThrowIfCancellationRequested();
             return Deduplicate(all)
                 .OrderBy(game => game.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToArray();
@@ -83,7 +100,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
 
                 var root = Path.Combine(steamApps, "common", installDir);
                 if (!Directory.Exists(root)) continue;
-                var exe = probe.FindBestExecutable(root, name, lenient: true);
+                var exe = FindBestExecutable(root, name, lenient: true, cancellationToken);
                 if (exe is null) continue;
                 games.Add(new DiscoveredGame(name, exe, "Steam", root));
             }
@@ -131,9 +148,10 @@ public sealed class GameDiscoveryService(GameProbeService probe)
         var games = new List<DiscoveredGame>();
         foreach (var item in byRoot.Values)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var exe = string.IsNullOrWhiteSpace(item.LaunchExecutable) ? null : Path.Combine(item.Root, item.LaunchExecutable);
-            if (exe is null || !File.Exists(exe)) exe = probe.FindBestExecutable(item.Root, item.Name, lenient: true);
-            if (exe is not null) games.Add(new DiscoveredGame(item.Name, exe, "Epic Games", item.Root));
+            if (exe is null || !File.Exists(exe)) exe = FindBestExecutable(item.Root, item.Name, lenient: true, cancellationToken);
+            if (exe is not null && IsRegularDirectory(Path.GetDirectoryName(exe)!)) games.Add(new DiscoveredGame(item.Name, exe, "Epic Games", item.Root));
         }
         return games;
     }
@@ -157,8 +175,8 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                 if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
                 var exe = rawExe;
                 if (!string.IsNullOrWhiteSpace(exe) && !Path.IsPathRooted(exe)) exe = Path.Combine(root, exe);
-                if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) exe = probe.FindBestExecutable(root, name, lenient: true);
-                if (exe is not null) games.Add(new DiscoveredGame(name, exe, "GOG", root));
+                if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe)) exe = FindBestExecutable(root, name, lenient: true, cancellationToken);
+                if (exe is not null && IsRegularDirectory(Path.GetDirectoryName(exe)!)) games.Add(new DiscoveredGame(name, exe, "GOG", root));
             }
         }
         return games;
@@ -179,7 +197,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                 var root = key is null ? string.Empty : ReadRegistryString(key, "InstallDir");
                 if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
                 var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
-                var exe = probe.FindBestExecutable(root, name, lenient: true);
+                var exe = FindBestExecutable(root, name, lenient: true, cancellationToken);
                 if (exe is not null) games.Add(new DiscoveredGame(name, exe, "Ubisoft Connect", root));
             }
         }
@@ -202,7 +220,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                         ? "Rockstar Games"
                         : null;
             if (source is null || string.IsNullOrWhiteSpace(entry.InstallLocation) || !Directory.Exists(entry.InstallLocation)) continue;
-            var exe = probe.FindBestExecutable(entry.InstallLocation, entry.DisplayName, lenient: true);
+            var exe = FindBestExecutable(entry.InstallLocation, entry.DisplayName, lenient: true, cancellationToken);
             if (exe is not null) games.Add(new DiscoveredGame(entry.DisplayName, exe, source, entry.InstallLocation));
         }
         return games;
@@ -220,7 +238,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                 var name = Path.GetFileName(directory);
                 var content = Path.Combine(directory, "Content");
                 var searchRoot = Directory.Exists(content) ? content : directory;
-                var exe = probe.FindBestExecutable(searchRoot, name, lenient: true);
+                var exe = FindBestExecutable(searchRoot, name, lenient: true, cancellationToken);
                 if (exe is not null) games.Add(new DiscoveredGame(name, exe, "Xbox / Game Pass", directory));
             }
         }
@@ -249,7 +267,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
                     if (ShouldSkipDirectory(name) || LooksLikeLauncherInstall(directory)) continue;
                     var normalized = NormalizePath(directory);
                     if (knownRoots.Contains(normalized)) continue;
-                    var exe = probe.FindBestExecutable(directory, name, lenient: false);
+                    var exe = FindBestExecutable(directory, name, lenient: false, cancellationToken);
                     if (exe is null) continue;
                     games.Add(new DiscoveredGame(name, exe, "Standalone", directory));
                     knownRoots.Add(normalized);
@@ -258,6 +276,109 @@ public sealed class GameDiscoveryService(GameProbeService probe)
         }
         return games;
     }
+
+    // A user folder can be a game itself or contain several nested game folders.
+    // Stop descending once a game is found; do not reinterpret its tool/content folders as games.
+    private IReadOnlyList<DiscoveredGame> ScanFolder(string root, HashSet<string> knownRoots,
+        IProgress<string>? progress, CancellationToken cancellationToken, int maxDepth)
+    {
+        var games = new List<DiscoveredGame>();
+        var pending = new Stack<(string Path, int Depth)>();
+        if (!IsRegularDirectory(root)) return games;
+        pending.Push((root, 0));
+        var visited = 0;
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (directory, depth) = pending.Pop();
+            if (++visited > 20000)
+            {
+                progress?.Report("Folder scan reached its directory limit. Add a more specific game folder to scan further.");
+                break;
+            }
+            var normalized = NormalizePath(directory);
+            if (knownRoots.Contains(normalized)) continue;
+            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(directory));
+            if ((depth > 0 && ShouldSkipDirectory(name)) || name.Equals("Users", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("ProgramData", StringComparison.OrdinalIgnoreCase)) continue;
+            if (visited % 50 == 1) progress?.Report($"Checking {directory}");
+            // Only probe likely game roots, avoiding repeated recursive probes of entire libraries.
+            var likelyRoot = SafeFiles(directory, "*.exe").Length > 0 ||
+                Directory.Exists(Path.Combine(directory, "Binaries")) || Directory.Exists(Path.Combine(directory, "bin64"));
+            if (likelyRoot && !LooksLikeLauncherInstall(directory))
+            {
+                var exe = FindBestExecutable(directory, name, false, cancellationToken);
+                if (exe is not null)
+                {
+                    games.Add(new DiscoveredGame(name, exe, "Standalone", directory));
+                    knownRoots.Add(normalized);
+                    continue;
+                }
+            }
+            if (depth < maxDepth)
+                foreach (var child in SafeDirectories(directory)) pending.Push((child, depth + 1));
+        }
+        return games;
+    }
+
+    private static bool IsRegularDirectory(string path)
+    {
+        try
+        {
+            // Reject junctions in ancestors too, including explicit custom/launcher roots.
+            for (DirectoryInfo? directory = new(Path.GetFullPath(path)); directory is not null; directory = directory.Parent)
+                if ((directory.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            return Directory.Exists(path);
+        }
+        catch { return false; }
+    }
+
+    private static string? FindBestExecutable(string root, string? gameName, bool lenient, CancellationToken cancellationToken)
+    {
+        if (!IsRegularDirectory(root)) return null;
+        var pending = new Stack<(string Path, int Depth)>();
+        pending.Push((root, 0));
+        string? best = null;
+        var bestScore = int.MinValue;
+        long bestLength = -1;
+        var visited = 0;
+        var normalizedName = NormalizeName(gameName ?? Path.GetFileName(root));
+        while (pending.Count > 0 && visited++ < 4096)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var (directory, depth) = pending.Pop();
+            foreach (var exe in SafeFiles(directory, "*.exe"))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try { if ((File.GetAttributes(exe) & FileAttributes.ReparsePoint) != 0) continue; }
+                catch { continue; }
+                var stem = Path.GetFileNameWithoutExtension(exe);
+                string[] utility = ["unins", "crash", "report", "launcher", "redist", "setup", "installer", "config", "directx", "dotnetfx", "physx", "easyanticheat", "beservice", "battleye"];
+                if (utility.Any(value => stem.Contains(value, StringComparison.OrdinalIgnoreCase))) continue;
+                var machine = GameProbeService.ReadPeMachine(exe);
+                if (machine is not (0x8664 or 0x014c)) continue;
+                var length = SafeLength(exe);
+                var score = (machine == 0x8664 ? 2 : 0) + (length >= 10 * 1024 * 1024 ? 3 : length < 1024 * 1024 ? -3 : 0);
+                var normalizedStem = NormalizeName(stem);
+                if (normalizedName.Length > 0 && normalizedStem.Length > 0 &&
+                    (normalizedStem.StartsWith(normalizedName, StringComparison.Ordinal) || normalizedName.StartsWith(normalizedStem, StringComparison.Ordinal))) score += 5;
+                if (stem.Contains("shipping", StringComparison.OrdinalIgnoreCase) || stem.Contains("game", StringComparison.OrdinalIgnoreCase)) score += 2;
+                if (score > bestScore || (score == bestScore && length > bestLength))
+                { best = exe; bestScore = score; bestLength = length; }
+            }
+            if (depth >= 4) continue;
+            foreach (var child in SafeDirectories(directory))
+            {
+                var name = Path.GetFileName(child);
+                if (ShouldSkipDirectory(name) || name.Equals("Engine", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("redist", StringComparison.OrdinalIgnoreCase) || name.Equals("Support", StringComparison.OrdinalIgnoreCase)) continue;
+                pending.Push((child, depth + 1));
+            }
+        }
+        return lenient || bestScore >= 0 ? best : null;
+    }
+
+    private static string NormalizeName(string name) => new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
     private static IReadOnlyList<DiscoveredGame> Deduplicate(IEnumerable<DiscoveredGame> games)
     {
@@ -384,7 +505,7 @@ public sealed class GameDiscoveryService(GameProbeService probe)
     private static string ReadRegistryString(RegistryKey key, string name) { try { return key.GetValue(name) as string ?? string.Empty; } catch { return string.Empty; } }
     private static string[] SafeSubKeys(RegistryKey key) { try { return key.GetSubKeyNames(); } catch { return []; } }
     private static string[] SafeFiles(string root, string pattern) { try { return Directory.EnumerateFiles(root, pattern, SearchOption.TopDirectoryOnly).ToArray(); } catch { return []; } }
-    private static string[] SafeDirectories(string root) { try { return Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly).ToArray(); } catch { return []; } }
+    private static string[] SafeDirectories(string root) { try { return Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly).Where(IsRegularDirectory).ToArray(); } catch { return []; } }
     private static string SafeRead(string path) { try { return File.ReadAllText(path); } catch { return string.Empty; } }
     private static long SafeLength(string path) { try { return new FileInfo(path).Length; } catch { return 0; } }
     private static string NormalizePath(string path) { try { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); } catch { return string.Empty; } }

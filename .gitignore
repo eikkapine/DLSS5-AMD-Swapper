@@ -35,7 +35,7 @@ __pycache__/
 # Private runtime assets, weights, captures, and logs
 backup-original/
 weights/
-models/
+/models/
 raw/
 images/
 logs/
@@ -101,3 +101,6 @@ docs/images/*
 !docs/images/cs2-native-on.png
 !docs/images/comparison.json
 !docs/images/dlss5-amd-swapper-header.svg
+
+!docs/images/swapper-overview.jpg
+!docs/images/swapper-settings.jpg

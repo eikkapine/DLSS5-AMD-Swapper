@@ -109,3 +109,9 @@ py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
 ```
 
 See [Direct-game route](../direct-game/README.md) for install/update/diagnose/remove commands.
+
+## Optional manager installation
+
+Extract the complete release ZIP, then run `Install.cmd`. It verifies `SHA256SUMS.txt`, copies the manager and project-owned payload into the current Windows account's Programs directory, and creates Desktop and Start menu shortcuts. Exit the installed app from its tray menu before updating. Running `Dlss5AmdSwapper.exe` directly remains the portable option.
+
+Settings includes light/dark themes, close-to-tray, additional scan folders and an optional full-drive scan. Right-click library entries for folder actions, local covers and hiding. Diagnostics export previews an allowlisted report before saving; private paths and raw logs are excluded.

@@ -10,6 +10,11 @@ if (!$OutputDirectory) {
     $OutputDirectory = Join-Path $repoRoot "artifacts\DLSS5-AMD-Swapper-local"
 }
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
+$allowedRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "artifacts")).TrimEnd('\') + '\'
+if (!$output.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputDirectory must be a child of the repository artifacts folder."
+}
+if ((Test-Path -LiteralPath $output) -and ((Get-Item -LiteralPath $output).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "OutputDirectory cannot be a link." }
 $payload = Join-Path $output "payload"
 $project = Join-Path $PSScriptRoot "Dlss5AmdSwapper\Dlss5AmdSwapper.csproj"
 $smokeProject = Join-Path $PSScriptRoot "Dlss5AmdSwapper.SmokeTests\Dlss5AmdSwapper.SmokeTests.csproj"
@@ -54,6 +59,8 @@ foreach ($entry in $payloadSources.GetEnumerator()) {
 }
 
 $releaseDocs = @{
+    "Install-Manager.ps1" = Join-Path $PSScriptRoot "Install-Manager.ps1"
+    "Install.cmd" = Join-Path $PSScriptRoot "Install.cmd"
     "README.md" = Join-Path $PSScriptRoot "PACKAGE-README.md"
     "INSTALL.md" = Join-Path $PSScriptRoot "PACKAGE-INSTALL.md"
     "THIRD-PARTY.md" = Join-Path $PSScriptRoot "PACKAGE-THIRD-PARTY.md"

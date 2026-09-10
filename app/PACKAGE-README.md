@@ -5,7 +5,7 @@ Portable Windows build for AMD Neural Rendering with two routes:
 - **Direct game** for supported x64 DX12/FSR games.
 - **Lossless Scaling** for capturable games, video, browsers and other windows.
 
-Run `Dlss5AmdSwapper.exe`. No installer is required for the manager itself.
+Run `Dlss5AmdSwapper.exe` for portable use, or run `Install.cmd` to install for your Windows account with Desktop and Start menu shortcuts. The installer verifies the package checksum manifest before copying.
 
 Use **Scan PC** to discover games from Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass and common standalone install folders. The scan finishes with a verification summary and leaves the library unselected so you choose the target yourself. Discovered games stay visible even when they fail the direct-game compatibility check.
 
@@ -19,7 +19,7 @@ For a compatible direct-game target, **Set up** automatically resolves install v
 | `Ctrl+Alt+F7` | Decrease strength |
 | `Ctrl+Alt+F8` | Increase strength |
 
-The direct-game page reports a setting as live only when the runtime log acknowledges it. The upstream `End` overlay remains the authoritative in-game status/control surface.
+The direct-game page saves settings but does not claim that a running game applied them. The upstream `End` overlay remains the authoritative in-game status/control surface.
 
 See `INSTALL.md` for setup and `THIRD-PARTY.md` for the runtime/licensing boundary.
 

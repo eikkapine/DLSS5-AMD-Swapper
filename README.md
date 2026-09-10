@@ -33,6 +33,17 @@ DLSS5 AMD Swapper puts the two ways I use the project into one app. **Direct Gam
 
 The scanner covers **Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass, Rockstar, and standalone installs**. A scan ends with a verification summary and intentionally leaves every game unselected.
 
+## The app
+
+![Swapper overview in light theme](docs/images/swapper-overview.jpg)
+
+<details>
+<summary>Settings in dark theme</summary>
+
+![Swapper settings](docs/images/swapper-settings.jpg)
+
+</details>
+
 ## Get started
 
 1. Open [Releases](https://github.com/eikkapine/DLSS5-AMD-Swapper/releases) and download the newest **DLSS5-AMD-Swapper** portable ZIP.
@@ -40,10 +51,14 @@ The scanner covers **Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass, 
 3. For a game install, open **Game library → Scan PC**, select a compatible target, then click **Set up**.
 4. For the desktop route, open **Lossless Scaling** in the app, configure your local runtime files once, then use Lossless Scaling normally.
 
-No installer is required for the manager itself. See the full [installation guide](docs/install.md) for runtime requirements, restore behavior, and source builds.
+For an installed copy with Desktop and Start menu shortcuts, run `Install.cmd` from the extracted package. Portable use remains available. See the full [installation guide](docs/install.md) for runtime requirements, restore behavior, and source builds.
 
 ## What the manager handles
 
+- Search, status filters, sorting, store grouping, hidden games and local cover artwork.
+- Cancellable discovery, extra scan folders and optional full-drive scanning.
+- Dark/light themes, tray lifetime and release checking.
+- Local activity history and a previewable, sanitized diagnostics export.
 - Universal installed-game discovery and deduplication.
 - x64, DX12, FSR, and common anti-cheat compatibility checks.
 - Automatic install-vs-update handling for the direct-game route.
@@ -63,6 +78,12 @@ No installer is required for the manager itself. See the full [installation guid
 | `Ctrl + Alt + F8` | Increase strength |
 
 Lossless Scaling owns these keys while its bridge is active. The Swapper registers the same keys for a running managed direct-game target. The Lossless Scaling route supports effect strength up to `4.0`.
+
+Direct-game hotkeys save runtime settings. A saved value does not prove the running game applied it; press `End` for the upstream live overlay.
+
+## Latest compatibility research
+
+I track AMD runtime changes separately from manager features. See the [September AMD research](docs/amd-research-20260910.md) and [feature comparison](docs/swapper-parity.md) for tested boundaries, upstream changes, and features that still need an AMD-compatible consumer. Newer FSR technologies are not drop-in Neural Rendering replacements. This update does not claim a measured neural-rendering speedup.
 
 ## Before / after
 

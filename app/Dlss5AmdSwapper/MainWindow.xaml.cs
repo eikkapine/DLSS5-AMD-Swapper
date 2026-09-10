@@ -37,6 +37,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _runtimeSetupStatus = "Official setup: checking latest release";
     private string _runtimeNrStatus = "NVIDIA runtime: searching local copies";
     private bool _closing;
+    private bool _installOperation;
+    private long _pollCount;
     private bool _losslessDeviceInitialized;
     private HashSet<string> _runningProcessNames = new(StringComparer.OrdinalIgnoreCase);
 
@@ -47,6 +49,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _settings = _settingsService.Load();
         InitializeComponent();
         DataContext = this;
+        InitializeLibrary();
+        InitializeDesktop();
 
         _runtimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _runtimeTimer.Tick += RuntimeTimer_Tick;
@@ -82,7 +86,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string DiagnosticsDetail { get => _diagnosticsDetail; private set => Set(ref _diagnosticsDetail, value); }
     public string LosslessStatusText { get => _losslessStatusText; private set => Set(ref _losslessStatusText, value); }
     public string LosslessInstallPath { get => _losslessInstallPath; private set => Set(ref _losslessInstallPath, value); }
-    public string RuntimeSourcesStatus { get => _runtimeSourcesStatus; private set => Set(ref _runtimeSourcesStatus, value); }
+    public string RuntimeBadgeText => RuntimeSourcesStatus.StartsWith("Ready for", StringComparison.Ordinal) ? "Runtime files ready" : "Runtime setup";
+    public string RuntimeSourcesStatus { get => _runtimeSourcesStatus; private set { Set(ref _runtimeSourcesStatus, value); OnPropertyChanged(nameof(RuntimeBadgeText)); } }
     public string RuntimeSetupStatus { get => _runtimeSetupStatus; private set => Set(ref _runtimeSetupStatus, value); }
     public string RuntimeNrStatus { get => _runtimeNrStatus; private set => Set(ref _runtimeNrStatus, value); }
 
@@ -98,7 +103,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         RefreshLosslessStatus();
-        await LoadGamesAsync();
+        Navigate(_settings.LastPage);
+        IsScanning = true;
+        _scanCancellation = new CancellationTokenSource();
+        try { await LoadGamesAsync(_scanCancellation.Token); }
+        catch (OperationCanceledException) { ShowToast("Game scan cancelled."); }
+        finally { _scanCancellation.Dispose(); _scanCancellation = null; IsScanning = false; }
+        if (_closing) return;
         await RefreshRuntimeSourcesAsync(false);
         Navigate(_settings.LastPage);
         RefreshProcessSnapshot();
@@ -108,23 +119,39 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (_installOperation)
+        {
+            e.Cancel = true;
+            ShowToast("Wait for the installation or restore to finish before exiting.");
+            return;
+        }
+        if (!_exitRequested && MinimizeToTray && _tray is not null)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
         _closing = true;
+        _scanCancellation?.Cancel();
+        DisposeDesktop();
         _runtimeTimer.Stop();
         _hotkeys?.Dispose();
         _hotkeys = null;
         SaveSettings();
     }
 
-    private async Task LoadGamesAsync()
+    private async Task LoadGamesAsync(CancellationToken cancellationToken)
     {
         foreach (var path in _settings.ManualGames.Distinct(StringComparer.OrdinalIgnoreCase).Where(File.Exists))
-            await AddGameInternalAsync(Path.GetFileNameWithoutExtension(path), path, "Manual", false);
+            await AddGameInternalAsync(Path.GetFileNameWithoutExtension(path), path, "Manual", false, cancellationToken);
 
         try
         {
-            var discovered = await _discovery.DiscoverAsync(includeHeuristics: false);
-            await Task.WhenAll(discovered.Select(game => AddGameInternalAsync(game.Name, game.ExePath, game.Store, false)));
+            var discovered = await _discovery.DiscoverAsync(includeHeuristics: false, cancellationToken: cancellationToken);
+            foreach (var game in discovered)
+                await AddGameInternalAsync(game.Name, game.ExePath, game.Store, false, cancellationToken);
         }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             ShowToast("Game scan skipped: " + ex.Message);
@@ -133,14 +160,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         GamesList.UnselectAll();
     }
 
-    private async Task AddGameInternalAsync(string name, string exePath, string store, bool persist)
+    private async Task AddGameInternalAsync(string name, string exePath, string store, bool persist, CancellationToken cancellationToken = default)
     {
         var full = Path.GetFullPath(exePath);
         var existing = Games.FirstOrDefault(g => g.ExePath.Equals(full, StringComparison.OrdinalIgnoreCase));
         if (existing is not null) return;
         var game = new GameEntry { Name = name, ExePath = full, Store = store };
         Games.Add(game);
-        try { await _probe.ProbeAsync(game); }
+        try { await _probe.ProbeAsync(game, cancellationToken); }
+        catch (OperationCanceledException) { Games.Remove(game); throw; }
         catch (Exception ex) { game.Status = ex.Message; }
         _runtime.Refresh(game);
         if (persist && !_settings.ManualGames.Contains(full, StringComparer.OrdinalIgnoreCase))
@@ -182,17 +210,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void ScanGames_Click(object sender, RoutedEventArgs e)
     {
+        if (IsScanning) return;
+        IsScanning = true;
+        _scanCancellation = new CancellationTokenSource();
         try
         {
             SelectedGame = null;
             GamesList.UnselectAll();
             ShowToast("Scanning installed games…");
             var progress = new Progress<string>(message => HotkeyStatus = message);
-            var discovered = await _discovery.DiscoverAsync(includeHeuristics: true, progress: progress);
-            await Task.WhenAll(discovered.Select(game => AddGameInternalAsync(game.Name, game.ExePath, game.Store, false)));
+            var discovered = await _discovery.DiscoverAsync(includeHeuristics: true, progress: progress, cancellationToken: _scanCancellation.Token, additionalFolders: _settings.AdditionalScanFolders.ToArray(), includeAllDrives: ScanAllDrives);
+            foreach (var game in discovered)
+            {
+                _scanCancellation.Token.ThrowIfCancellationRequested();
+                await AddGameInternalAsync(game.Name, game.ExePath, game.Store, false, _scanCancellation.Token);
+            }
             SelectedGame = null;
             GamesList.UnselectAll();
-            await RefreshRuntimeSourcesAsync(false);
+            if (_closing) return;
             var ready = Games.Count(game => game.Eligible);
             var blocked = Games.Count(game => game.HasAntiCheat);
             var review = Games.Count - ready - blocked;
@@ -201,6 +236,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 .OrderBy(group => group.Key)
                 .ToDictionary(group => group.Key, group => group.Count());
             HotkeyStatus = "PC game scan complete";
+            RecordActivity("Scan completed", $"{Games.Count} targets checked; {ready} compatible; {blocked} blocked.");
             ShowToast($"Verified {Games.Count} installed game(s) · {ready} direct-game ready.", true);
             ScanTotalText.Text = Games.Count.ToString();
             ScanReadyText.Text = ready.ToString();
@@ -212,19 +248,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                     .OrderByDescending(pair => pair.Value)
                     .ThenBy(pair => pair.Key)
                     .Select(pair => $"{pair.Key} {pair.Value}"));
+            MainContent.IsEnabled = false;
             ScanSummaryOverlay.Visibility = Visibility.Visible;
             ScanSummaryDoneButton.Focus();
             SelectedGame = null;
             GamesList.UnselectAll();
         }
+        catch (OperationCanceledException) { ShowToast("Scan cancelled. Completed entries were kept."); }
         catch (Exception ex) { ShowError(ex); }
+        finally { _scanCancellation?.Dispose(); _scanCancellation = null; IsScanning = false; }
     }
 
     private void ScanSummaryDone_Click(object sender, RoutedEventArgs e)
     {
         ScanSummaryOverlay.Visibility = Visibility.Collapsed;
+        MainContent.IsEnabled = true;
         SelectedGame = null;
         GamesList.UnselectAll();
+    }
+
+    private void ScanSummary_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape) { ScanSummaryDone_Click(sender, e); e.Handled = true; }
     }
 
     private async void ProbeSelected_Click(object sender, RoutedEventArgs e)
@@ -241,33 +286,43 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void InstallSelected_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedGame is null) { ShowToast("Select a game first."); return; }
+        var target = SelectedGame;
+        if (target is null) { ShowToast("Select a game first."); return; }
+        if (_installOperation) { ShowToast("Another installation or restore is in progress."); return; }
+        _installOperation = true;
         try
         {
             ShowToast("Preparing verified runtime sources…");
             var sources = await ResolveRuntimeSourcesAsync(promptForNr: true);
-            var update = _installer.HasManagedInstall(SelectedGame);
+            var update = _installer.HasManagedInstall(target);
             ShowToast(update ? "Updating AMD Neural Rendering…" : "Installing AMD Neural Rendering…");
-            var result = await _installer.InstallAsync(SelectedGame, sources.SetupPath, sources.NrDllPath!, update);
-            _runtime.Refresh(SelectedGame);
-            await RefreshDiagnosticsAsync(false);
-            ShowToast($"{(update ? "Updated" : "Installed")} · upstream {result.UpstreamTag} · rich config verified", true);
+            var result = await _installer.InstallAsync(target, sources.SetupPath, sources.NrDllPath!, update);
+            _runtime.Refresh(target);
+            if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
+            RecordActivity(update ? "Game updated" : "Game installed", target.Name);
+            ShowToast($"{(update ? "Updated" : "Installed")} {target.Name} · upstream {result.UpstreamTag} · rich config verified", true);
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { _installOperation = false; }
     }
 
     private async void RestoreSelected_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedGame is null) return;
+        var target = SelectedGame;
+        if (target is null) return;
+        if (_installOperation) { ShowToast("Another installation or restore is in progress."); return; }
+        _installOperation = true;
         try
         {
-            var result = await _installer.RemoveAsync(SelectedGame, removeModel: true);
-            _runtime.Refresh(SelectedGame);
+            var result = await _installer.RemoveAsync(target, removeModel: true);
+            _runtime.Refresh(target);
+            RecordActivity("Game restored", target.Name);
             ShowToast(result.ManifestRetained
                 ? "Restore preserved files that changed after installation. The manifest was kept for safety."
-                : $"Restored game. Removed {result.Removed.Count} managed file(s).", true);
+                : $"Restored {target.Name}. Removed {result.Removed.Count} managed file(s).", true);
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { _installOperation = false; }
     }
 
     private async void DirectEnabledSwitch_Click(object sender, RoutedEventArgs e)
@@ -276,7 +331,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         try
         {
             var desired = DirectEnabledSwitch.IsChecked == true;
-            var result = await _runtime.SetEnabledAsync(SelectedGame, desired);
+            var target = SelectedGame;
+            var result = await _runtime.SetEnabledAsync(target, desired);
+            RecordActivity("Toggle requested", $"{target.Name}: {(desired ? "on" : "off")} — {result.Message}");
             ShowToast(result.Message, result.LiveAcknowledged);
         }
         catch (Exception ex) { ShowError(ex); }
@@ -309,9 +366,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         try
         {
-            var diag = await _diagnostics.InspectAsync(SelectedGame);
+            var target = SelectedGame;
+            var diag = await _diagnostics.InspectAsync(target);
+            if (!ReferenceEquals(SelectedGame, target) || _closing) return;
             DiagnosticsSummary = diag.Summary;
-            var parts = new List<string>();
+            var parts = new List<string> { diag.EvidenceScope };
             if (diag.InputResolution is not null) parts.Add($"FSR input {diag.InputResolution}");
             if (diag.OutputResolution is not null) parts.Add($"output {diag.OutputResolution}");
             if (diag.MeanNetworkGpuMs is not null) parts.Add($"network {diag.MeanNetworkGpuMs:0.00} ms GPU mean ({diag.TimedJobs} samples)");
@@ -328,11 +387,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private void RuntimeTimer_Tick(object? sender, EventArgs e)
     {
         RefreshProcessSnapshot();
+        _pollCount++;
         foreach (var game in Games)
         {
             var processName = Path.GetFileNameWithoutExtension(game.ExePath);
             var running = _runningProcessNames.Contains(processName) && RuntimeControlService.IsRunning(game.ExePath);
-            _runtime.Refresh(game, running);
+            if (running || game.Running != running || ReferenceEquals(game, SelectedGame) || _pollCount % 15 == 0)
+                _runtime.Refresh(game, running);
         }
         UpdateHotkeyRegistration();
     }

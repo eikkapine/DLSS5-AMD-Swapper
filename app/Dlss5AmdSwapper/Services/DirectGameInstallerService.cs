@@ -17,14 +17,17 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
     private static readonly string[] RuntimeNames = ["dlssnr_on_amd.ini", "dlssnr_on_amd_weights.bin", "dlssnr_on_amd.log"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = CreateHttpClient();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveFolders = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<InstallResult> InstallAsync(GameEntry game, string setupSource, string nrSource, bool update, CancellationToken cancellationToken = default)
     {
-        if (game.Busy) throw new InvalidOperationException("An operation is already running for this game.");
+        var operationFolder = Path.GetFullPath(game.DirectoryPath);
+        if (game.Busy || !ActiveFolders.TryAdd(operationFolder, 0)) throw new InvalidOperationException("An operation is already running for this game folder.");
         game.Busy = true;
         game.Status = update ? "Updating" : "Installing";
         try
         {
+            if (game.Running) throw new InvalidOperationException("Close the game before installing or updating Neural Rendering.");
             var compatibility = await Task.Run(() => probe.Probe(game.ExePath, cancellationToken), cancellationToken);
             if (!compatibility.X64) throw new InvalidOperationException("Direct-game AMD support requires a 64-bit game executable.");
             if (compatibility.AntiCheatMarkers.Count > 0) throw new InvalidOperationException("Anti-cheat markers were found. Direct-game installation is blocked for this target.");
@@ -38,6 +41,8 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             if (update && existingManifest is null) throw new InvalidOperationException("Update requires an existing managed install.");
             if (!update && existingManifest is not null) throw new InvalidOperationException("This game already has a managed install. Use Update instead.");
 
+            var originalManifest = existingManifest is null ? null : await ReadManifestAsync(existingManifest, cancellationToken)
+                ?? throw new InvalidOperationException("The managed install manifest could not be read.");
             var before = await SnapshotAsync(folder, cancellationToken);
             if (!update)
             {
@@ -48,7 +53,8 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
 
             var localSetup = Path.Combine(folder, UpstreamAsset);
             var localNr = Path.Combine(folder, "nvngx_dlssnr.dll");
-            if (File.Exists(localSetup) && !string.Equals(await Sha256Async(localSetup, cancellationToken), release.Sha256, StringComparison.OrdinalIgnoreCase))
+            if (File.Exists(localSetup) && !string.Equals(await Sha256Async(localSetup, cancellationToken), release.Sha256, StringComparison.OrdinalIgnoreCase)
+                && !(update && originalManifest?.ManagedSetupWasCreated == true && originalManifest.After.TryGetValue(UpstreamAsset, out var oldSetup) && oldSetup == before[UpstreamAsset]))
                 throw new InvalidOperationException($"A different {UpstreamAsset} already exists in the game folder.");
             if (File.Exists(localNr) && !string.Equals(await Sha256Async(localNr, cancellationToken), nrMeta.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("A different nvngx_dlssnr.dll already exists in the game folder.");
@@ -62,10 +68,16 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                 if (File.Exists(source)) File.Copy(source, Path.Combine(backupRoot, name), true);
             }
 
+            var keepBackup = false;
             try
             {
-                if (!File.Exists(localSetup)) File.Copy(Path.GetFullPath(setupSource), localSetup, false);
+                if (!Path.GetFullPath(setupSource).Equals(localSetup, StringComparison.OrdinalIgnoreCase))
+                    File.Copy(Path.GetFullPath(setupSource), localSetup, true);
                 if (!File.Exists(localNr)) File.Copy(Path.GetFullPath(nrSource), localNr, false);
+
+                if (!string.Equals(await Sha256Async(localSetup, cancellationToken), release.Sha256, StringComparison.OrdinalIgnoreCase)
+                    || !string.Equals(await Sha256Async(localNr, cancellationToken), nrMeta.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Runtime sources changed while preparing the installation.");
 
                 var setup = await RunSetupAsync(localSetup, folder, update, cancellationToken);
                 var after = await SnapshotAsync(folder, cancellationToken);
@@ -75,7 +87,8 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                 {
                     var oldManifest = await ReadManifestAsync(existingManifest, cancellationToken);
                     installedProxy = oldManifest?.InstalledProxyNames?.Where(after.ContainsKey).ToArray() ?? [];
-                    if (installedProxy.Length == 0) installedProxy = ProxyNames.Where(after.ContainsKey).ToArray();
+                    if (installedProxy.Length == 0)
+                        throw new InvalidOperationException("The existing managed proxy is missing; refusing to adopt unrelated proxy DLLs.");
                 }
                 else installedProxy = changedProxy;
 
@@ -102,11 +115,11 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                         AntiCheatMarkers = compatibility.AntiCheatMarkers.ToArray()
                     },
                     VerifiedConfig = verifiedConfig,
-                    Before = before,
+                    Before = originalManifest?.Before ?? before,
                     After = after,
                     InstalledProxyNames = installedProxy,
-                    ManagedSetupWasCreated = !before.ContainsKey(UpstreamAsset),
-                    ModelWasCopied = !before.ContainsKey("nvngx_dlssnr.dll")
+                    ManagedSetupWasCreated = originalManifest?.ManagedSetupWasCreated ?? !before.ContainsKey(UpstreamAsset),
+                    ModelWasCopied = originalManifest?.ModelWasCopied ?? !before.ContainsKey("nvngx_dlssnr.dll")
                 };
 
                 var manifestText = JsonSerializer.Serialize(manifest, JsonOptions) + Environment.NewLine;
@@ -119,7 +132,12 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             }
             catch
             {
-                await RestoreSnapshotAsync(folder, before, backupRoot, CancellationToken.None);
+                try { await RestoreSnapshotAsync(folder, before, backupRoot, CancellationToken.None); }
+                catch (Exception restoreError)
+                {
+                    keepBackup = true;
+                    throw new IOException($"Rollback could not finish. Recovery files were retained at {backupRoot}.", restoreError);
+                }
                 if (previousManifestBytes is not null && existingManifest is not null)
                     await File.WriteAllBytesAsync(existingManifest, previousManifestBytes, CancellationToken.None);
                 if (File.Exists(game.ManifestPath) && (existingManifest is null || !Path.GetFullPath(existingManifest).Equals(Path.GetFullPath(game.ManifestPath), StringComparison.OrdinalIgnoreCase)))
@@ -128,17 +146,24 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             }
             finally
             {
-                try { Directory.Delete(backupRoot, true); } catch { }
+                if (!keepBackup) { try { Directory.Delete(backupRoot, true); } catch { } }
             }
         }
         finally
         {
             game.Busy = false;
+            ActiveFolders.TryRemove(operationFolder, out _);
         }
     }
 
     public async Task<RemoveResult> RemoveAsync(GameEntry game, bool removeModel, CancellationToken cancellationToken = default)
     {
+        var operationFolder = Path.GetFullPath(game.DirectoryPath);
+        if (game.Busy || !ActiveFolders.TryAdd(operationFolder, 0)) throw new InvalidOperationException("An operation is already running for this game folder.");
+        game.Busy = true;
+        try
+        {
+        if (game.Running) throw new InvalidOperationException("Close the game before restoring its files.");
         var manifestPath = FindManifest(game) ?? throw new InvalidOperationException("No managed direct-game install was found.");
         var manifest = await ReadManifestAsync(manifestPath, cancellationToken) ?? throw new InvalidOperationException("The managed install manifest could not be read.");
         var removed = new List<string>();
@@ -169,6 +194,12 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
 
         game.Status = remainingCreated.Length == 0 ? "Restored" : "Some changed files were preserved";
         return new RemoveResult(removed, preserved.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), remainingCreated, remainingCreated.Length != 0);
+        }
+        finally
+        {
+            game.Busy = false;
+            ActiveFolders.TryRemove(operationFolder, out _);
+        }
     }
 
     public bool HasManagedInstall(GameEntry game) => FindManifest(game) is not null;
@@ -273,9 +304,12 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(2));
         try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            try { process.Kill(true); } catch { }
+            try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
+            await process.WaitForExitAsync(CancellationToken.None);
+            try { await Task.WhenAll(stdoutTask, stderrTask); } catch (OperationCanceledException) { }
+            cancellationToken.ThrowIfCancellationRequested();
             throw new TimeoutException("The upstream setup did not finish within two minutes.");
         }
         var output = (await stdoutTask) + Environment.NewLine + (await stderrTask);

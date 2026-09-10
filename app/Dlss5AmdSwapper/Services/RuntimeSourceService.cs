@@ -52,8 +52,7 @@ public sealed class RuntimeSourceService
         if (await MatchesReleaseAsync(destination, release, cancellationToken))
             return new CachedSetup(destination, false);
 
-        var temp = destination + ".download";
-        if (File.Exists(temp)) File.Delete(temp);
+        var temp = destination + "." + Guid.NewGuid().ToString("N") + ".download";
         try
         {
             using var response = await _http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -83,7 +82,9 @@ public sealed class RuntimeSourceService
             var hash = await DirectGameInstallerService.Sha256Async(path, cancellationToken);
             return hash.Equals(release.Sha256, StringComparison.OrdinalIgnoreCase);
         }
-        catch { return false; }
+        catch (OperationCanceledException) { throw; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
 
     private static string? FindNrDll(string configuredPath, IEnumerable<GameEntry> games, IEnumerable<string>? additionalCandidates)
@@ -136,6 +137,11 @@ public sealed class RuntimeSourceService
                 throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current official setup.");
             if (string.IsNullOrWhiteSpace(url))
                 throw new InvalidOperationException("GitHub did not publish a download URL for the current official setup.");
+            if (size <= 0 || digest.Length != 71 || !digest[7..].All(Uri.IsHexDigit)
+                || !Uri.TryCreate(url, UriKind.Absolute, out var downloadUri)
+                || downloadUri.Scheme != Uri.UriSchemeHttps || downloadUri.Host != "github.com"
+                || !downloadUri.AbsolutePath.StartsWith("/danielblnc/DLSS-NR-on-AMD/releases/download/", StringComparison.Ordinal))
+                throw new InvalidOperationException("The official setup metadata contains an invalid digest, size, or download URL.");
             return new SetupAsset(tag, size, digest[7..].ToLowerInvariant(), url);
         }
         throw new InvalidOperationException("The latest DLSS-NR-on-AMD release has no setup asset.");

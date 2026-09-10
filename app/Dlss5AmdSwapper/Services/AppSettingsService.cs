@@ -25,8 +25,15 @@ public sealed class AppSettingsService
     {
         Directory.CreateDirectory(_folder);
         var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
-        var temp = FilePath + ".tmp";
-        File.WriteAllText(temp, json);
-        File.Move(temp, FilePath, true);
+        var temp = FilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temp, json);
+            File.Move(temp, FilePath, true);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 }

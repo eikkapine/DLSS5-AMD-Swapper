@@ -3,8 +3,10 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.2.0-pre.2</Version>
     <AssemblyName>Dlss5AmdSwapper</AssemblyName>
     <RootNamespace>Dlss5AmdSwapper</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -15,6 +17,8 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
     <Resource Include="Assets\Dlss5AmdSwapper.ico" />
   </ItemGroup>
 </Project>

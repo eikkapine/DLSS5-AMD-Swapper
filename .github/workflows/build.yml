@@ -1,0 +1,17 @@
+name: Manager checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  manager:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - run: dotnet run --project app/Dlss5AmdSwapper.SmokeTests -c Release
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python tools/Check-Publication.py
