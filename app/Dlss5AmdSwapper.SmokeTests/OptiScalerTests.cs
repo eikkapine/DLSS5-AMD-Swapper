@@ -355,6 +355,26 @@ internal static class OptiScalerTests
             try { await f.Legacy.RemoveAsync(f.Game, false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("pre-SR"), "legacy remove must refuse other routes"); }
         });
+
+        await run("Pre-SR restore removes only unchanged managed files and keeps pre-existing dependencies", async () =>
+        {
+            var f = await MakeInstallFixtureAsync(preexistingLibxess: true);
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            Check(f.Installer.HasManagedInstall(f.Game), "managed after install");
+            await File.AppendAllTextAsync(Path.Combine(f.GameDir, "OptiScaler.ini"), "\n; user edit\n");
+
+            var result = await f.Installer.RemoveAsync(f.Game);
+            Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_amd_pass3.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_on_amd_weights.bin")), "managed files removed");
+            Check(!File.Exists(Path.Combine(f.GameDir, "OptiScaler", "amd_fidelityfx_upscaler_dx12.dll")), "copied dependency removed");
+            Check(File.Exists(Path.Combine(f.GameDir, "OptiScaler", "libxess.dll")), "pre-existing dependency kept");
+            Check(File.Exists(Path.Combine(f.GameDir, "OptiScaler.ini")) && result.Preserved.Contains("OptiScaler.ini"), "edited INI preserved");
+            Check(result.ManifestRetained && File.Exists(f.Game.ManifestPath), "manifest retained while a created file remains");
+            File.Delete(Path.Combine(f.GameDir, "OptiScaler.ini"));
+            var second = await f.Installer.RemoveAsync(f.Game);
+            Check(!second.ManifestRetained && !File.Exists(f.Game.ManifestPath), "manifest deleted once nothing created remains");
+            Check(!f.Installer.HasManagedInstall(f.Game), "not managed after restore");
+        });
     }
 
     internal static void Check(bool condition, string message)

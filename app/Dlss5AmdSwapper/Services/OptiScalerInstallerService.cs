@@ -182,6 +182,49 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
         }
     }
 
+    public bool HasManagedInstall(GameEntry game) => ManagedManifest.ReadRoute(game) == InstallRoute.OptiScalerPreSr;
+
+    public async Task<RemoveResult> RemoveAsync(GameEntry game, CancellationToken cancellationToken = default)
+    {
+        var folder = Path.GetFullPath(game.DirectoryPath);
+        if (game.Busy || !ActiveFolders.TryAdd(folder, 0)) throw new InvalidOperationException("An operation is already running for this game folder.");
+        game.Busy = true;
+        try
+        {
+            if (game.Running) throw new InvalidOperationException("Close the game before restoring its files.");
+            if (ManagedManifest.ReadRoute(game) != InstallRoute.OptiScalerPreSr) throw new InvalidOperationException("No managed pre-SR install was found.");
+            var manifest = await ReadManifestAsync(game.ManifestPath, cancellationToken) ?? throw new InvalidOperationException("The managed install manifest could not be read.");
+            var removed = new List<string>();
+            var preserved = new List<string>();
+            var preexisting = new HashSet<string>(manifest.PreexistingDependencies, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var relative in manifest.After.Keys.Concat(manifest.InstalledProxyNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+            {
+                var path = Path.Combine(folder, relative);
+                if (manifest.Before.ContainsKey(relative) || preexisting.Contains(relative)) { preserved.Add(relative); continue; }
+                if (!File.Exists(path)) continue;
+                var current = new FileState(new FileInfo(path).Length, await DirectGameInstallerService.Sha256Async(path, cancellationToken));
+                if (manifest.After.TryGetValue(relative, out var expected) && expected == current) { File.Delete(path); removed.Add(relative); }
+                else preserved.Add(relative);
+            }
+
+            var dependencyFolder = Path.Combine(folder, OptiScalerPackageService.DependencyFolderName);
+            if (Directory.Exists(dependencyFolder) && !Directory.EnumerateFiles(dependencyFolder, "*", SearchOption.AllDirectories).Any()) Directory.Delete(dependencyFolder, true);
+
+            var remaining = manifest.After.Keys
+                .Where(relative => !manifest.Before.ContainsKey(relative) && !preexisting.Contains(relative) && File.Exists(Path.Combine(folder, relative)))
+                .ToArray();
+            if (remaining.Length == 0) File.Delete(game.ManifestPath);
+            game.Status = remaining.Length == 0 ? "Restored" : "Some changed files were preserved";
+            return new RemoveResult(removed, preserved.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), remaining, remaining.Length != 0);
+        }
+        finally
+        {
+            game.Busy = false;
+            ActiveFolders.TryRemove(folder, out _);
+        }
+    }
+
     private static async Task<Dictionary<string, FileState>> SnapshotAsync(string folder, IEnumerable<string> relatives, CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, FileState>(StringComparer.OrdinalIgnoreCase);
