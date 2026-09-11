@@ -24,15 +24,30 @@ FORBIDDEN_PHRASES = (
     "observed_output_source",
 )
 FPS_NUMBER = re.compile(r"(?i)(?:~|about\s+|roughly\s+)?\d+(?:\.\d+)?\s*fps\b")
+FORBIDDEN_FILENAMES = re.compile(
+    r"(?i)^(dxgi\.dll|optiscaler.*\.dll|dlssnr_amd_pass\d\.dll|libxess.*\.dll|libxell\.dll|amd_fidelityfx_.*\.dll|d3d12core\.dll|"
+    r"dlss-enabler.*\.dll|dlssnr_on_amd_weights\.bin|nvngx_dlssnr\.dll|nvngx\.dll_dlssnr\.dll|dlssnr_on_amd_setup\.exe|"
+    r"lossless_original\.dll|instalar_amd\.ps1|diagnostico_amd\.ps1|amd_presr\.log|optiscaler\.log|dlssnr_on_amd\.log)$"
+)
+SKIP_DIRS = {".git", ".vs", "runs", "build", "bin", "obj", "runtime", "artifacts", "optiscaler-packages", ".superpowers"}
 
 
 def main() -> int:
     failures: list[str] = []
     for path in ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT)
+        if any(part in SKIP_DIRS for part in relative.parts):
+            continue
+        if FORBIDDEN_FILENAMES.match(path.name):
+            failures.append(f"{relative}: forbidden third-party/private file present in the repository tree")
+
+    for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in TEXT_EXTENSIONS:
             continue
         relative = path.relative_to(ROOT)
-        if any(part in {".git", ".vs", "runs", "build", "bin", "obj", "runtime", "artifacts"} for part in relative.parts):
+        if any(part in SKIP_DIRS for part in relative.parts):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         lower = text.lower()

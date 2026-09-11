@@ -72,12 +72,12 @@ foreach ($entry in $releaseDocs.GetEnumerator()) {
 }
 
 $forbidden = @(
-    "Lossless_original.dll",
-    "LosslessScaling.exe",
-    "version.dll",
-    "nvngx_dlssnr.dll",
-    "dlssnr_on_amd_setup.exe",
-    "dlssnr_on_amd_weights.bin"
+    "Lossless_original.dll", "LosslessScaling.exe", "version.dll", "dxgi.dll", "winmm.dll",
+    "nvngx_dlssnr.dll", "nvngx.dll_dlssnr.dll", "dlssnr_on_amd_setup.exe", "dlssnr_on_amd_weights.bin",
+    "OptiScaler.dll", "OptiScaler.ini", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll",
+    "libxess.dll", "libxess_dx11.dll", "libxess_fg.dll", "libxell.dll", "D3D12Core.dll",
+    "amd_fidelityfx_upscaler_dx12.dll", "amd_fidelityfx_framegeneration_dx12.dll", "amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_vk.dll",
+    "dlss-enabler-headless.dll", "INSTALAR_AMD.ps1", "DIAGNOSTICO_AMD.ps1", "amd_presr.log", "OptiScaler.log"
 )
 $bad = Get-ChildItem -LiteralPath $output -Recurse -File | Where-Object { $forbidden -contains $_.Name }
 if ($bad) {

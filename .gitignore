@@ -67,6 +67,12 @@ wallpaper-tests/
 *.engine
 .dlss5-amd-swapper.json
 .nr-auto-scale-direct.json
+optiscaler-packages/
+backup-amd-presr-*/
+amd_presr.log
+OptiScaler.log
+OptiScaler.ini
+SHA256SUMS.txt
 
 # Upstream/local clones
 LosslessProxy/
@@ -92,6 +98,8 @@ Desktop.ini
 /AGENTS.md
 /PLAN.md
 /nr-bridge/
+.serena/
+.superpowers/
 
 
 # Approved comparison crops; all other captures stay private
