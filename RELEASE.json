@@ -4,7 +4,7 @@
   "tag": "v0.3.0-pre.1",
   "status": "experimental-preview",
   "date": "2026-09-12",
-  "published": false,
+  "published": true,
   "previous_published_version": "0.2.0-pre.1",
   "artifacts": [
     {
