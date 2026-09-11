@@ -19,4 +19,7 @@ public sealed class AppSettings
     public List<string> AdditionalScanFolders { get; set; } = [];
     public bool RegisterHotkeys { get; set; } = true;
     public string LastPage { get; set; } = "Home";
+    public string OptiScalerPackagePath { get; set; } = string.Empty;
+    public string LocalWeightsPath { get; set; } = string.Empty;
+    public string OptiScalerDefaultPreset { get; set; } = "Quality";
 }

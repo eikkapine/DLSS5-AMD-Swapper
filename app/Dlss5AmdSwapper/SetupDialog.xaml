@@ -1,0 +1,31 @@
+﻿<Window x:Class="Dlss5AmdSwapper.SetupDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Set up Neural Rendering" Width="560" SizeToContent="Height" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" Background="{DynamicResource BgBrush}" Foreground="{DynamicResource TextBrush}" FontSize="12">
+    <StackPanel Margin="24">
+        <TextBlock Text="{Binding GameName}" FontSize="20" FontWeight="SemiBold"/>
+        <TextBlock Text="Choose how Neural Rendering reaches this game." Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,16"/>
+
+        <TextBlock Text="ROUTE" Foreground="{DynamicResource MutedBrush}" FontSize="10" FontWeight="Bold"/>
+        <RadioButton x:Name="PreSrRadio" GroupName="Route" Margin="0,8,0,0" Foreground="{DynamicResource TextBrush}" IsEnabled="{Binding PreSrAvailable}">
+            <StackPanel><TextBlock Text="OptiScaler pre-SR (render-resolution neural pass)" FontWeight="SemiBold"/><TextBlock Text="{Binding PackageSummary}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="10"/><TextBlock Text="{Binding WeightsSummary}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="10"/></StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="PostFsrRadio" GroupName="Route" Margin="0,10,0,0" Foreground="{DynamicResource TextBrush}">
+            <StackPanel><TextBlock Text="Post-FSR runtime (official DLSS-NR-on-AMD setup)" FontWeight="SemiBold"/><TextBlock Text="Runs after FSR at the game's FSR input resolution." Foreground="{DynamicResource MutedBrush}" FontSize="10"/></StackPanel>
+        </RadioButton>
+
+        <TextBlock Text="PRE-SR PRESET" Foreground="{DynamicResource MutedBrush}" FontSize="10" FontWeight="Bold" Margin="0,18,0,0"/>
+        <RadioButton x:Name="QualityRadio" GroupName="Preset" Margin="0,8,0,0" Foreground="{DynamicResource TextBrush}" IsEnabled="{Binding ElementName=PreSrRadio, Path=IsChecked}">
+            <StackPanel><TextBlock Text="Quality" FontWeight="SemiBold"/><TextBlock Text="One pass, pre-SR on, frame generation off, the game's own FSR ratio." Foreground="{DynamicResource MutedBrush}" FontSize="10"/></StackPanel>
+        </RadioButton>
+        <RadioButton x:Name="PerformanceRadio" GroupName="Preset" Margin="0,8,0,0" Foreground="{DynamicResource TextBrush}" IsEnabled="{Binding ElementName=PreSrRadio, Path=IsChecked}">
+            <StackPanel><TextBlock Text="Performance" FontWeight="SemiBold"/><TextBlock Text="Forces a 3.0x upscale ratio and 3x frame generation through OptiScaler. Adds latency; the FG path needs the game's own DLSS Frame Generation option." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="10"/></StackPanel>
+        </RadioButton>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+            <Button Content="Cancel" MinWidth="90" Click="Cancel_Click" Margin="0,0,10,0"/>
+            <Button Content="Set up" MinWidth="110" Style="{StaticResource PrimaryButton}" Click="Confirm_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

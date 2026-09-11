@@ -103,6 +103,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         RefreshLosslessStatus();
+        _ = ResolveOptiScalerSourcesAsync(false);
+        RefreshLosslessLayers();
         Navigate(_settings.LastPage);
         IsScanning = true;
         _scanCancellation = new CancellationTokenSource();
@@ -192,7 +194,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         switch (page)
         {
             case "Games": GamesPage.Visibility = Visibility.Visible; PageTitle = "Game library"; break;
-            case "Lossless": LosslessPage.Visibility = Visibility.Visible; PageTitle = "Lossless Scaling"; RefreshLosslessStatus(); break;
+            case "Lossless": LosslessPage.Visibility = Visibility.Visible; PageTitle = "Lossless Scaling"; RefreshLosslessStatus(); RefreshLosslessLayers(); break;
             case "Settings": SettingsPage.Visibility = Visibility.Visible; PageTitle = "Settings"; break;
             default: page = "Home"; HomePage.Visibility = Visibility.Visible; PageTitle = "Overview"; break;
         }
@@ -292,18 +294,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _installOperation = true;
         try
         {
-            ShowToast("Preparing verified runtime sources…");
-            var sources = await ResolveRuntimeSourcesAsync(promptForNr: true);
-            var update = _installer.HasManagedInstall(target);
-            ShowToast(update ? "Updating AMD Neural Rendering…" : "Installing AMD Neural Rendering…");
-            var result = await _installer.InstallAsync(target, sources.SetupPath, sources.NrDllPath!, update);
-            _runtime.Refresh(target);
-            if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
-            RecordActivity(update ? "Game updated" : "Game installed", target.Name);
-            ShowToast($"{(update ? "Updated" : "Installed")} {target.Name} · upstream {result.UpstreamTag} · rich config verified", true);
+            switch (target.Route)
+            {
+                case InstallRoute.OptiScalerPreSr: await UpdatePreSrAsync(target); break;
+                case InstallRoute.PostFsrRuntime: await InstallPostFsrAsync(target, update: true); break;
+                default: await SetUpNewRouteAsync(target); break;
+            }
         }
         catch (Exception ex) { ShowError(ex); }
         finally { _installOperation = false; }
+    }
+
+    private async Task InstallPostFsrAsync(GameEntry target, bool update)
+    {
+        ShowToast("Preparing verified runtime sources…");
+        var sources = await ResolveRuntimeSourcesAsync(promptForNr: true);
+        ShowToast(update ? "Updating AMD Neural Rendering…" : "Installing AMD Neural Rendering…");
+        var result = await _installer.InstallAsync(target, sources.SetupPath, sources.NrDllPath!, update);
+        _runtime.Refresh(target);
+        if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
+        RecordActivity(update ? "Game updated" : "Game installed", target.Name);
+        ShowToast($"{(update ? "Updated" : "Installed")} {target.Name} · upstream {result.UpstreamTag} · rich config verified", true);
     }
 
     private async void RestoreSelected_Click(object sender, RoutedEventArgs e)
@@ -314,7 +325,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _installOperation = true;
         try
         {
-            var result = await _installer.RemoveAsync(target, removeModel: true);
+            var result = target.Route == InstallRoute.OptiScalerPreSr
+                ? await OptiInstaller.RemoveAsync(target)
+                : await _installer.RemoveAsync(target, removeModel: true);
             _runtime.Refresh(target);
             RecordActivity("Game restored", target.Name);
             ShowToast(result.ManifestRetained
@@ -327,25 +340,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void DirectEnabledSwitch_Click(object sender, RoutedEventArgs e)
     {
-        if (SelectedGame is null || !_installer.HasManagedInstall(SelectedGame)) return;
+        if (SelectedGame is null || SelectedGame.Route == InstallRoute.None) return;
         try
         {
             var desired = DirectEnabledSwitch.IsChecked == true;
             var target = SelectedGame;
-            var result = await _runtime.SetEnabledAsync(target, desired);
+            var result = target.IsPreSr ? await _optiControl.SetEnabledAsync(target, desired) : await _runtime.SetEnabledAsync(target, desired);
             RecordActivity("Toggle requested", $"{target.Name}: {(desired ? "on" : "off")} — {result.Message}");
             ShowToast(result.Message, result.LiveAcknowledged);
         }
         catch (Exception ex) { ShowError(ex); }
     }
 
-    private async void StructureSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => _runtime.SetStructureAsync(SelectedGame!, StructureSlider.Value));
-    private async void ToneSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => _runtime.SetToneAsync(SelectedGame!, ToneSlider.Value));
-    private async void SkinSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => _runtime.SetSkinStructureAsync(SelectedGame!, SkinSlider.Value));
+    private async void StructureSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => SelectedGame!.IsPreSr ? _optiControl.SetStructureAsync(SelectedGame!, StructureSlider.Value) : _runtime.SetStructureAsync(SelectedGame!, StructureSlider.Value));
+    private async void ToneSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => SelectedGame!.IsPreSr ? _optiControl.SetToneAsync(SelectedGame!, ToneSlider.Value) : _runtime.SetToneAsync(SelectedGame!, ToneSlider.Value));
+    private async void SkinSlider_MouseUp(object sender, MouseButtonEventArgs e) => await ApplyScalarAsync(() => SelectedGame!.IsPreSr ? _optiControl.SetSkinAsync(SelectedGame!, SkinSlider.Value) : _runtime.SetSkinStructureAsync(SelectedGame!, SkinSlider.Value));
 
     private async Task ApplyScalarAsync(Func<Task<RuntimeChangeResult>> change)
     {
-        if (SelectedGame is null || !_installer.HasManagedInstall(SelectedGame)) return;
+        if (SelectedGame is null || SelectedGame.Route == InstallRoute.None) return;
         try
         {
             var result = await change();
@@ -362,6 +375,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             DiagnosticsSummary = "Select a game to inspect runtime evidence.";
             DiagnosticsDetail = string.Empty;
+            return;
+        }
+        if (SelectedGame.IsPreSr)
+        {
+            try { await RefreshPreSrDiagnosticsAsync(SelectedGame, toast); }
+            catch (Exception ex) { if (toast) ShowError(ex); }
             return;
         }
         try
@@ -414,23 +433,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_closing) return;
         var bridgeRunning = _runningProcessNames.Contains("DlssNrBridge");
+        var losslessRunning = _runningProcessNames.Contains("LosslessScaling");
         var target = Games.FirstOrDefault(game => game.Installed && game.Running) ?? (SelectedGame?.Installed == true && SelectedGame.Running ? SelectedGame : null);
-        var shouldRegister = RegisterHotkeys && !bridgeRunning && target is not null;
+        HotkeySet? wanted = null;
+        if (RegisterHotkeys && !bridgeRunning && target is not null) wanted = HotkeySet.DirectGame;
+        else if (RegisterHotkeys && losslessRunning && LosslessRuntimeIni is { } ini && File.Exists(ini)) wanted = HotkeySet.LosslessLayers;
 
-        if (!shouldRegister)
+        if (wanted is null || (_hotkeys is not null && _hotkeys.Set != wanted))
         {
             _hotkeys?.Dispose();
             _hotkeys = null;
-            HotkeyStatus = bridgeRunning ? "Lossless Scaling bridge owns F6/F7/F8" : RegisterHotkeys ? "Waiting for a managed game" : "Hotkeys disabled";
+        }
+        if (wanted is null)
+        {
+            HotkeyStatus = bridgeRunning ? "Lossless Scaling bridge owns F6/F7/F8" : RegisterHotkeys ? "Waiting for a managed game or Lossless Scaling" : "Hotkeys disabled";
             return;
         }
-
-        if (_hotkeys is not null) { HotkeyStatus = $"F6/F7/F8 → {target!.Name}"; return; }
+        var label = wanted == HotkeySet.DirectGame ? $"F6/F7/F8 → {target!.Name}" : $"F9/F10/F11 → Lossless Scaling layers ({_losslessLayerTarget})";
+        if (_hotkeys is not null) { HotkeyStatus = label; return; }
         try
         {
             _hotkeys = new HotkeyService(HandleHotkey);
-            _hotkeys.Attach(new WindowInteropHelper(this).Handle);
-            HotkeyStatus = $"F6/F7/F8 → {target!.Name}";
+            _hotkeys.Attach(new WindowInteropHelper(this).Handle, wanted.Value);
+            HotkeyStatus = label;
         }
         catch (Exception ex)
         {
@@ -442,15 +467,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void HandleHotkey(SwapperHotkey hotkey)
     {
+        if (hotkey is SwapperHotkey.CycleLayer or SwapperHotkey.LayerDecrease or SwapperHotkey.LayerIncrease) { try { await HandleLayerHotkeyAsync(hotkey); } catch (Exception ex) { ShowError(ex); } return; }
         var target = Games.FirstOrDefault(game => game.Installed && game.Running) ?? SelectedGame;
         if (target?.Installed != true) return;
         try
         {
             RuntimeChangeResult result = hotkey switch
             {
-                SwapperHotkey.Toggle => await _runtime.SetEnabledAsync(target, !target.Enabled),
-                SwapperHotkey.Decrease => await _runtime.AdjustStructureAsync(target, -0.1),
-                SwapperHotkey.Increase => await _runtime.AdjustStructureAsync(target, 0.1),
+                SwapperHotkey.Toggle => target.IsPreSr ? await _optiControl.SetEnabledAsync(target, !target.Enabled) : await _runtime.SetEnabledAsync(target, !target.Enabled),
+                SwapperHotkey.Decrease => target.IsPreSr ? await _optiControl.SetStructureAsync(target, target.LocalStructure - 0.1) : await _runtime.AdjustStructureAsync(target, -0.1),
+                SwapperHotkey.Increase => target.IsPreSr ? await _optiControl.SetStructureAsync(target, target.LocalStructure + 0.1) : await _runtime.AdjustStructureAsync(target, 0.1),
                 _ => new RuntimeChangeResult(false, "No action")
             };
             ShowToast(result.Message, result.LiveAcknowledged);
