@@ -15,8 +15,26 @@ public sealed class RuntimeControlService
         lock (ConfigWriteLock)
         {
             game.LiveAcknowledged = false;
-            game.Installed = File.Exists(game.ConfigPath) && HasProxy(game.DirectoryPath);
+            game.Route = ManagedManifest.ReadRoute(game);
             game.Running = runningOverride ?? IsRunning(game.ExePath);
+            if (game.Route == InstallRoute.OptiScalerPreSr)
+            {
+                game.Installed = File.Exists(game.OptiScalerIniPath) && HasProxy(game.DirectoryPath);
+                if (game.Installed)
+                {
+                    var ini = IniDocument.Load(game.OptiScalerIniPath);
+                    game.Enabled = ini.GetBool(OptiScalerControlService.Section, "Enabled", true);
+                    game.LocalStructure = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "LocalStructure", 1.0), 0.0, 2.0);
+                    game.LocalTone = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "LocalTone", 0.0), 0.0, 2.0);
+                    game.SkinStructure = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "SkinStructure", 1.0), 0.0, 2.0);
+                    game.Passes = int.TryParse(ini.Get(OptiScalerControlService.Section, "Passes"), out var passes) ? Math.Clamp(passes, 1, 3) : 1;
+                }
+                else ResetControls(game);
+                game.RuntimeStatus = !game.Installed ? "Not installed" : game.Running ? "Game running - Insert opens the OptiScaler menu" : "Ready for next launch";
+                return;
+            }
+
+            game.Installed = File.Exists(game.ConfigPath) && HasProxy(game.DirectoryPath);
             if (File.Exists(game.ConfigPath))
             {
                 var ini = IniDocument.Load(game.ConfigPath);
@@ -25,13 +43,17 @@ public sealed class RuntimeControlService
                 game.LocalTone = Math.Clamp(ini.GetDouble(Section, "LocalTone", 1.0), 0.0, 2.0);
                 game.SkinStructure = Math.Clamp(ini.GetDouble(Section, "SkinStructure", 1.0), 0.0, 2.0);
             }
-            else
-            {
-                game.Enabled = false;
-                game.LocalStructure = game.LocalTone = game.SkinStructure = 1.0;
-            }
+            else ResetControls(game);
+            game.Passes = 1;
             game.RuntimeStatus = !game.Installed ? "Not installed" : game.Running ? "Game running - End opens AMD live controls" : "Ready for next launch";
         }
+    }
+
+    private static void ResetControls(GameEntry game)
+    {
+        game.Enabled = false;
+        game.LocalStructure = game.LocalTone = game.SkinStructure = 1.0;
+        game.Passes = 1;
     }
 
     public async Task<RuntimeChangeResult> SetEnabledAsync(GameEntry game, bool enabled, CancellationToken cancellationToken = default)
@@ -67,6 +89,56 @@ public sealed class RuntimeControlService
             ini.Set(Section, "Inline", inline ? "1" : "0");
             ini.SaveAtomic(game.ConfigPath);
             Refresh(game);
+        }
+    }
+
+    private static readonly string[] LayerKeys = ["LocalStructure", "SkinStructure", "LocalTone"];
+
+    public LayerState ReadLayers(string iniPath)
+    {
+        lock (ConfigWriteLock)
+        {
+            var ini = IniDocument.Load(iniPath);
+            var skin = ini.GetDouble(Section, "SkinStructure", 1.0);
+            return new LayerState(
+                Math.Clamp(ini.GetDouble(Section, "LocalStructure", 1.0), 0.0, 2.0),
+                skin < 0 ? 1.0 : Math.Clamp(skin, 0.0, 2.0),
+                Math.Clamp(ini.GetDouble(Section, "LocalTone", 0.0), 0.0, 2.0),
+                skin < 0);
+        }
+    }
+
+    public Task<RuntimeChangeResult> SetLayerAsync(string iniPath, string key, double value, CancellationToken cancellationToken = default)
+    {
+        if (!LayerKeys.Contains(key, StringComparer.Ordinal)) throw new ArgumentException("Unknown layer key.", nameof(key));
+        if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        var stored = key == "SkinStructure" && value < 0 ? -1.0 : Math.Clamp(value, 0.0, 2.0);
+        return ChangeIniAsync(iniPath, ini => ini.Set(Section, key, stored.ToString("0.0", CultureInfo.InvariantCulture)), cancellationToken);
+    }
+
+    public Task<RuntimeChangeResult> AdjustLayerAsync(string iniPath, string key, double delta, CancellationToken cancellationToken = default)
+    {
+        if (!LayerKeys.Contains(key, StringComparer.Ordinal)) throw new ArgumentException("Unknown layer key.", nameof(key));
+        if (!double.IsFinite(delta)) throw new ArgumentOutOfRangeException(nameof(delta));
+        return ChangeIniAsync(iniPath, ini =>
+        {
+            var current = ini.GetDouble(Section, key, key == "LocalTone" ? 0.0 : 1.0);
+            if (current < 0) current = ini.GetDouble(Section, "LocalStructure", 1.0);
+            var next = Math.Clamp(Math.Round(current + delta, 1, MidpointRounding.AwayFromZero), 0.0, 2.0);
+            ini.Set(Section, key, next.ToString("0.0", CultureInfo.InvariantCulture));
+        }, cancellationToken);
+    }
+
+    private Task<RuntimeChangeResult> ChangeIniAsync(string iniPath, Action<IniDocument> change, CancellationToken cancellationToken)
+    {
+        lock (ConfigWriteLock)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(iniPath)) throw new InvalidOperationException("The runtime config was not found: " + Path.GetFileName(iniPath));
+            var ini = IniDocument.Load(iniPath);
+            change(ini);
+            ini.SaveAtomic(iniPath);
+            return Task.FromResult(new RuntimeChangeResult(false, "Saved. The runtime reloads this file while it runs."));
         }
     }
 
@@ -135,3 +207,5 @@ public sealed class RuntimeControlService
 }
 
 public sealed record RuntimeChangeResult(bool LiveAcknowledged, string Message);
+
+public sealed record LayerState(double Structure, double Skin, double Tone, bool SkinFollowsStructure);

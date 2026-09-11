@@ -475,6 +475,47 @@ internal static class OptiScalerTests
             catch (Exception ex) { throw new InvalidOperationException("InspectAsync must tolerate concurrent truncation", ex); }
             await truncationTask;
         });
+
+        await run("Runtime refresh reads route and pre-SR controls from OptiScaler.ini", async () =>
+        {
+            using var temp = new OptiTemp();
+            var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
+            await File.WriteAllTextAsync(game.ManifestPath, "{\"route\":\"amd-optiscaler-presr\",\"installed_proxy_names\":[\"dxgi.dll\"]}");
+            await File.WriteAllBytesAsync(Path.Combine(temp.Path, "dxgi.dll"), [1]);
+            await File.WriteAllTextAsync(game.OptiScalerIniPath, "[DlssNr]\nEnabled=true\nPasses=2\nLocalStructure=1.5\nSkinStructure=0.5\nLocalTone=0\n");
+            new RuntimeControlService().Refresh(game, false);
+            Check(game.Route == InstallRoute.OptiScalerPreSr && game.IsPreSr, "route");
+            Check(game.Installed && game.Enabled && game.Passes == 2, "installed/enabled/passes");
+            Check(Math.Abs(game.LocalStructure - 1.5) < 0.001 && Math.Abs(game.SkinStructure - 0.5) < 0.001 && game.LocalTone == 0, "layers");
+            Check(game.RouteLabel == "OptiScaler pre-SR", "label");
+
+            var control = new OptiScalerControlService();
+            await control.SetPassesAsync(game, 3);
+            await control.SetEnabledAsync(game, false);
+            await control.SetSkinAsync(game, 2.0);
+            var ini = IniDocument.Load(game.OptiScalerIniPath);
+            Check(ini.Get("DlssNr", "Passes") == "3" && ini.Get("DlssNr", "Enabled") == "false" && ini.Get("DlssNr", "SkinStructure") == "2.0", "control writes");
+            try { await control.SetPassesAsync(game, 4); throw new Exception("accepted"); }
+            catch (ArgumentOutOfRangeException) { }
+        });
+
+        await run("Layer API edits an arbitrary runtime INI and supports skin follow", async () =>
+        {
+            using var temp = new OptiTemp();
+            var ini = Path.Combine(temp.Path, "dlssnr_on_amd.ini");
+            await File.WriteAllTextAsync(ini, "[DlssNrOnAmd]\nEnabled=1\nLocalStructure=1\nLocalTone=0\nSkinStructure=-1\n");
+            var service = new RuntimeControlService();
+            var state = service.ReadLayers(ini);
+            Check(state.SkinFollowsStructure && state.Structure == 1 && state.Tone == 0, "read");
+            await service.SetLayerAsync(ini, "SkinStructure", 1.2);
+            await service.AdjustLayerAsync(ini, "LocalTone", 0.3);
+            state = service.ReadLayers(ini);
+            Check(!state.SkinFollowsStructure && Math.Abs(state.Skin - 1.2) < 0.001 && Math.Abs(state.Tone - 0.3) < 0.001, "write");
+            await service.SetLayerAsync(ini, "SkinStructure", -1);
+            Check(service.ReadLayers(ini).SkinFollowsStructure, "follow restored");
+            try { await service.SetLayerAsync(ini, "Enabled", 1); throw new Exception("accepted"); }
+            catch (ArgumentException) { }
+        });
     }
 
     internal static void Check(bool condition, string message)

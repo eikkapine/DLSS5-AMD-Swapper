@@ -16,6 +16,8 @@ public sealed class GameEntry : INotifyPropertyChanged
     private double _localTone = 1.0;
     private double _skinStructure = 1.0;
     private bool _liveAcknowledged;
+    private InstallRoute _route;
+    private int _passes = 1;
     private string? _coverArtPath;
     private BitmapImage? _coverImage;
     private bool _coverLoaded;
@@ -87,6 +89,11 @@ public sealed class GameEntry : INotifyPropertyChanged
     public double LocalTone { get => _localTone; set => Set(ref _localTone, value); }
     public double SkinStructure { get => _skinStructure; set => Set(ref _skinStructure, value); }
     public bool LiveAcknowledged { get => _liveAcknowledged; set => Set(ref _liveAcknowledged, value); }
+    public InstallRoute Route { get => _route; set { if (Set(ref _route, value)) { OnPropertyChanged(nameof(RouteLabel)); OnPropertyChanged(nameof(IsPreSr)); OnPropertyChanged(nameof(IsPostFsr)); } } }
+    public int Passes { get => _passes; set => Set(ref _passes, value); }
+    public string RouteLabel => InstallRoutes.Label(Route);
+    public bool IsPreSr => Route == InstallRoute.OptiScalerPreSr;
+    public bool IsPostFsr => Route == InstallRoute.PostFsrRuntime;
 
     public string CompatibilityLabel => HasAntiCheat ? "Blocked: anti-cheat" : Eligible ? "Direct-game ready" : "Needs review";
     public string InstallLabel => Installed ? "Installed" : "Not installed";
@@ -100,12 +107,13 @@ public sealed class GameEntry : INotifyPropertyChanged
         OnPropertyChanged(nameof(InstallLabel));
     }
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
-        if (EqualityComparer<T>.Default.Equals(field, value)) return;
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(name);
         if (name == nameof(Installed)) OnPropertyChanged(nameof(InstallLabel));
+        return true;
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
