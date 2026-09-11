@@ -540,6 +540,17 @@ internal static class OptiScalerTests
             Check(ini.Get("DlssNr", "LocalStructure") == "1.7" && ini.Get("DlssNr", "LocalTone") == "0.4", "INI structure and tone");
             Check(structureResult.Message == "Saved for the next launch" && toneResult.Message == "Saved for the next launch", "next-launch message");
         });
+
+        await run("Hotkey sets map to distinct virtual keys", () =>
+        {
+            var direct = HotkeyService.Bindings(HotkeySet.DirectGame);
+            var layers = HotkeyService.Bindings(HotkeySet.LosslessLayers);
+            Check(direct.Select(b => b.VirtualKey).SequenceEqual([0x75u, 0x76u, 0x77u]), "F6-F8");
+            Check(layers.Select(b => b.VirtualKey).SequenceEqual([0x78u, 0x79u, 0x7Au]), "F9-F11");
+            Check(layers.Select(b => b.Key).SequenceEqual([SwapperHotkey.CycleLayer, SwapperHotkey.LayerDecrease, SwapperHotkey.LayerIncrease]), "layer keys");
+            Check(HotkeyService.Describe(HotkeySet.LosslessLayers) == "F9/F10/F11", "describe");
+            return Task.CompletedTask;
+        });
     }
 
     internal static void Check(bool condition, string message)

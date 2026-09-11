@@ -4,7 +4,9 @@ using System.Windows.Interop;
 
 namespace Dlss5AmdSwapper.Services;
 
-public enum SwapperHotkey { Toggle = 1, Decrease = 2, Increase = 3 }
+public enum SwapperHotkey { Toggle = 1, Decrease = 2, Increase = 3, CycleLayer = 4, LayerDecrease = 5, LayerIncrease = 6 }
+
+public enum HotkeySet { DirectGame, LosslessLayers }
 
 public sealed class HotkeyService : IDisposable
 {
@@ -19,14 +21,23 @@ public sealed class HotkeyService : IDisposable
 
     public HotkeyService(Action<SwapperHotkey> callback) => _callback = callback;
 
-    public void Attach(IntPtr handle)
+    public HotkeySet Set { get; private set; }
+
+    public static (SwapperHotkey Key, uint VirtualKey)[] Bindings(HotkeySet set) => set switch
+    {
+        HotkeySet.LosslessLayers => [(SwapperHotkey.CycleLayer, 0x78), (SwapperHotkey.LayerDecrease, 0x79), (SwapperHotkey.LayerIncrease, 0x7A)],
+        _ => [(SwapperHotkey.Toggle, 0x75), (SwapperHotkey.Decrease, 0x76), (SwapperHotkey.Increase, 0x77)]
+    };
+
+    public static string Describe(HotkeySet set) => set == HotkeySet.LosslessLayers ? "F9/F10/F11" : "F6/F7/F8";
+
+    public void Attach(IntPtr handle, HotkeySet set = HotkeySet.DirectGame)
     {
         _handle = handle;
+        Set = set;
         _source = HwndSource.FromHwnd(handle) ?? throw new InvalidOperationException("Could not attach to the app window.");
         _source.AddHook(Hook);
-        Register(SwapperHotkey.Toggle, 0x75);   // F6
-        Register(SwapperHotkey.Decrease, 0x76); // F7
-        Register(SwapperHotkey.Increase, 0x77); // F8
+        foreach (var (key, virtualKey) in Bindings(set)) Register(key, virtualKey);
     }
 
     public void Dispose()
@@ -40,7 +51,7 @@ public sealed class HotkeyService : IDisposable
     private void Register(SwapperHotkey hotkey, uint key)
     {
         if (!RegisterHotKey(_handle, (int)hotkey, ModControl | ModAlt | ModNoRepeat, key))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not register Ctrl+Alt+F{(int)hotkey + 5}.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not register Ctrl+Alt+F{key - 0x70 + 1}.");
         _registered.Add((int)hotkey);
     }
 
