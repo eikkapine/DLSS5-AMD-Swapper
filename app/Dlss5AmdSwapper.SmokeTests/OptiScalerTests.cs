@@ -213,6 +213,92 @@ internal static class OptiScalerTests
             Check(perfNoEnabler.Get("DlssNr", "RunBeforeSR") == "true", "minimal INI still carries DlssNr");
             return Task.CompletedTask;
         });
+
+        await run("Pre-SR install copies package, patches INI, records manifest and skips identical dependencies", async () =>
+        {
+            var f = await MakeInstallFixtureAsync(preexistingLibxess: true);
+            using var _ = f.Temp;
+            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            Check(result.Success && result.ProxyName == "dxgi.dll", "install result");
+            foreach (var name in new[] { "dxgi.dll", "OptiScaler.ini", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin", "OptiScaler\\amd_fidelityfx_upscaler_dx12.dll" })
+                Check(File.Exists(Path.Combine(f.GameDir, name)), $"missing {name}");
+            Check(IniDocument.Load(Path.Combine(f.GameDir, "OptiScaler.ini")).Get("DlssNr", "RunBeforeSR") == "true", "INI patched");
+            Check(ManagedManifest.ReadRoute(f.Game) == InstallRoute.OptiScalerPreSr, "manifest route");
+            var manifestText = await File.ReadAllTextAsync(f.Game.ManifestPath);
+            Check(manifestText.Contains("\"schema_version\": 3") && manifestText.Contains("\"preset\": \"quality\""), "manifest content");
+            Check(manifestText.Contains("OptiScaler\\\\libxess.dll") && manifestText.Contains("\"preexisting_dependencies\""), "preexisting dependency recorded");
+            Check(f.Game.Status == "Installed" && !f.Game.Busy, "status");
+
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("Update"), "second install must ask for Update"); }
+
+            var updated = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true);
+            Check(updated.Preset == OptiScalerPreset.Performance, "update preset");
+            Check(IniDocument.Load(Path.Combine(f.GameDir, "OptiScaler.ini")).Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "update rewrote INI");
+        });
+
+        await run("Pre-SR install refuses unmanaged proxies, anti-cheat and running games", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "winmm.dll"), [1]);
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("winmm.dll"), "unmanaged proxy must be named"); }
+            File.Delete(Path.Combine(f.GameDir, "winmm.dll"));
+
+            await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "EasyAntiCheat.dll"), [1]);
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("Anti-cheat"), "anti-cheat must block"); }
+            File.Delete(Path.Combine(f.GameDir, "EasyAntiCheat.dll"));
+
+            f.Game.Running = true;
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("Close the game"), "running game must block"); }
+            Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(f.Game.ManifestPath), "refusals must leave the folder untouched");
+        });
+
+        await run("Pre-SR install rolls back exactly when a write fails", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            // A directory at the INI path makes the INI write fail after the binaries were copied.
+            Directory.CreateDirectory(Path.Combine(f.GameDir, "OptiScaler.ini"));
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new InvalidOperationException("accepted"); }
+            catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
+            catch (Exception) { }
+            Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_amd_pass1.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_on_amd_weights.bin")), "copied files must be rolled back");
+            Check(!File.Exists(Path.Combine(f.GameDir, "OptiScaler", "libxess.dll")), "dependency copies must be rolled back");
+            Check(!File.Exists(f.Game.ManifestPath), "manifest must not remain");
+            Check(!f.Game.Busy, "busy flag cleared");
+        });
+
+        await run("Pre-SR install removes a managed post-FSR route first and records it", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            var oldProxy = Path.Combine(f.GameDir, "winmm.dll");
+            var oldIni = Path.Combine(f.GameDir, "dlssnr_on_amd.ini");
+            await File.WriteAllTextAsync(oldProxy, "old proxy");
+            await File.WriteAllTextAsync(oldIni, "[DlssNrOnAmd]\nEnabled=1\n");
+            await File.WriteAllTextAsync(f.Game.ManifestPath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schema_version = 2, route = "amd-fsr-direct",
+                before = new Dictionary<string, FileState>(),
+                after = new Dictionary<string, FileState>
+                {
+                    ["winmm.dll"] = new(new FileInfo(oldProxy).Length, await DirectGameInstallerService.Sha256Async(oldProxy)),
+                    ["dlssnr_on_amd.ini"] = new(new FileInfo(oldIni).Length, await DirectGameInstallerService.Sha256Async(oldIni))
+                },
+                installed_proxy_names = new[] { "winmm.dll" }
+            }));
+            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            Check(result.PreviousRouteRemoval is not null && result.PreviousRouteRemoval.Removed.Contains("winmm.dll"), "old proxy removed");
+            Check(!File.Exists(oldProxy) && !File.Exists(oldIni) && File.Exists(Path.Combine(f.GameDir, "dxgi.dll")), "old route gone, new route present");
+            Check((await File.ReadAllTextAsync(f.Game.ManifestPath)).Contains("\"previous_route\""), "previous route recorded");
+            Check(!f.Legacy.HasManagedInstall(f.Game), "legacy installer must not claim a pre-SR game");
+            try { await f.Legacy.RemoveAsync(f.Game, false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("pre-SR"), "legacy remove must refuse other routes"); }
+        });
     }
 
     internal static void Check(bool condition, string message)
@@ -268,5 +354,29 @@ internal static class OptiScalerTests
             File.WriteAllLines(Path.Combine(root, "SHA256SUMS.txt"), lines);
         }
         return root;
+    }
+
+    internal sealed record InstallFixture(OptiTemp Temp, OptiScalerPackage Package, string GameDir, GameEntry Game, LocalWeights Weights, OptiScalerInstallerService Installer, DirectGameInstallerService Legacy);
+
+    internal static async Task<InstallFixture> MakeInstallFixtureAsync(bool preexistingLibxess = false)
+    {
+        var temp = new OptiTemp();
+        var root = MakePackage(temp.Path, layout: "package", withSums: false);
+        var package = OptiScalerPackageService.Validate(root, FakeFork);
+        var gameDir = Path.Combine(temp.Path, "Game");
+        Directory.CreateDirectory(gameDir);
+        var exe = WritePe(Path.Combine(gameDir, "FixtureGame.exe"), "d3d12.dll");
+        await File.WriteAllBytesAsync(Path.Combine(gameDir, "amd_fidelityfx_upscaler_dx12.dll"), [1]);
+        if (preexistingLibxess)
+        {
+            Directory.CreateDirectory(Path.Combine(gameDir, "OptiScaler"));
+            File.Copy(Path.Combine(root, "OptiScaler", "libxess.dll"), Path.Combine(gameDir, "OptiScaler", "libxess.dll"));
+        }
+        var weightsPath = Path.Combine(temp.Path, "weights.bin");
+        await File.WriteAllBytesAsync(weightsPath, new byte[1024 * 1024 + 3]);
+        var weights = new LocalWeights(weightsPath, new FileInfo(weightsPath).Length, await DirectGameInstallerService.Sha256Async(weightsPath));
+        var probe = new GameProbeService();
+        var legacy = new DirectGameInstallerService(probe);
+        return new InstallFixture(temp, package, gameDir, new GameEntry { Name = "Fixture", ExePath = exe }, weights, new OptiScalerInstallerService(probe, legacy), legacy);
     }
 }
