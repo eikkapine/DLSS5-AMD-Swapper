@@ -361,7 +361,16 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         try
         {
             await using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return await JsonSerializer.DeserializeAsync<DirectManifest>(stream, JsonOptions, cancellationToken);
+            var manifest = await JsonSerializer.DeserializeAsync<DirectManifest>(stream, JsonOptions, cancellationToken);
+            if (manifest is not null)
+            {
+                // System.Text.Json discards the StringComparer.OrdinalIgnoreCase initializer of
+                // Dictionary<string, FileState> properties on deserialization, so rebuild them here
+                // to keep key lookups case-insensitive after a round-trip through disk.
+                manifest.Before = new Dictionary<string, FileState>(manifest.Before, StringComparer.OrdinalIgnoreCase);
+                manifest.After = new Dictionary<string, FileState>(manifest.After, StringComparer.OrdinalIgnoreCase);
+            }
+            return manifest;
         }
         catch (JsonException) { return null; }
     }

@@ -23,7 +23,7 @@ await RunAsync("Installer restore preserves changed and pre-existing files", asy
     var originalState = new FileState(new FileInfo(original).Length, await DirectGameInstallerService.Sha256Async(original));
     await File.WriteAllTextAsync(game.ManifestPath, System.Text.Json.JsonSerializer.Serialize(new
     {
-        before = new Dictionary<string, FileState> { ["dlssnr_on_amd.ini"] = originalState },
+        before = new Dictionary<string, FileState> { ["DLSSNR_ON_AMD.INI"] = originalState },
         after = new Dictionary<string, FileState> { ["version.dll"] = proxyState, ["dlssnr_on_amd_weights.bin"] = new(1, "old") },
         installed_proxy_names = new[] { "version.dll" }
     }));

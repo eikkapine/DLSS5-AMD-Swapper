@@ -375,6 +375,33 @@ internal static class OptiScalerTests
             Check(!second.ManifestRetained && !File.Exists(f.Game.ManifestPath), "manifest deleted once nothing created remains");
             Check(!f.Installer.HasManagedInstall(f.Game), "not managed after restore");
         });
+
+        await run("Pre-SR restore removes the dependency folder when nothing user-owned remains", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            Directory.CreateDirectory(Path.Combine(f.GameDir, "OptiScaler", "empty-sub"));
+
+            var result = await f.Installer.RemoveAsync(f.Game);
+            Check(!Directory.Exists(Path.Combine(f.GameDir, "OptiScaler")), "dependency folder removed despite an empty subdirectory");
+            Check(!result.ManifestRetained, "manifest not retained when nothing user-owned remains");
+        });
+
+        await run("Manifest file maps stay case-insensitive after reload", async () =>
+        {
+            using var temp = new OptiTemp();
+            var manifestPath = Path.Combine(temp.Path, "manifest.json");
+            await File.WriteAllTextAsync(manifestPath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                before = new Dictionary<string, FileState> { ["OptiScaler\\LibXess.dll"] = new FileState(3, "abc") },
+                after = new Dictionary<string, FileState> { ["OptiScaler\\libxess.dll"] = new FileState(3, "abc") }
+            }));
+            var manifest = await OptiScalerInstallerService.ReadManifestAsync(manifestPath, CancellationToken.None);
+            Check(manifest is not null, "manifest must deserialize");
+            Check(manifest!.Before.ContainsKey("optiscaler\\libxess.dll"), "Before lookup must be case-insensitive after reload");
+            Check(manifest.After.ContainsKey("OPTISCALER\\LIBXESS.DLL"), "After lookup must be case-insensitive after reload");
+        });
     }
 
     internal static void Check(bool condition, string message)

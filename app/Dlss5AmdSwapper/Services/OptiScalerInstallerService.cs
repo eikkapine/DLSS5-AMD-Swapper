@@ -194,29 +194,38 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             if (game.Running) throw new InvalidOperationException("Close the game before restoring its files.");
             if (ManagedManifest.ReadRoute(game) != InstallRoute.OptiScalerPreSr) throw new InvalidOperationException("No managed pre-SR install was found.");
             var manifest = await ReadManifestAsync(game.ManifestPath, cancellationToken) ?? throw new InvalidOperationException("The managed install manifest could not be read.");
-            var removed = new List<string>();
-            var preserved = new List<string>();
-            var preexisting = new HashSet<string>(manifest.PreexistingDependencies, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var relative in manifest.After.Keys.Concat(manifest.InstalledProxyNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+            try
             {
-                var path = Path.Combine(folder, relative);
-                if (manifest.Before.ContainsKey(relative) || preexisting.Contains(relative)) { preserved.Add(relative); continue; }
-                if (!File.Exists(path)) continue;
-                var current = new FileState(new FileInfo(path).Length, await DirectGameInstallerService.Sha256Async(path, cancellationToken));
-                if (manifest.After.TryGetValue(relative, out var expected) && expected == current) { File.Delete(path); removed.Add(relative); }
-                else preserved.Add(relative);
+                var removed = new List<string>();
+                var preserved = new List<string>();
+                var preexisting = new HashSet<string>(manifest.PreexistingDependencies, StringComparer.OrdinalIgnoreCase);
+                var candidates = manifest.After.Keys.Concat(manifest.InstalledProxyNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+                foreach (var relative in candidates)
+                {
+                    var path = Path.Combine(folder, relative);
+                    if (manifest.Before.ContainsKey(relative) || preexisting.Contains(relative)) { preserved.Add(relative); continue; }
+                    if (!File.Exists(path)) continue;
+                    var current = new FileState(new FileInfo(path).Length, await DirectGameInstallerService.Sha256Async(path, cancellationToken));
+                    if (manifest.After.TryGetValue(relative, out var expected) && expected == current) { File.Delete(path); removed.Add(relative); }
+                    else preserved.Add(relative);
+                }
+
+                var dependencyFolder = Path.Combine(folder, OptiScalerPackageService.DependencyFolderName);
+                if (Directory.Exists(dependencyFolder) && !Directory.EnumerateFiles(dependencyFolder, "*", SearchOption.AllDirectories).Any()) Directory.Delete(dependencyFolder, true);
+
+                var remaining = candidates
+                    .Where(relative => !manifest.Before.ContainsKey(relative) && !preexisting.Contains(relative) && File.Exists(Path.Combine(folder, relative)))
+                    .ToArray();
+                if (remaining.Length == 0) File.Delete(game.ManifestPath);
+                game.Status = remaining.Length == 0 ? "Restored" : "Some changed files were preserved";
+                return new RemoveResult(removed, preserved.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), remaining, remaining.Length != 0);
             }
-
-            var dependencyFolder = Path.Combine(folder, OptiScalerPackageService.DependencyFolderName);
-            if (Directory.Exists(dependencyFolder) && !Directory.EnumerateFiles(dependencyFolder, "*", SearchOption.AllDirectories).Any()) Directory.Delete(dependencyFolder, true);
-
-            var remaining = manifest.After.Keys
-                .Where(relative => !manifest.Before.ContainsKey(relative) && !preexisting.Contains(relative) && File.Exists(Path.Combine(folder, relative)))
-                .ToArray();
-            if (remaining.Length == 0) File.Delete(game.ManifestPath);
-            game.Status = remaining.Length == 0 ? "Restored" : "Some changed files were preserved";
-            return new RemoveResult(removed, preserved.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), remaining, remaining.Length != 0);
+            catch
+            {
+                game.Status = "Restore failed";
+                throw;
+            }
         }
         finally
         {
@@ -258,7 +267,18 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
         try
         {
             await using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return await JsonSerializer.DeserializeAsync<OptiScalerManifest>(stream, JsonOptions, cancellationToken);
+            var manifest = await JsonSerializer.DeserializeAsync<OptiScalerManifest>(stream, JsonOptions, cancellationToken);
+            if (manifest is not null)
+            {
+                // System.Text.Json discards the StringComparer.OrdinalIgnoreCase initializer of
+                // Dictionary<string, FileState> properties on deserialization, so rebuild them here
+                // to keep key lookups case-insensitive after a round-trip through disk.
+                manifest.Before = new Dictionary<string, FileState>(manifest.Before, StringComparer.OrdinalIgnoreCase);
+                manifest.After = new Dictionary<string, FileState>(manifest.After, StringComparer.OrdinalIgnoreCase);
+                if (manifest.Package is not null)
+                    manifest.Package.Files = new Dictionary<string, FileState>(manifest.Package.Files, StringComparer.OrdinalIgnoreCase);
+            }
+            return manifest;
         }
         catch (JsonException) { return null; }
     }
