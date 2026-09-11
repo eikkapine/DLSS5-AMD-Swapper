@@ -92,6 +92,74 @@ internal static class OptiScalerTests
             await File.WriteAllBytesAsync(pointer, new byte[1024 * 1024 + 1]);
             Check(OptiScalerPackageService.IsRealWeightsFile(pointer), "large binary rejected");
         });
+
+        await run("Discovery finds package folders, zips and Vodkaman folders under search roots", () =>
+        {
+            using var temp = new OptiTemp();
+            var downloads = Path.Combine(temp.Path, "Downloads");
+            MakePackage(downloads, layout: "package", withSums: false);
+            var nested = Path.Combine(downloads, "Arquivos necessarios");
+            Directory.CreateDirectory(nested);
+            File.WriteAllBytes(Path.Combine(nested, "OptiScaler-AMD-PreSR-Multipass-v1.3.zip"), [0x50, 0x4B]);
+            var vodka = Path.Combine(downloads, "DLSS-NR-UE5-Opti-DLL");
+            Directory.CreateDirectory(vodka);
+            File.WriteAllBytes(Path.Combine(vodka, "dxgi.dll"), [1]);
+            File.WriteAllBytes(Path.Combine(vodka, "dlssnr_amd_pass1.dll"), [1]);
+            var configured = Path.Combine(temp.Path, "Configured");
+            Directory.CreateDirectory(configured);
+            var found = new OptiScalerPackageService().DiscoverCandidates(configured, [downloads]);
+            Check(found.Count == 4, $"expected 4 candidates, got {found.Count}");
+            Check(found[0] == configured, "configured path first");
+            Check(found.Any(path => path.EndsWith("OptiScaler-AMD-PreSR-Multipass-v1.2", StringComparison.Ordinal)), "package folder");
+            Check(found.Any(path => path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)), "zip");
+            Check(found.Any(path => path.EndsWith("DLSS-NR-UE5-Opti-DLL", StringComparison.Ordinal)), "vodkaman folder");
+            return Task.CompletedTask;
+        });
+
+        await run("Zip extraction is cached by hash and rejects escaping entries", async () =>
+        {
+            using var temp = new OptiTemp();
+            var zip = Path.Combine(temp.Path, "OptiScaler-AMD-PreSR-Multipass-v1.2.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                var entry = archive.CreateEntry("OptiScaler-AMD-PreSR-Multipass-v1.2/OptiScaler.ini");
+                await using var writer = new StreamWriter(entry.Open());
+                await writer.WriteAsync("[DlssNr]\nEnabled=auto\n");
+            }
+            var cache = Path.Combine(temp.Path, "cache");
+            var service = new OptiScalerPackageService();
+            var first = service.EnsureExtracted(zip, cache);
+            var second = service.EnsureExtracted(zip, cache);
+            Check(first == second, "extraction must be cached");
+            Check(File.Exists(Path.Combine(first, "OptiScaler.ini")), "inner folder must be unwrapped");
+
+            var evil = Path.Combine(temp.Path, "evil.zip");
+            using (var archive = System.IO.Compression.ZipFile.Open(evil, System.IO.Compression.ZipArchiveMode.Create))
+                archive.CreateEntry("../escape.txt");
+            try { service.EnsureExtracted(evil, cache); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("outside"), "zip-slip must be refused"); }
+        });
+
+        await run("Local weights come from generated copies and must agree", async () =>
+        {
+            using var temp = new OptiTemp();
+            var ls = Path.Combine(temp.Path, "Lossless Scaling");
+            var runtime = Path.Combine(ls, "nr-bridge", "runtime");
+            var game = Path.Combine(temp.Path, "Game");
+            Directory.CreateDirectory(runtime); Directory.CreateDirectory(game);
+            var payload = new byte[1024 * 1024 + 7];
+            payload[3] = 9;
+            await File.WriteAllBytesAsync(Path.Combine(runtime, "dlssnr_on_amd_weights.bin"), payload);
+            await File.WriteAllBytesAsync(Path.Combine(game, "dlssnr_on_amd_weights.bin"), payload);
+            var weights = OptiScalerPackageService.FindLocalWeights(null, [game], ls);
+            Check(weights is not null && weights.Size == payload.Length, "weights not found");
+            Check(weights!.Path == Path.Combine(runtime, "dlssnr_on_amd_weights.bin"), "bridge runtime copy must win");
+            payload[5] = 1;
+            await File.WriteAllBytesAsync(Path.Combine(game, "dlssnr_on_amd_weights.bin"), payload);
+            try { OptiScalerPackageService.FindLocalWeights(null, [game], ls); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("differ"), "disagreeing copies must fail"); }
+            Check(OptiScalerPackageService.FindLocalWeights(null, [], Path.Combine(temp.Path, "nowhere")) is null, "no candidates must be null");
+        });
     }
 
     internal static void Check(bool condition, string message)

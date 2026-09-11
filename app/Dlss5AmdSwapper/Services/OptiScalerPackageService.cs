@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 using Dlss5AmdSwapper.Models;
 
@@ -12,6 +13,7 @@ public sealed class OptiScalerPackageService
     public const string EnablerName = "dlss-enabler-headless.dll";
     public const string DependencyFolderName = "OptiScaler";
     public const string RequiredUpscalerDependency = "amd_fidelityfx_upscaler_dx12.dll";
+    public const string PackageFolderPrefix = "OptiScaler-AMD-PreSR-Multipass";
     public static readonly string[] PassNames = ["dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll"];
 
     public static OptiScalerPackage Validate(string root, Func<string, PeVersion>? versionReader = null)
@@ -141,5 +143,101 @@ public sealed class OptiScalerPackageService
             if (rest.Length == 0) continue;
             yield return (rest.Replace('/', '\\'), hash);
         }
+    }
+
+    public IReadOnlyList<string> DiscoverCandidates(string? configuredPath, IEnumerable<string>? searchRoots = null)
+    {
+        var results = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configuredPath) && (Directory.Exists(configuredPath) || File.Exists(configuredPath)))
+            results.Add(Path.GetFullPath(configuredPath));
+
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var roots = searchRoots?.ToArray() ?? [Path.Combine(profile, "Downloads"), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)];
+        foreach (var root in roots.Where(Directory.Exists))
+        {
+            foreach (var folder in EnumerateFolders(root, 2))
+            {
+                var name = Path.GetFileName(folder);
+                if (name.StartsWith(PackageFolderPrefix, StringComparison.OrdinalIgnoreCase)
+                    || (File.Exists(Path.Combine(folder, "dxgi.dll")) && File.Exists(Path.Combine(folder, PassNames[0]))))
+                    results.Add(folder);
+                foreach (var zip in Directory.EnumerateFiles(folder, PackageFolderPrefix + "*.zip"))
+                    results.Add(zip);
+            }
+            foreach (var zip in Directory.EnumerateFiles(root, PackageFolderPrefix + "*.zip"))
+                results.Add(zip);
+        }
+        return results.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static IEnumerable<string> EnumerateFolders(string root, int depth)
+    {
+        IEnumerable<string> children;
+        try { children = Directory.EnumerateDirectories(root); }
+        catch (UnauthorizedAccessException) { yield break; }
+        catch (IOException) { yield break; }
+        foreach (var child in children)
+        {
+            yield return child;
+            if (depth > 1)
+                foreach (var grandchild in EnumerateFolders(child, depth - 1)) yield return grandchild;
+        }
+    }
+
+    public string EnsureExtracted(string zipPath, string? cacheRoot = null)
+    {
+        cacheRoot ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DLSS5 AMD Swapper", "optiscaler-packages");
+        var hash = DirectGameInstallerService.Sha256Async(zipPath).GetAwaiter().GetResult();
+        var target = Path.Combine(cacheRoot, hash[..8]);
+        var marker = Path.Combine(target, ".extracted");
+        if (File.Exists(marker)) return UnwrapSingleFolder(target);
+
+        if (Directory.Exists(target)) Directory.Delete(target, true);
+        Directory.CreateDirectory(target);
+        var prefix = Path.GetFullPath(target).TrimEnd('\\') + "\\";
+        using (var archive = ZipFile.OpenRead(zipPath))
+        {
+            foreach (var entry in archive.Entries)
+            {
+                var destination = Path.GetFullPath(Path.Combine(target, entry.FullName.Replace('/', '\\')));
+                if (!destination.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"The zip contains an entry outside its folder: {entry.FullName}");
+                if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\')) { Directory.CreateDirectory(destination); continue; }
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                entry.ExtractToFile(destination, true);
+            }
+        }
+        File.WriteAllText(marker, zipPath);
+        return UnwrapSingleFolder(target);
+    }
+
+    // A zip usually wraps everything in one top-level folder; validate that folder, not the cache root.
+    private static string UnwrapSingleFolder(string folder)
+    {
+        var files = Directory.EnumerateFiles(folder).Where(file => Path.GetFileName(file) != ".extracted").Any();
+        var directories = Directory.GetDirectories(folder);
+        return !files && directories.Length == 1 ? directories[0] : folder;
+    }
+
+    public static LocalWeights? FindLocalWeights(string? configuredPath, IEnumerable<string> gameDirectories, string? losslessInstallPath)
+    {
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configuredPath)) candidates.Add(configuredPath);
+        if (!string.IsNullOrWhiteSpace(losslessInstallPath))
+        {
+            candidates.Add(Path.Combine(losslessInstallPath, "nr-bridge", "runtime", WeightsName));
+            candidates.Add(Path.Combine(losslessInstallPath, WeightsName));
+        }
+        foreach (var directory in gameDirectories) candidates.Add(Path.Combine(directory, WeightsName));
+
+        LocalWeights? chosen = null;
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase).Where(IsRealWeightsFile))
+        {
+            var state = new LocalWeights(Path.GetFullPath(candidate), new FileInfo(candidate).Length, DirectGameInstallerService.Sha256Async(candidate).GetAwaiter().GetResult());
+            if (chosen is null) { chosen = state; continue; }
+            if (!chosen.Sha256.Equals(state.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Two local weights files differ: {chosen.Path} and {state.Path}. Point Settings at the one you trust.");
+        }
+        return chosen;
     }
 }
