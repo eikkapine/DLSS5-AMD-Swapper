@@ -1,3 +1,4 @@
+using System.Security.AccessControl;
 using System.Text;
 using Dlss5AmdSwapper.Models;
 using Dlss5AmdSwapper.Services;
@@ -159,6 +160,37 @@ internal static class OptiScalerTests
             try { OptiScalerPackageService.FindLocalWeights(null, [game], ls); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("differ"), "disagreeing copies must fail"); }
             Check(OptiScalerPackageService.FindLocalWeights(null, [], Path.Combine(temp.Path, "nowhere")) is null, "no candidates must be null");
+        });
+
+        await run("Discovery skips unreadable folders and finds packages", () =>
+        {
+            using var temp = new OptiTemp();
+            var root = Path.Combine(temp.Path, "Search");
+            Directory.CreateDirectory(root);
+            var unreadable = Path.Combine(root, "Locked");
+            Directory.CreateDirectory(unreadable);
+            var found = MakePackage(root, layout: "package", withSums: false);
+
+            var security = new DirectorySecurity(unreadable, AccessControlSections.Owner | AccessControlSections.Group | AccessControlSections.Access);
+            security.AddAccessRule(new FileSystemAccessRule(
+                new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.WorldSid, null),
+                FileSystemRights.ListDirectory | FileSystemRights.ReadData,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Deny));
+            try
+            {
+                System.IO.FileSystemAclExtensions.SetAccessControl(new DirectoryInfo(unreadable), security);
+                var results = new OptiScalerPackageService().DiscoverCandidates(null, [root]);
+                Check(results.Any(p => p.EndsWith("OptiScaler-AMD-PreSR-Multipass-v1.2", StringComparison.Ordinal)), "package folder found despite unreadable sibling");
+            }
+            finally
+            {
+                var restore = new DirectorySecurity();
+                restore.SetAccessRuleProtection(false, false);
+                System.IO.FileSystemAclExtensions.SetAccessControl(new DirectoryInfo(unreadable), restore);
+            }
+            return Task.CompletedTask;
         });
     }
 

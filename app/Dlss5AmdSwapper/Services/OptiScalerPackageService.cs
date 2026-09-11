@@ -161,10 +161,10 @@ public sealed class OptiScalerPackageService
                 if (name.StartsWith(PackageFolderPrefix, StringComparison.OrdinalIgnoreCase)
                     || (File.Exists(Path.Combine(folder, "dxgi.dll")) && File.Exists(Path.Combine(folder, PassNames[0]))))
                     results.Add(folder);
-                foreach (var zip in Directory.EnumerateFiles(folder, PackageFolderPrefix + "*.zip"))
+                foreach (var zip in EnumerateZips(folder))
                     results.Add(zip);
             }
-            foreach (var zip in Directory.EnumerateFiles(root, PackageFolderPrefix + "*.zip"))
+            foreach (var zip in EnumerateZips(root))
                 results.Add(zip);
         }
         return results.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -182,6 +182,13 @@ public sealed class OptiScalerPackageService
             if (depth > 1)
                 foreach (var grandchild in EnumerateFolders(child, depth - 1)) yield return grandchild;
         }
+    }
+
+    private static string[] EnumerateZips(string folder)
+    {
+        try { return Directory.EnumerateFiles(folder, PackageFolderPrefix + "*.zip").ToArray(); }
+        catch (UnauthorizedAccessException) { return []; }
+        catch (IOException) { return []; }
     }
 
     public string EnsureExtracted(string zipPath, string? cacheRoot = null)
