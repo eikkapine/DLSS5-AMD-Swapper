@@ -34,7 +34,7 @@ public sealed partial class OptiScalerDiagnosticsService
             if (trimmed.Length > 0 && Fault().IsMatch(trimmed)) lastFault = trimmed;
         }
         return new OptiScalerDiagnostics(
-            PreSrActive: completed is not null || running is not null,
+            PreSrActive: completed is not null || optiLog.Contains("DLSS-NR running", StringComparison.Ordinal),
             HipAdapter: adapter.Success ? adapter.Groups[1].Value.Trim() : null,
             PassesInitialized: initialized,
             PassesCompleted: completed,
@@ -54,19 +54,27 @@ public sealed partial class OptiScalerDiagnosticsService
         var length = stream.Length;
         using var sha = SHA256.Create();
         var hash = await sha.ComputeHashAsync(stream, cancellationToken);
+        var currentLength = stream.Length;
+        if (currentLength < length) length = currentLength;
         var tailStart = Math.Max(0, length - TailBytes);
         stream.Position = tailStart;
         var buffer = new byte[length - tailStart];
-        await stream.ReadExactlyAsync(buffer, cancellationToken);
-        return (Encoding.UTF8.GetString(buffer), Convert.ToHexString(hash).ToLowerInvariant(), length);
+        int bytesRead = 0;
+        while (bytesRead < buffer.Length)
+        {
+            var readCount = await stream.ReadAsync(buffer.AsMemory(bytesRead), cancellationToken);
+            if (readCount == 0) break;
+            bytesRead += readCount;
+        }
+        return (Encoding.UTF8.GetString(buffer, 0, bytesRead), Convert.ToHexString(hash).ToLowerInvariant(), length);
     }
 
-    [GeneratedRegex(@"^HIP adapter:\s*(.+)$", RegexOptions.Multiline)] private static partial Regex HipAdapter();
+    [GeneratedRegex(@"HIP adapter:\s*(.+)", RegexOptions.Multiline)] private static partial Regex HipAdapter();
     [GeneratedRegex(@"Initialized independent AMD pass \d+")] private static partial Regex PassInitialized();
     [GeneratedRegex(@"Completed AMD pre-SR passes=(\d+)")] private static partial Regex PassesCompleted();
     [GeneratedRegex(@"DLSS-NR running [^:]*: target (\d+x\d+), model (\d+x\d+)")] private static partial Regex Running();
     [GeneratedRegex(@"DLSS-NR cost: ([\d.]+) ms total = ([\d.]+) ms model")] private static partial Regex Cost();
-    [GeneratedRegex(@"^(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|.*hash mismatch|dlssnr_on_amd_weights\.bin is required|.*LoadLibrary failed|AMD engine initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")] private static partial Regex Fault();
+    [GeneratedRegex(@"(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|hash mismatch|weights\.bin is required|LoadLibrary failed|initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")] private static partial Regex Fault();
 }
 
 public sealed record OptiScalerDiagnostics(

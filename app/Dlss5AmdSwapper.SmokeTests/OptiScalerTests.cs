@@ -443,6 +443,38 @@ internal static class OptiScalerTests
             Check(result.PreSrLogBytes == new FileInfo(game.PreSrLogPath).Length && result.PreSrLogSha256?.Length == 64, "hash covers full file");
             Check(result.OptiLogSha256 is null && result.OptiLogBytes == 0, "absent OptiScaler.log tolerated");
         });
+
+        await run("Pre-SR diagnostics tolerate prefixed and drifted log lines", () =>
+        {
+            var presr = "[12:00:01] HIP adapter: AMD Radeon RX 9070 XT\r\n[12:00:02] AMD engine initialization failed\r\n";
+            var opti = "[info] DlssNr_Dx12::Dispatch DLSS-NR running before SR (no sizes)\n";
+            var result = OptiScalerDiagnosticsService.Parse(presr, opti);
+            Check(result.PreSrActive, "active from opti log");
+            Check(result.HipAdapter == "AMD Radeon RX 9070 XT", "adapter from prefixed line");
+            Check(result.LastFault?.EndsWith("AMD engine initialization failed", StringComparison.Ordinal) ?? false, "generic fault pattern matches real fork text");
+            Check(result.ModelSize is null, "no resolution when running format drifts");
+            return Task.CompletedTask;
+        });
+
+        await run("Pre-SR diagnostics survive a log that shrinks during inspection", async () =>
+        {
+            using var temp = new OptiTemp();
+            var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
+            var content = "Initialized independent AMD pass 1\n" + new string('x', 3 * 1024 * 1024) + "\nCompleted AMD pre-SR passes=1\n";
+            await File.WriteAllTextAsync(game.PreSrLogPath, content);
+            var truncationTask = Task.Run(async () =>
+            {
+                await Task.Delay(5);
+                await File.WriteAllBytesAsync(game.PreSrLogPath, new byte[100]);
+            });
+            try
+            {
+                var result = await new OptiScalerDiagnosticsService().InspectAsync(game);
+                Check(result.PreSrLogBytes >= 0, "call must complete without throwing");
+            }
+            catch (Exception ex) { throw new InvalidOperationException("InspectAsync must tolerate concurrent truncation", ex); }
+            await truncationTask;
+        });
     }
 
     internal static void Check(bool condition, string message)
