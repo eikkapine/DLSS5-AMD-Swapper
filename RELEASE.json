@@ -61,8 +61,9 @@
     "portable_manager_package_verified": true,
     "optiscaler_presr_route_smoke_tests_passed": true,
     "optiscaler_presr_python_tests_passed": true,
-    "optiscaler_presr_live_install_verified": false,
-    "optiscaler_presr_capture_recorded": false
+    "optiscaler_presr_live_install_verified": true,
+    "optiscaler_presr_capture_recorded": false,
+    "optiscaler_presr_package_validated_real_files": true
   },
   "working_resolution": {
     "lossless_scaling_mode": "native visible output + capped neural branch",
@@ -106,10 +107,10 @@
   },
   "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available.",
   "manager_release": {
-    "asset": "DLSS5-AMD-Swapper-v0.2.0-pre.1.zip",
+    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.1-win-x64.zip",
     "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
-    "sha256": "50b95a8a0d3a1571ac751f5b0eb4a803b22193429ea19688d9390aac09c51935",
-    "bytes": 65931422,
+    "sha256": "203e17cff658d5d41ce3b681beec4e7a582aaa59e12d0c541ea24ebcf3615297",
+    "bytes": 66003114,
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
@@ -119,5 +120,20 @@
     "redistributed": false,
     "downloaded": false,
     "source": "user-supplied"
+  },
+  "optiscaler_presr_live": {
+    "date": "2026-09-12",
+    "game": "Crimson Desert (bin64)",
+    "route_switch": "post-FSR manifest removed first, pre-SR installed with the Quality preset",
+    "package_fork_version": "10.0.0-dev (amd-presr-multipass-local) (20260907_075847)",
+    "package_sha256sums_verified": true,
+    "package_sha256sums_warnings": [
+      "LEIA-ME-AMD.md",
+      "Licenses\\FidelityFX_v1_LICENSE.md",
+      "Licenses\\FidelityFX_v2_LICENSE.md",
+      "Licenses\\XeSS_LICENSE.txt"
+    ],
+    "weights_source": "locally generated copy from the Lossless Scaling bridge runtime folder",
+    "gameplay_capture": "pending; no performance number is claimed until a hashed capture exists"
   }
 }
