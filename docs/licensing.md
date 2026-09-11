@@ -15,8 +15,14 @@ It does not grant rights to Lossless Scaling, NVIDIA runtime/model files, `DLSS-
 | [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder) | Feeding/integration reference | Preserve its MIT notice if source is copied/adapted. |
 | [NVIDIA/DLSS](https://github.com/NVIDIA/DLSS) | NVIDIA SDK/runtime terms reference | Do not redistribute NVIDIA DLLs, SDK files, models or weights from this repository. |
 | [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | FidelityFX reference/header material | Keep upstream notices with any published vendored material. |
+| [cdozdil/OptiScaler](https://github.com/cdozdil/OptiScaler) | Upscaler/frame-generation host for the pre-SR route (GPL-3.0) | Never bundled. The pre-SR fork build is supplied by the user; the manager verifies and copies it locally. |
+| [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR) | DLSS-NR integration lineage of the fork | Reference only. |
+| [Vodkaman23/DLSS-NR-UE5-Opti-DLL](https://github.com/Vodkaman23/DLSS-NR-UE5-Opti-DLL) | Public example of the fork + pass DLL layout | No licence published; its binaries are never redistributed, downloaded or modified by this project. |
+| [gamegpu.com report](https://en.gamegpu.com/news/igry/dlss-5-teper-rabotaet-na-radeon-rx-9070-xt-i-rx-9060-xt-s-bolee-chem-60-fps-v-4k) | Credit for the pre-SR configuration | Their numbers are not measurements of this project. |
 
 The current `DLSS-NR-on-AMD` licence has restrictions that make bundling it into this project inappropriate, so the direct-game installer requires a local official setup supplied by the person running the tool. The manager verifies that local setup against GitHub release metadata and invokes it unchanged.
+
+The `dlssnr_amd_pass*.dll` files used in the pre-SR route are DLSS-NR-on-AMD proxy builds; the same non-redistribution rule applies to them as to the official setup. The OptiScaler pre-SR fork's source has not been published, so its binaries cannot be redistributed with GPL-3.0 source obligations satisfied.
 
 I also do not claim that using every combination of third-party NVIDIA/AMD compatibility software is automatically permitted everywhere. Anyone using or redistributing third-party components should review the current upstream licences and the target game's terms.
 
@@ -49,7 +55,8 @@ A normal DLSS5 AMD Swapper release may contain:
 
 It must not contain:
 
-- `DLSS-NR-on-AMD` binaries/installers or generated weights
+- `DLSS-NR-on-AMD` binaries/installers, proxy builds (`dlssnr_amd_pass*.dll`) or generated weights
+- OptiScaler fork binaries (`OptiScaler.dll`, `dxgi.dll`), package INIs (`OptiScaler.ini`), `dlss-enabler-headless.dll` or OptiScaler dependency libraries
 - NVIDIA runtime/model/SDK files
 - third-party AMD compatibility binaries
 - paid Lossless Scaling files

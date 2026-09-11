@@ -25,7 +25,7 @@ DLSS5 AMD Swapper puts the two ways I use the project into one app. **Direct Gam
 
 | | **Direct Game** | **Lossless Scaling** |
 | --- | --- | --- |
-| Best for | Supported single-player/offline games | Almost any capturable game, video, browser, or app |
+| Best for | Supported single-player/offline games (two backends: post-FSR runtime, OptiScaler pre-SR) | Almost any capturable game, video, browser, or app |
 | Input | Game FSR colour + motion + depth when available | Finished desktop frame |
 | Output | Game keeps control of final resolution | Captured source stays at native visible resolution |
 | Setup | Scan → select game → **Set up** | Configure once → press **Scale** normally |
@@ -62,6 +62,7 @@ For an installed copy with Desktop and Start menu shortcuts, run `Install.cmd` f
 - Universal installed-game discovery and deduplication.
 - x64, DX12, FSR, and common anti-cheat compatibility checks.
 - Automatic install-vs-update handling for the direct-game route.
+- OptiScaler pre-SR package verification and reversible install.
 - Official upstream installer download with size + SHA-256 verification.
 - Local discovery of a legitimate `nvngx_dlssnr.dll`; it is never bundled or downloaded by this project.
 - Reversible per-game setup with hash-backed manifests.
@@ -132,6 +133,7 @@ The repository and release package do **not** contain:
 
 - paid Lossless Scaling files or `Lossless_original.dll`
 - `DLSS-NR-on-AMD` installers/binaries or generated weights
+- OptiScaler fork binaries (`OptiScaler.dll`, `dxgi.dll`), package INIs (`OptiScaler.ini`), `dlss-enabler-headless.dll` or OptiScaler dependency libraries
 - NVIDIA DLSS-NR DLLs, models, or weights
 - third-party AMD proxy/runtime binaries
 - private INIs, manifests, backups, logs, captures, or machine-specific paths
@@ -145,6 +147,7 @@ The release contains my manager plus project-built bridge/wrapper files and scri
 | --- | --- |
 | [Installation](docs/install.md) | Portable app, Direct Game, Lossless Scaling, restore, source build |
 | [Direct Game](direct-game/README.md) | Compatibility, install/update flow, diagnostics, CLI |
+| [OptiScaler pre-SR](docs/optiscaler-presr.md) | Pre-SR route, package verification, presets, diagnostics, and CLI |
 | [Architecture](docs/architecture.md) | Manager, scanner, bridge, direct-game path, trust boundaries |
 | [Performance](docs/performance.md) | Measurement policy and analyzer output |
 | [Verification](docs/verification.md) | Runtime evidence and publication checks |
@@ -161,6 +164,9 @@ This project builds on public research and compatibility work from:
 - [matiasLombo/neural-upstream](https://github.com/matiasLombo/neural-upstream)
 - [Kizzuwatnaa/DLSS5-Autopilot](https://github.com/Kizzuwatnaa/DLSS5-Autopilot)
 - [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR)
+- [cdozdil/OptiScaler](https://github.com/cdozdil/OptiScaler) — upscaler and frame-generation host
+- [Vodkaman23/DLSS-NR-UE5-Opti-DLL](https://github.com/Vodkaman23/DLSS-NR-UE5-Opti-DLL) — public reference for the pre-SR fork and pass proxy layout
+- [gamegpu.com report](https://en.gamegpu.com/news/igry/dlss-5-teper-rabotaet-na-radeon-rx-9070-xt-i-rx-9060-xt-s-bolee-chem-60-fps-v-4k) — configuration report publicising pre-SR with frame generation
 - [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
 - [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
 

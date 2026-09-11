@@ -18,7 +18,7 @@ That script builds the native Lossless Scaling wrapper, builds the bridge, runs 
 
 ## App smoke tests
 
-The smoke tests cover the parts most likely to make the manager unsafe or misleading:
+The 44 C# smoke tests cover the parts most likely to make the manager unsafe or misleading:
 
 - INI edits preserve unrelated sections
 - runtime controls save atomically
@@ -27,11 +27,29 @@ The smoke tests cover the parts most likely to make the manager unsafe or mislea
 - anti-cheat evidence overrides otherwise compatible targets
 - SHA-256 helpers are deterministic
 - an installed Lossless Scaling bridge can be recognized when a real install path is supplied
+- OptiScaler package discovery, cached zip extraction, and layout verification
+- OptiScaler fork detection via ProductName / ProductVersion and pass DLL marker checks
+- SHA256SUMS integrity verification and weights LFS-pointer rejection
+- local weights discovery, hash consistency across copies, and generated-weights requirement
+- OptiScaler preset INI generation (Quality vs Performance)
+- reversible pre-SR install, rollback on write failure, and failed-update recovery
+- hash-checked pre-SR restore preserving pre-existing dependencies
+- bounded pre-SR log parsing and diagnostic extraction
+- Lossless Scaling runtime INI layer control (Structure, Skin, Tone) and skin-follow logic
+- manifest route detection and round-trip parsing (schema 3 `amd-optiscaler-presr`)
 
 Run them directly with:
 
 ```powershell
 dotnet run --project .\app\Dlss5AmdSwapper.SmokeTests\Dlss5AmdSwapper.SmokeTests.csproj -c Release
+```
+
+## Python helper tests
+
+The direct-game CLI helper includes unit tests covering both the official post-FSR and OptiScaler pre-SR routes:
+
+```powershell
+py -m unittest discover -s direct-game/tests
 ```
 
 ## Direct-game invariants
@@ -45,7 +63,8 @@ I keep the direct installer reversible and conservative:
 - snapshot managed files before changing them
 - restore the pre-install managed state on failure/cancel
 - remove only files whose hashes still prove they are managed
-- recognize the legacy manifest while writing the new `.dlss5-amd-swapper.json` format
+- recognize legacy manifests while writing the schema 3 `.dlss5-amd-swapper.json` format
+- pre-SR installs never bundle package files; weights come only from local generated copies
 
 ## Lossless Scaling invariants
 
@@ -56,6 +75,7 @@ I keep the direct installer reversible and conservative:
 - reject unstable residual colour/luminance that causes trails/flicker
 - preserve the existing managed bridge settings during an update
 - never package the paid Lossless Scaling original DLL
+- OptiScaler inside Lossless Scaling is not possible because Lossless Scaling presentation is Direct3D 11 whereas OptiScaler pre-SR requires a DirectX 12 super-resolution call
 
 ## Performance work
 
@@ -65,7 +85,7 @@ For direct-game performance, the important dimensions are the game's actual FSR 
 
 ## Publication discipline
 
-Concrete frame-rate claims must come from hashed measurement logs. I run:
+Concrete performance claims must come from hashed measurement logs. I run:
 
 ```powershell
 py .\tools\Check-Publication.py

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.2.0-pre.1",
-  "tag": "v0.2.0-pre.1",
+  "version": "0.3.0-pre.1",
+  "tag": "v0.3.0-pre.1",
   "status": "experimental-preview",
-  "date": "2026-09-09",
-  "published": true,
-  "previous_published_version": "0.1.0-pre.3-dev.15",
+  "date": "2026-09-12",
+  "published": false,
+  "previous_published_version": "0.2.0-pre.1",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
@@ -35,7 +35,7 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "99accf04e5aba5d1bd131e210ffbf05e183b03f2f5531358270cba81dda8535e",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "a04acc32d4458ce65f2cb8253a671186e7b4a7912eab2614e242b9005a4d5fc9"
+      "VERSION": "4ced0aac71052abc457d10e03843360d012d188503a58469a70b98e00a3f69d8"
     }
   },
   "verification": {
@@ -58,7 +58,11 @@
     "manager_ui_minimum_size_verified": true,
     "in_app_scan_summary_verified": true,
     "universal_game_scan_verified": true,
-    "portable_manager_package_verified": true
+    "portable_manager_package_verified": true,
+    "optiscaler_presr_route_smoke_tests_passed": true,
+    "optiscaler_presr_python_tests_passed": true,
+    "optiscaler_presr_live_install_verified": false,
+    "optiscaler_presr_capture_recorded": false
   },
   "working_resolution": {
     "lossless_scaling_mode": "native visible output + capped neural branch",
@@ -109,5 +113,11 @@
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
+  },
+  "external_optiscaler_package": {
+    "expected_fork_marker": "amd-presr",
+    "redistributed": false,
+    "downloaded": false,
+    "source": "user-supplied"
   }
 }

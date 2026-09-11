@@ -13,7 +13,9 @@ The ZIP contains the manager and project-owned Lossless Scaling payload only. It
 
 ## Direct-game setup
 
-Use this route for supported single-player/offline x64 DX12/FSR games.
+Use this route for supported single-player/offline x64 DX12/FSR games. Two backends are supported: the official post-FSR runtime and the OptiScaler pre-SR route.
+
+### Official post-FSR runtime
 
 1. Open **Game library** and press **Scan PC** to check Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass and common standalone game folders, or add the game executable manually.
 2. Review the scan summary and select a compatible game. The scanner does not select a target for you.
@@ -29,6 +31,21 @@ The generated rich path must enable FSR inputs, depth, temporal history, interop
 
 For the currently tested upstream route, use **AMD Software: Adrenalin Edition 26.1.1 or newer**. A separate ROCm install is not required for normal use.
 
+### Direct Game — OptiScaler pre-SR
+
+Use this alternative direct-game backend when you want to evaluate neural rendering before super-resolution (FSR/XeSS) upscaling rather than after it.
+
+1. In **Settings**, specify your user-supplied `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder or zip. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package archives (cached under `%LOCALAPPDATA%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
+2. Specify your locally generated `dlssnr_on_amd_weights.bin`. The manager reuses locally generated weights from the bridge runtime folder, Lossless Scaling folder, or previously managed game folders; all copies must agree in SHA-256 hash. Git LFS pointer stubs and undersized files are rejected. The project never downloads or bundles package files or weights.
+3. Open **Game library**, select a compatible x64 DirectX 12 target, and click **Set up**.
+4. In the route selection dialog, choose **OptiScaler pre-SR**.
+5. Select **Quality** (pre-SR neural pass with FSR 4 upscaling) or **Performance** (pre-SR with a 3.0x ratio override and multi-frame generation).
+6. Click **Install**. The manager validates PE x64 binaries, verifies the `amd-presr` version string and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
+7. Launch the game with FSR enabled. Press `Insert` to open the in-game OptiScaler menu.
+8. Use **Refresh evidence** in the manager to verify active passes, render and target dimensions, and execution times.
+
+OptiScaler cannot be used inside Lossless Scaling because Lossless Scaling uses Direct3D 11 presentation whereas OptiScaler pre-SR requires a DirectX 12 super-resolution call to hook.
+
 ### Native output with lower neural cost
 
 Keep the game's final output at your normal/native resolution. If the game offers FSR quality modes, the hidden neural workload can follow the lower FSR input/render resolution while the game still reconstructs the native final output.
@@ -42,8 +59,9 @@ The runtime diagnostics show both FSR input size and swapchain/output size. If t
 3. Select your local AMD compatibility proxy named `version.dll`.
 4. Select your own `nvngx_dlssnr.dll`.
 5. Choose the HIP device index if your system has more than one AMD-visible device.
-6. Click **Install / Update bridge**.
-7. Focus any capturable window and press **Scale** in Lossless Scaling normally.
+6. Adjust the Structure, Skin, and Tone sliders (or enable **Skin follows structure**).
+7. Click **Install / Update bridge**.
+8. Focus any capturable window and press **Scale** in Lossless Scaling normally.
 
 The manager detects the Lossless Scaling installation, installs my project-built proxy/bridge and preserves the existing bridge resolution/runtime choices when updating an already managed install.
 
@@ -72,8 +90,11 @@ Sources below the cap are not enlarged for the neural pass.
 | `Ctrl+Alt+F6` | Toggle effect |
 | `Ctrl+Alt+F7` | Decrease strength |
 | `Ctrl+Alt+F8` | Increase strength |
+| `Ctrl+Alt+F9` | Cycle selected layer (Structure, Skin, Tone) |
+| `Ctrl+Alt+F10` | Decrease selected layer strength (-0.1) |
+| `Ctrl+Alt+F11` | Increase selected layer strength (+0.1) |
 
-Lossless Scaling owns these keys while its bridge is active. The manager registers the same keys for a running managed direct-game target.
+Lossless Scaling owns `Ctrl+Alt+F6/F7/F8` while its bridge is active, and accepts `Ctrl+Alt+F9/F10/F11` to adjust layer settings in the bridge runtime INI while `LosslessScaling.exe` runs. The manager registers `Ctrl+Alt+F6/F7/F8` for a running managed direct-game target.
 
 ## Restore / uninstall
 
@@ -108,7 +129,7 @@ The Python direct-game helper remains available:
 py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
 ```
 
-See [Direct-game route](../direct-game/README.md) for install/update/diagnose/remove commands.
+See [Direct-game route](../direct-game/README.md) and [OptiScaler pre-SR](optiscaler-presr.md) for install/update/diagnose/remove commands.
 
 ## Optional manager installation
 
