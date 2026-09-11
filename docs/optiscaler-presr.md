@@ -48,7 +48,7 @@ The manager validates:
 - Target architecture is PE x64.
 - `OptiScaler.dll` VersionInfo has ProductName `OptiScaler` and ProductVersion containing `amd-presr`.
 - Pass DLLs contain the internal marker `dlssnr_amd`.
-- File integrity matches `SHA256SUMS.txt` when present.
+- File integrity matches `SHA256SUMS.txt` when present. Every file the manager installs (the fork binary, pass DLLs, `OptiScaler.ini`, the `OptiScaler\` dependencies, the enabler and the weights entry) must match exactly; a Git LFS pointer satisfies its entry when its `oid sha256:` equals the listed hash. A stale checksum on a file the manager never installs (readme, scripts, licence texts) is reported as a warning, because the reference package itself ships with such stale entries.
 - Weights are verified locally against existing generated copies (from the bridge runtime folder, Lossless Scaling folder, or managed game folders); all copies must match in SHA-256 hash. Git LFS pointer stubs and undersized files are rejected.
 
 ## Setup

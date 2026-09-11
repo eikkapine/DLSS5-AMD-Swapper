@@ -72,16 +72,30 @@ public sealed class OptiScalerPackageService
             foreach (var file in Directory.EnumerateFiles(dependencies, "*", SearchOption.AllDirectories)) Record(file);
 
         var sumsVerified = false;
+        var sumsWarnings = new List<string>();
         if (File.Exists(sums))
         {
+            // Only files the manager installs must match exactly; a stale checksum on a readme or script is a warning.
+            bool IsInstalled(string relativePath) =>
+                files.ContainsKey(relativePath) || relativePath.Equals(WeightsName, StringComparison.OrdinalIgnoreCase);
             foreach (var (relative, expected) in ParseSha256Sums(sums))
             {
                 var full = Path.GetFullPath(Path.Combine(root, relative));
                 if (!full.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"SHA256SUMS.txt lists a path outside the package: {relative}");
                 if (!File.Exists(full)) continue; // optional file absent; the required ones were checked above
-                var actual = files.TryGetValue(Path.GetRelativePath(root, full), out var state) ? state.Sha256 : DirectGameInstallerService.Sha256Async(full).GetAwaiter().GetResult();
-                if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                var oid = ReadLfsPointerOid(full);
+                if (oid is not null)
+                {
+                    if (!oid.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"SHA256SUMS.txt does not match {relative} (LFS pointer references a different object). Re-download the package before installing.");
+                    continue;
+                }
+                var relativeKey = Path.GetRelativePath(root, full);
+                var actual = files.TryGetValue(relativeKey, out var state) ? state.Sha256 : DirectGameInstallerService.Sha256Async(full).GetAwaiter().GetResult();
+                if (actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) continue;
+                if (IsInstalled(relativeKey))
                     throw new InvalidOperationException($"SHA256SUMS.txt does not match {relative}. Re-download the package before installing.");
+                sumsWarnings.Add(relative);
             }
             sumsVerified = true;
         }
@@ -94,7 +108,45 @@ public sealed class OptiScalerPackageService
             IsRealWeightsFile(weights) ? weights : null,
             File.Exists(sums) ? sums : null,
             version.ProductVersion,
-            files, sumsVerified, layout);
+            files, sumsVerified, layout, sumsWarnings);
+    }
+
+    public static string? ReadLfsPointerOid(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var buffer = new byte[4096];
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                var read = stream.Read(buffer, totalRead, buffer.Length - totalRead);
+                if (read <= 0) break;
+                totalRead += read;
+            }
+            if (totalRead == 0) return null;
+            var text = Encoding.UTF8.GetString(buffer, 0, totalRead);
+            if (!text.StartsWith("version https://git-lfs", StringComparison.Ordinal)) return null;
+            using var reader = new StringReader(text);
+            string? line;
+            while ((line = reader.ReadLine()) is not null)
+            {
+                line = line.Trim();
+                const string prefix = "oid sha256:";
+                if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var candidate = line[prefix.Length..].Trim();
+                    if (candidate.Length == 64 && candidate.All(Uri.IsHexDigit))
+                        return candidate.ToLowerInvariant();
+                }
+            }
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static bool IsRealWeightsFile(string path)

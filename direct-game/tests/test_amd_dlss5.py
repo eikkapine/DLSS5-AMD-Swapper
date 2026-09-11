@@ -22,6 +22,17 @@ def write_pe(path: Path, marker: bytes = b"") -> Path:
     return path
 
 
+WEIGHTS_OID = "6bf8dc931ef3ccffe18c82de26ab374156e7f19539ffcf8eabaa25dca5cf15ab"
+
+
+def write_sums(root: Path, weights_hash: str = WEIGHTS_OID, extra: str = "") -> None:
+    lines = []
+    for relative in ("OptiScaler.dll", "dlssnr_amd_pass1.dll", "OptiScaler.ini", "dlssnr_on_amd_weights.bin"):
+        digest = weights_hash if relative == "dlssnr_on_amd_weights.bin" else helper.sha256(root / relative)
+        lines.append(f"{digest} *{relative}")
+    (root / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n" + extra, encoding="utf-8")
+
+
 def make_package(parent: Path) -> Path:
     root = parent / "OptiScaler-AMD-PreSR-Multipass-v1.2"
     (root / "OptiScaler").mkdir(parents=True)
@@ -29,7 +40,7 @@ def make_package(parent: Path) -> Path:
     for index in (1, 2, 3):
         write_pe(root / f"dlssnr_amd_pass{index}.dll", b"dlssnr_amd")
     (root / "OptiScaler.ini").write_text("[Upscalers]\nDx12Upscaler=auto\n\n[DlssNr]\nEnabled=auto\n", encoding="utf-8")
-    (root / "dlssnr_on_amd_weights.bin").write_text("version https://git-lfs.github.com/spec/v1\n", encoding="utf-8")
+    (root / "dlssnr_on_amd_weights.bin").write_text(f"version https://git-lfs.github.com/spec/v1\noid sha256:{WEIGHTS_OID}\nsize 147689451\n", encoding="utf-8")
     (root / "OptiScaler" / "amd_fidelityfx_upscaler_dx12.dll").write_bytes(b"\x01\x02")
     return root
 
@@ -60,6 +71,35 @@ class PackageTests(unittest.TestCase):
         self.assertIn("amd-presr", info["fork_version"])
         with self.assertRaises(RuntimeError):
             helper.validate_package(f.package, version_reader=lambda _p: ("OptiScaler", "10.0.0-dev (792f2f1)"))
+
+    def test_sha256sums_accepts_matching_lfs_pointer(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        write_sums(f.package)
+        info = helper.validate_package(f.package, version_reader=fake_fork)
+        self.assertTrue(info["sha256sums_verified"])
+        self.assertEqual(info["sha256sums_warnings"], [])
+        self.assertIsNone(info["weights"])
+
+    def test_sha256sums_rejects_mismatched_lfs_pointer(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        write_sums(f.package, weights_hash="0" * 64)
+        with self.assertRaises(RuntimeError) as raised:
+            helper.validate_package(f.package, version_reader=fake_fork)
+        self.assertIn("dlssnr_on_amd_weights.bin", str(raised.exception))
+
+    def test_sha256sums_stale_doc_checksum_is_a_warning(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        (f.package / "LEIA-ME-AMD.md").write_text("edited after the checksums were generated\n", encoding="utf-8")
+        write_sums(f.package, extra="0" * 64 + " *LEIA-ME-AMD.md\n")
+        info = helper.validate_package(f.package, version_reader=fake_fork)
+        self.assertTrue(info["sha256sums_verified"])
+        self.assertEqual(info["sha256sums_warnings"], ["LEIA-ME-AMD.md"])
+        (f.package / "OptiScaler.ini").write_text("tampered\n", encoding="utf-8")
+        with self.assertRaises(RuntimeError):
+            helper.validate_package(f.package, version_reader=fake_fork)
 
     def test_weights_detection(self):
         f = Fixture()

@@ -85,6 +85,28 @@ internal static class OptiScalerTests
             catch (InvalidOperationException error) { Check(error.Message.Contains("dlssnr_amd_pass1.dll"), "marker failure must name pass 1"); }
         });
 
+        await run("SHA256SUMS mismatch on a non-installed file is a warning, not a failure", async () =>
+        {
+            using var temp = new OptiTemp();
+            var root = MakePackage(temp.Path, layout: "package", withSums: true);
+            await File.WriteAllTextAsync(Path.Combine(root, "LEIA-ME-AMD.md"), "edited after the checksums were generated\n");
+            await File.AppendAllTextAsync(Path.Combine(root, "SHA256SUMS.txt"), new string('0', 64) + " *LEIA-ME-AMD.md\n");
+            var package = OptiScalerPackageService.Validate(root, FakeFork);
+            Check(package.Sha256SumsVerified, "installed files still verify");
+            Check(package.Sha256SumsWarnings is { Count: 1 } && package.Sha256SumsWarnings[0] == "LEIA-ME-AMD.md", "stale doc checksum must be reported as a warning");
+            Check(package.Summary.Contains("stale checksum"), "summary mentions the warning");
+        });
+
+        await run("SHA256SUMS rejects an LFS pointer whose oid differs", async () =>
+        {
+            using var temp = new OptiTemp();
+            var root = MakePackage(temp.Path, layout: "package", withSums: true);
+            var pointer = Path.Combine(root, "dlssnr_on_amd_weights.bin");
+            await File.WriteAllTextAsync(pointer, $"version https://git-lfs.github.com/spec/v1\noid sha256:{new string('0', 64)}\nsize 147689451\n");
+            try { OptiScalerPackageService.Validate(root, FakeFork); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("dlssnr_on_amd_weights.bin"), "mismatch must name dlssnr_on_amd_weights.bin"); }
+        });
+
         await run("Weights detection rejects LFS pointers and small files", async () =>
         {
             using var temp = new OptiTemp();
@@ -592,16 +614,19 @@ internal static class OptiScalerTests
         WritePe(Path.Combine(root, "OptiScaler.dll"));
         for (var i = 1; i <= 3; i++) WritePe(Path.Combine(root, $"dlssnr_amd_pass{i}.dll"), "dlssnr_amd");
         File.WriteAllText(Path.Combine(root, "OptiScaler.ini"), "[Upscalers]\nDx12Upscaler=auto\n\n[DlssNr]\nEnabled=auto\n");
-        File.WriteAllText(Path.Combine(root, "dlssnr_on_amd_weights.bin"), "version https://git-lfs.github.com/spec/v1\noid sha256:6bf8\nsize 147689451\n");
+        const string weightsPointerOid = "6bf8dc931ef3ccffe18c82de26ab374156e7f19539ffcf8eabaa25dca5cf15ab";
+        File.WriteAllText(Path.Combine(root, "dlssnr_on_amd_weights.bin"), $"version https://git-lfs.github.com/spec/v1\noid sha256:{weightsPointerOid}\nsize 147689451\n");
         File.WriteAllBytes(Path.Combine(root, "OptiScaler", "amd_fidelityfx_upscaler_dx12.dll"), [1, 2, 3]);
         File.WriteAllBytes(Path.Combine(root, "OptiScaler", "libxess.dll"), [4, 5, 6]);
         if (withSums)
         {
             var lines = new List<string>();
-            foreach (var relative in new[] { "OptiScaler.dll", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "OptiScaler.ini", "OptiScaler\\amd_fidelityfx_upscaler_dx12.dll", "OptiScaler\\libxess.dll", "MISSING_OPTIONAL.txt" })
+            foreach (var relative in new[] { "OptiScaler.dll", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "OptiScaler.ini", "dlssnr_on_amd_weights.bin", "OptiScaler\\amd_fidelityfx_upscaler_dx12.dll", "OptiScaler\\libxess.dll", "MISSING_OPTIONAL.txt" })
             {
                 var full = Path.Combine(root, relative);
-                var hash = File.Exists(full) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(full))) : new string('0', 64);
+                var hash = relative == "dlssnr_on_amd_weights.bin"
+                    ? weightsPointerOid
+                    : (File.Exists(full) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(full))) : new string('0', 64));
                 lines.Add($"{hash} *{relative}");
             }
             File.WriteAllLines(Path.Combine(root, "SHA256SUMS.txt"), lines);

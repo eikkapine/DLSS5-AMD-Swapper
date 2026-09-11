@@ -118,6 +118,26 @@ def is_real_weights(path: Path) -> bool:
         return not stream.read(32).startswith(b"version https://git-lfs")
 
 
+def read_lfs_pointer_oid(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        with path.open("rb") as stream:
+            chunk = stream.read(4096)
+        if not chunk.startswith(b"version https://git-lfs"):
+            return None
+        text = chunk.decode("utf-8", errors="replace")
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if line.lower().startswith("oid sha256:"):
+                candidate = line[len("oid sha256:"):].strip()
+                if len(candidate) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in candidate):
+                    return candidate.lower()
+        return None
+    except OSError:
+        return None
+
+
 def contains_marker(path: Path, marker: bytes) -> bool:
     carry = b""
     with path.open("rb") as stream:
@@ -223,6 +243,7 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
             if path.is_file():
                 record(path)
     sums_verified = False
+    sums_warnings: list[str] = []
     if sums.is_file():
         for relative, expected in parse_sha256sums(sums):
             full = (root / relative).resolve()
@@ -230,9 +251,19 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
                 raise RuntimeError(f"SHA256SUMS.txt lists a path outside the package: {relative}")
             if not full.is_file():
                 continue
-            actual = files.get(str(full.relative_to(root)), {}).get("sha256") or sha256(full)
-            if actual != expected:
+            oid = read_lfs_pointer_oid(full)
+            if oid is not None:
+                if oid != expected.lower():
+                    raise RuntimeError(f"SHA256SUMS.txt does not match {relative} (LFS pointer references a different object). Re-download the package before installing")
+                continue
+            relative_key = str(full.relative_to(root))
+            actual = files.get(relative_key, {}).get("sha256") or sha256(full)
+            if actual == expected:
+                continue
+            # Only files the helper installs must match exactly; a stale checksum on a readme or script is a warning.
+            if relative_key in files or relative_key.lower() == OPTI_WEIGHTS:
                 raise RuntimeError(f"SHA256SUMS.txt does not match {relative}. Re-download the package before installing")
+            sums_warnings.append(relative)
         sums_verified = True
     weights = root / OPTI_WEIGHTS
     return {
@@ -247,6 +278,7 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
         "fork_version": version,
         "files": files,
         "sha256sums_verified": sums_verified,
+        "sha256sums_warnings": sums_warnings,
     }
 
 

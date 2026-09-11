@@ -18,7 +18,8 @@ public sealed record OptiScalerPackage(
     string ForkVersion,
     IReadOnlyDictionary<string, FileState> Files,
     bool Sha256SumsVerified,
-    string Layout)
+    string Layout,
+    IReadOnlyList<string>? Sha256SumsWarnings = null)
 {
     public const string LayoutPackage = "package";
     public const string LayoutVodkaman = "vodkaman";
@@ -26,5 +27,6 @@ public sealed record OptiScalerPackage(
     public string Summary =>
         $"{ForkVersion} · {Layout} layout · {PassDllPaths.Count} pass DLL(s)" +
         (Sha256SumsPath is null ? " · no SHA256SUMS" : Sha256SumsVerified ? " · SHA256SUMS verified" : " · SHA256SUMS mismatch") +
+        (Sha256SumsWarnings is { Count: > 0 } ? $" · {Sha256SumsWarnings.Count} stale checksum(s) on non-installed files" : string.Empty) +
         (EnablerDllPath is null ? string.Empty : " · enabler present");
 }
