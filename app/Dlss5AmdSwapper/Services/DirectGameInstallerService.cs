@@ -38,7 +38,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             var nrMeta = await ValidateNrDllAsync(nrSource, cancellationToken);
             var folder = game.DirectoryPath;
             var existingManifest = FindManifest(game);
-            if (existingManifest is not null && ManagedManifest.ReadRoute(existingManifest) != InstallRoute.PostFsrRuntime)
+            if (existingManifest is not null && ManagedManifest.ReadRoute(existingManifest) == InstallRoute.OptiScalerPreSr)
                 throw new InvalidOperationException("This game is managed by the OptiScaler pre-SR route. Restore it before installing the post-FSR runtime.");
             if (update && existingManifest is null) throw new InvalidOperationException("Update requires an existing managed install.");
             if (!update && existingManifest is not null) throw new InvalidOperationException("This game already has a managed install. Use Update instead.");
@@ -167,7 +167,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         {
         if (game.Running) throw new InvalidOperationException("Close the game before restoring its files.");
         var manifestPath = FindManifest(game) ?? throw new InvalidOperationException("No managed direct-game install was found.");
-        if (ManagedManifest.ReadRoute(manifestPath) != InstallRoute.PostFsrRuntime)
+        if (ManagedManifest.ReadRoute(manifestPath) == InstallRoute.OptiScalerPreSr)
             throw new InvalidOperationException("This game is managed by the OptiScaler pre-SR route. Use its Restore.");
         var manifest = await ReadManifestAsync(manifestPath, cancellationToken) ?? throw new InvalidOperationException("The managed install manifest could not be read.");
         var removed = new List<string>();

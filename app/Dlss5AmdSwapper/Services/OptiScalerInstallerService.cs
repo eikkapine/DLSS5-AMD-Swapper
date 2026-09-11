@@ -55,7 +55,9 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             var dependencyRelatives = package.DependencyFolder is null ? [] : Directory.EnumerateFiles(package.DependencyFolder, "*", SearchOption.AllDirectories)
                 .Select(file => Path.Combine(OptiScalerPackageService.DependencyFolderName, Path.GetRelativePath(package.DependencyFolder, file))).ToArray();
             var enablerRelative = Path.Combine(OptiScalerPackageService.DependencyFolderName, OptiScalerPackageService.EnablerName);
-            var managed = ProxyNames.Concat(RootManagedNames).Concat(dependencyRelatives).Append(enablerRelative).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var managed = ProxyNames.Concat(RootManagedNames).Concat(dependencyRelatives).Append(enablerRelative)
+                .Concat(previousManifest?.After.Keys ?? Enumerable.Empty<string>())
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var before = await SnapshotAsync(folder, managed, cancellationToken);
 
             if (!update)
@@ -67,20 +69,23 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                 throw new InvalidOperationException("Update must keep the proxy name recorded in the manifest.");
 
             var backupRoot = Path.Combine(Path.GetTempPath(), "dlss5-amd-swapper", Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(backupRoot);
-            foreach (var relative in before.Keys)
-            {
-                var target = Path.Combine(backupRoot, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(Path.Combine(folder, relative), target, true);
-            }
-            var previousManifestBytes = File.Exists(game.ManifestPath) ? await File.ReadAllBytesAsync(game.ManifestPath, cancellationToken) : null;
+            byte[]? previousManifestBytes = null;
+            var originalBefore = previousManifest?.Before ?? before;
 
             var written = new List<string>();
             var preexisting = new List<string>();
             var keepBackup = false;
             try
             {
+                Directory.CreateDirectory(backupRoot);
+                foreach (var relative in before.Keys)
+                {
+                    var target = Path.Combine(backupRoot, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    File.Copy(Path.Combine(folder, relative), target, true);
+                }
+                previousManifestBytes = File.Exists(game.ManifestPath) ? await File.ReadAllBytesAsync(game.ManifestPath, cancellationToken) : null;
+
                 async Task CopyVerifiedAsync(string source, string relative)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -93,8 +98,11 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                 }
 
                 await CopyVerifiedAsync(package.OptiScalerDllPath, proxyName);
-                for (var index = 0; index < OptiScalerPackageService.PassNames.Length; index++)
-                    await CopyVerifiedAsync(index < package.PassDllPaths.Count ? package.PassDllPaths[index] : package.PassDllPaths[0], OptiScalerPackageService.PassNames[index]);
+                foreach (var passName in OptiScalerPackageService.PassNames)
+                {
+                    var match = package.PassDllPaths.FirstOrDefault(path => string.Equals(Path.GetFileName(path), passName, StringComparison.OrdinalIgnoreCase));
+                    await CopyVerifiedAsync(match ?? package.PassDllPaths[0], passName);
+                }
                 await CopyVerifiedAsync(weights.Path, OptiScalerPackageService.WeightsName);
 
                 foreach (var relative in dependencyRelatives)
@@ -102,7 +110,10 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     var source = Path.Combine(package.Root, relative);
                     if (before.TryGetValue(relative, out var existing)
                         && existing.Sha256.Equals(await DirectGameInstallerService.Sha256Async(source, cancellationToken), StringComparison.OrdinalIgnoreCase))
-                    { preexisting.Add(relative); continue; }
+                    {
+                        if (originalBefore.ContainsKey(relative)) preexisting.Add(relative);
+                        continue;
+                    }
                     await CopyVerifiedAsync(source, relative);
                 }
                 var enablerAvailable = package.EnablerDllPath is not null;
@@ -126,7 +137,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     Weights = new WeightsState { Source = weights.Path, Size = weights.Size, Sha256 = weights.Sha256 },
                     Compatibility = new OptiCompatibility { X64 = compatibility.X64, FsrMarkers = compatibility.FsrMarkers.ToArray(), Dx12Evidence = compatibility.Dx12Evidence.ToArray(), AntiCheatMarkers = compatibility.AntiCheatMarkers.ToArray() },
                     PreviousRoute = previousRemoval is null ? previousManifest?.PreviousRoute : new PreviousRouteState { Route = InstallRoutes.PostFsr, Removed = previousRemoval.Removed.ToArray(), Preserved = previousRemoval.Preserved.ToArray() },
-                    Before = previousManifest?.Before ?? before,
+                    Before = originalBefore,
                     After = after,
                     PreexistingDependencies = (previousManifest?.PreexistingDependencies ?? []).Concat(preexisting).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                     InstalledProxyNames = [proxyName]
@@ -186,7 +197,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             else if (File.Exists(target)) File.Delete(target);
         }
         var dependencyFolder = Path.Combine(folder, OptiScalerPackageService.DependencyFolderName);
-        if (Directory.Exists(dependencyFolder) && !Directory.EnumerateFileSystemEntries(dependencyFolder, "*", SearchOption.AllDirectories).Any()) Directory.Delete(dependencyFolder, true);
+        if (Directory.Exists(dependencyFolder) && !Directory.EnumerateFiles(dependencyFolder, "*", SearchOption.AllDirectories).Any()) Directory.Delete(dependencyFolder, true);
     }
 
     internal static async Task<OptiScalerManifest?> ReadManifestAsync(string path, CancellationToken cancellationToken)

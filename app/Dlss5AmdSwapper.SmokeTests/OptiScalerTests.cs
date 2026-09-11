@@ -235,6 +235,11 @@ internal static class OptiScalerTests
             var updated = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true);
             Check(updated.Preset == OptiScalerPreset.Performance, "update preset");
             Check(IniDocument.Load(Path.Combine(f.GameDir, "OptiScaler.ini")).Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "update rewrote INI");
+
+            using var updatedDoc = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(f.Game.ManifestPath));
+            var preexistingAfterUpdate = updatedDoc.RootElement.GetProperty("preexisting_dependencies").EnumerateArray().Select(e => e.GetString()).ToArray();
+            Check(preexistingAfterUpdate.Contains(@"OptiScaler\libxess.dll"), "update must keep tracking the originally preexisting dependency");
+            Check(!preexistingAfterUpdate.Contains(@"OptiScaler\amd_fidelityfx_upscaler_dx12.dll"), "update must not relabel an app-installed dependency as preexisting");
         });
 
         await run("Pre-SR install refuses unmanaged proxies, anti-cheat and running games", async () =>
@@ -270,6 +275,31 @@ internal static class OptiScalerTests
             Check(!File.Exists(Path.Combine(f.GameDir, "OptiScaler", "libxess.dll")), "dependency copies must be rolled back");
             Check(!File.Exists(f.Game.ManifestPath), "manifest must not remain");
             Check(!f.Game.Busy, "busy flag cleared");
+        });
+
+        await run("Pre-SR failed update restores the previous install and manifest", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            var manifestBytes = await File.ReadAllBytesAsync(f.Game.ManifestPath);
+            var proxyPath = Path.Combine(f.GameDir, "dxgi.dll");
+            var proxyHash = await DirectGameInstallerService.Sha256Async(proxyPath);
+
+            // Swap the INI path for a directory so the update's snapshot still succeeds but the final write fails.
+            var iniPath = Path.Combine(f.GameDir, "OptiScaler.ini");
+            File.Delete(iniPath);
+            Directory.CreateDirectory(iniPath);
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true); throw new InvalidOperationException("accepted"); }
+            catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
+            catch (Exception) { }
+            Directory.Delete(iniPath);
+
+            Check((await File.ReadAllBytesAsync(f.Game.ManifestPath)).SequenceEqual(manifestBytes), "manifest must be restored byte-for-byte after a failed update");
+            Check(File.Exists(proxyPath) && await DirectGameInstallerService.Sha256Async(proxyPath) == proxyHash, "proxy must be restored to its pre-update content");
+            foreach (var name in new[] { "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin" })
+                Check(File.Exists(Path.Combine(f.GameDir, name)), $"missing {name} after failed-update rollback");
+            Check(!f.Game.Busy, "busy flag cleared after failed update");
         });
 
         await run("Pre-SR install removes a managed post-FSR route first and records it", async () =>
