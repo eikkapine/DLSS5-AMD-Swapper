@@ -68,6 +68,18 @@ ANTI_CHEAT_MARKERS = {
     "blackcipher",
 }
 
+ROUTE_POST_FSR = "amd-fsr-direct"
+ROUTE_OPTISCALER = "amd-optiscaler-presr"
+OPTI_PROXY_NAMES = ("dxgi.dll", "version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll")
+OPTI_PASS_NAMES = ("dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll")
+OPTI_ROOT_MANAGED = ("OptiScaler.ini", "OptiScaler.log", "amd_presr.log", *OPTI_PASS_NAMES, "dlssnr_on_amd_weights.bin")
+OPTI_WEIGHTS = "dlssnr_on_amd_weights.bin"
+OPTI_ENABLER = "dlss-enabler-headless.dll"
+OPTI_DEPENDENCY_FOLDER = "OptiScaler"
+OPTI_REQUIRED_UPSCALER = "amd_fidelityfx_upscaler_dx12.dll"
+OPTI_FORK_MARKER = "amd-presr"
+OPTI_PASS_MARKER = b"dlssnr_amd"
+
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -97,6 +109,209 @@ def file_state(path: Path) -> dict[str, Any] | None:
         return None
     stat = path.stat()
     return {"size": stat.st_size, "sha256": sha256(path)}
+
+
+def is_real_weights(path: Path) -> bool:
+    if not path.is_file() or path.stat().st_size <= 1024 * 1024:
+        return False
+    with path.open("rb") as stream:
+        return not stream.read(32).startswith(b"version https://git-lfs")
+
+
+def contains_marker(path: Path, marker: bytes) -> bool:
+    carry = b""
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(4 * 1024 * 1024)
+            if not chunk:
+                return False
+            data = carry + chunk
+            if marker in data:
+                return True
+            carry = data[-(len(marker) - 1):] if len(marker) > 1 else b""
+
+
+def pe_product_version(path: Path) -> tuple[str | None, str | None]:
+    """Read ProductName/ProductVersion from the VS_VERSIONINFO string table without Win32 APIs."""
+    data = path.read_bytes()
+    marker = "VS_VERSION_INFO".encode("utf-16le")
+    start = data.find(marker)
+    if start < 0:
+        return None, None
+    block = data[start:start + 8192]
+
+    def read_value(key: str) -> str | None:
+        needle = key.encode("utf-16le") + b"\x00\x00"
+        index = block.find(needle)
+        if index < 0:
+            return None
+        cursor = index + len(needle)
+        while cursor < len(block) and block[cursor:cursor + 2] == b"\x00\x00":
+            cursor += 2
+        end = block.find(b"\x00\x00", cursor)
+        if end < 0:
+            return None
+        while end % 2:
+            end = block.find(b"\x00\x00", end + 1)
+            if end < 0:
+                return None
+        return block[cursor:end].decode("utf-16le", errors="replace").strip("\x00") or None
+
+    return read_value("ProductName"), read_value("ProductVersion")
+
+
+def parse_sha256sums(path: Path) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if len(line) < 66 or not all(ch in "0123456789abcdefABCDEF" for ch in line[:64]):
+            continue
+        entries.append((line[64:].lstrip(" *").replace("/", "\\"), line[:64].lower()))
+    return entries
+
+
+def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
+    version_reader = version_reader or pe_product_version
+    root = root.resolve()
+    if not root.is_dir():
+        raise RuntimeError("The OptiScaler package folder does not exist")
+    if (root / "OptiScaler.dll").is_file():
+        fork, layout = root / "OptiScaler.dll", "package"
+    elif (root / "dxgi.dll").is_file():
+        fork, layout = root / "dxgi.dll", "vodkaman"
+    else:
+        raise RuntimeError("No OptiScaler.dll or dxgi.dll was found in the package folder")
+    if pe_machine(fork) != 0x8664:
+        raise RuntimeError(f"{fork.name} is not a 64-bit Windows PE file")
+    product, version = version_reader(fork)
+    if (product or "").lower() != "optiscaler":
+        raise RuntimeError(f"{fork.name} does not identify itself as OptiScaler")
+    if not version or OPTI_FORK_MARKER not in version.lower():
+        raise RuntimeError("This OptiScaler build is not the AMD pre-SR fork; the pre-SR route needs a build whose version contains amd-presr")
+
+    passes: list[Path] = []
+    for name in OPTI_PASS_NAMES:
+        candidate = root / name
+        if not candidate.is_file():
+            if not passes:
+                raise RuntimeError("dlssnr_amd_pass1.dll was not found in the package folder")
+            continue
+        if pe_machine(candidate) != 0x8664:
+            raise RuntimeError(f"{name} is not a 64-bit Windows PE file")
+        if not contains_marker(candidate, OPTI_PASS_MARKER):
+            raise RuntimeError(f"{name} does not look like a DLSS-NR-on-AMD runtime (marker missing)")
+        passes.append(candidate)
+
+    files: dict[str, dict[str, Any]] = {}
+
+    def record(path: Path) -> None:
+        files[str(path.relative_to(root))] = file_state(path)
+
+    record(fork)
+    for item in passes:
+        record(item)
+    ini = root / "OptiScaler.ini"
+    enabler = root / OPTI_ENABLER
+    deps = root / OPTI_DEPENDENCY_FOLDER
+    sums = root / "SHA256SUMS.txt"
+    if ini.is_file():
+        record(ini)
+    if enabler.is_file():
+        record(enabler)
+    if deps.is_dir():
+        for path in sorted(deps.rglob("*")):
+            if path.is_file():
+                record(path)
+    sums_verified = False
+    if sums.is_file():
+        for relative, expected in parse_sha256sums(sums):
+            full = (root / relative).resolve()
+            if root not in full.parents:
+                raise RuntimeError(f"SHA256SUMS.txt lists a path outside the package: {relative}")
+            if not full.is_file():
+                continue
+            actual = files.get(str(full.relative_to(root)), {}).get("sha256") or sha256(full)
+            if actual != expected:
+                raise RuntimeError(f"SHA256SUMS.txt does not match {relative}. Re-download the package before installing")
+        sums_verified = True
+    weights = root / OPTI_WEIGHTS
+    return {
+        "root": str(root),
+        "layout": layout,
+        "optiscaler_dll": str(fork),
+        "pass_dlls": [str(item) for item in passes],
+        "ini": str(ini) if ini.is_file() else None,
+        "dependency_folder": str(deps) if deps.is_dir() else None,
+        "enabler": str(enabler) if enabler.is_file() else None,
+        "weights": str(weights) if is_real_weights(weights) else None,
+        "fork_version": version,
+        "files": files,
+        "sha256sums_verified": sums_verified,
+    }
+
+
+def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless: Path | None) -> dict[str, Any] | None:
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(configured)
+    if lossless:
+        candidates.append(lossless / "nr-bridge" / "runtime" / OPTI_WEIGHTS)
+        candidates.append(lossless / OPTI_WEIGHTS)
+    candidates.extend(directory / OPTI_WEIGHTS for directory in game_dirs)
+    chosen: dict[str, Any] | None = None
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve()).lower()
+        if key in seen or not is_real_weights(candidate):
+            continue
+        seen.add(key)
+        state = {"source": str(candidate.resolve()), **file_state(candidate)}
+        if chosen is None:
+            chosen = state
+        elif chosen["sha256"] != state["sha256"]:
+            raise RuntimeError(f"Two local weights files differ: {chosen['source']} and {state['source']}")
+    return chosen
+
+
+MINIMAL_INI_HEADER = "; Written by DLSS5 AMD Swapper. Unlisted OptiScaler keys keep their defaults.\n; Open the in-game OptiScaler menu (Insert) to change anything else.\n"
+
+
+def _ini_set(lines: list[str], section: str, key: str, value: str) -> None:
+    section_index = next((i for i, line in enumerate(lines) if line.strip().lower() == f"[{section.lower()}]"), -1)
+    if section_index < 0:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend([f"[{section}]", f"{key}={value}"])
+        return
+    end = len(lines)
+    for i in range(section_index + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            end = i
+            break
+        if "=" in lines[i] and lines[i].split("=", 1)[0].strip().lower() == key.lower():
+            lines[i] = f"{key}={value}"
+            return
+    lines.insert(end, f"{key}={value}")
+
+
+def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool) -> str:
+    lines = (base_text if base_text and base_text.strip() else MINIMAL_INI_HEADER).replace("\r\n", "\n").split("\n")
+    for section, key, value in (
+        ("Upscalers", "Dx12Upscaler", "ffx"),
+        ("DlssNr", "Enabled", "true"), ("DlssNr", "RunBeforeSR", "true"), ("DlssNr", "Passes", "1"),
+        ("DlssNr", "LocalTone", "0"), ("DlssNr", "LocalStructure", "1"), ("DlssNr", "SkinStructure", "1"), ("DlssNr", "ApplyAfterRR", "false"),
+        ("Log", "LogToFile", "true"), ("Log", "LogLevel", "2"),
+    ):
+        _ini_set(lines, section, key, value)
+    if preset == "performance":
+        for section, key, value in (
+            ("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true"), ("UpscaleRatio", "UpscaleRatioOverrideValue", "3.0"),
+            ("FrameGen", "Enabled", "true"), ("FrameGen", "FGInput", "nvngxfg"), ("FrameGen", "FGNvngxReplacement", "combo" if enabler else "ffx"),
+            ("DLSSG", "InterpolationCount", "2"),
+        ):
+            _ini_set(lines, section, key, value)
+    return "\n".join(lines).rstrip("\n") + "\n"
 
 
 def scan_tree(root: Path, max_depth: int = 4) -> tuple[list[str], list[str]]:
@@ -332,6 +547,8 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
     folder = game.parent
     manifest_path = folder / MANIFEST_NAME
     existing_manifest_path = find_manifest(folder)
+    if existing_manifest_path is not None and manifest_route(folder) == ROUTE_OPTISCALER:
+        raise RuntimeError("This game is managed by the OptiScaler pre-SR route. Run --remove first")
     if args.update and existing_manifest_path is None:
         raise RuntimeError("--update requires an existing managed direct-game manifest")
     if existing_manifest_path is not None and not args.update:
@@ -486,6 +703,225 @@ def remove(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _read_manifest(folder: Path) -> tuple[Path | None, dict[str, Any] | None]:
+    path = find_manifest(folder)
+    if path is None:
+        return None, None
+    try:
+        return path, json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return path, None
+
+
+def manifest_route(folder: Path) -> str | None:
+    path, manifest = _read_manifest(folder)
+    if path is None or manifest is None:
+        return None
+    return manifest.get("route") or ROUTE_POST_FSR
+
+
+def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[str, Any]:
+    game = Path(args.game).resolve()
+    info = check_game(game)
+    if not info["x64"]:
+        raise RuntimeError("The pre-SR route supports 64-bit games only")
+    if info["anti_cheat_markers"]:
+        raise RuntimeError("Anti-cheat markers were found. Direct-game installation is blocked for this target")
+    if not info["fsr_markers"] and not args.force:
+        raise RuntimeError("No FSR runtime marker was found near the game executable")
+    if not info["dx12_evidence"] and not args.force:
+        raise RuntimeError("No DirectX 12 evidence was found near the game executable")
+    if not args.package or not args.weights:
+        raise RuntimeError("--route optiscaler-presr requires --package and --weights")
+    package = validate_package(Path(args.package), version_reader)
+    weights = Path(args.weights).resolve()
+    if not is_real_weights(weights):
+        raise RuntimeError("--weights must point to a generated dlssnr_on_amd_weights.bin")
+    proxy_name = (args.proxy_name or "dxgi.dll").lower()
+    if proxy_name not in OPTI_PROXY_NAMES:
+        raise RuntimeError("Unsupported --proxy-name")
+    folder = game.parent
+    package_upscaler = Path(package["dependency_folder"]) / OPTI_REQUIRED_UPSCALER if package["dependency_folder"] else None
+    if not (package_upscaler and package_upscaler.is_file()) and not (folder / OPTI_REQUIRED_UPSCALER).is_file():
+        raise RuntimeError(f"{OPTI_REQUIRED_UPSCALER} is missing from both the package and the game folder")
+
+    route = manifest_route(folder)
+    previous_manifest: dict[str, Any] | None = None
+    if route == ROUTE_POST_FSR:
+        raise RuntimeError("This game has the post-FSR route installed. Run --remove first, then install the pre-SR route")
+    if route == ROUTE_OPTISCALER and not args.update:
+        raise RuntimeError("This game already has the pre-SR route. Use --update")
+    if route == ROUTE_OPTISCALER:
+        previous_manifest = _read_manifest(folder)[1]
+    if route is None and args.update:
+        raise RuntimeError("--update requires an existing managed pre-SR manifest")
+
+    dependency_relatives: list[str] = []
+    if package["dependency_folder"]:
+        deps = Path(package["dependency_folder"])
+        dependency_relatives = [str(Path(OPTI_DEPENDENCY_FOLDER) / path.relative_to(deps)) for path in sorted(deps.rglob("*")) if path.is_file()]
+    enabler_relative = str(Path(OPTI_DEPENDENCY_FOLDER) / OPTI_ENABLER)
+    previous_after_keys = list(previous_manifest.get("after", {}).keys()) if previous_manifest else []
+    managed = list(dict.fromkeys([*OPTI_PROXY_NAMES, *OPTI_ROOT_MANAGED, *dependency_relatives, enabler_relative, *previous_after_keys]))
+
+    def snapshot() -> dict[str, Any]:
+        return {name: state for name in managed if (state := file_state(folder / name)) is not None}
+
+    before = snapshot()
+    if not args.update:
+        unmanaged = [name for name in OPTI_PROXY_NAMES if name in before]
+        if unmanaged:
+            raise RuntimeError("A proxy DLL already exists in the game folder and is not managed by this helper: " + ", ".join(unmanaged))
+    elif previous_manifest and proxy_name not in [p.lower() for p in previous_manifest.get("installed_proxy_names", [])]:
+        raise RuntimeError("Update must keep the proxy name recorded in the manifest")
+
+    manifest_path = folder / MANIFEST_NAME
+    previous_bytes = manifest_path.read_bytes() if manifest_path.is_file() else None
+
+    with tempfile.TemporaryDirectory(prefix="dlss5-amd-swapper-presr-backup-") as temp_name:
+        backup = Path(temp_name)
+        for name in before:
+            target = backup / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(folder / name, target)
+        written: list[str] = []
+        preexisting: list[str] = []
+        original_before = previous_manifest.get("before") if previous_manifest and "before" in previous_manifest else before
+        try:
+            def copy_verified(source: Path, relative: str) -> None:
+                destination = folder / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                if sha256(source) != sha256(destination):
+                    raise RuntimeError(f"Copy verification failed for {relative}")
+                written.append(relative)
+
+            copy_verified(Path(package["optiscaler_dll"]), proxy_name)
+            for index, name in enumerate(OPTI_PASS_NAMES):
+                source = package["pass_dlls"][index] if index < len(package["pass_dlls"]) else package["pass_dlls"][0]
+                copy_verified(Path(source), name)
+            copy_verified(weights, OPTI_WEIGHTS)
+            for relative in dependency_relatives:
+                source = Path(package["root"]) / relative
+                if relative in before and before[relative]["sha256"] == sha256(source):
+                    if relative in original_before:
+                        preexisting.append(relative)
+                    continue
+                copy_verified(source, relative)
+            enabler_available = package["enabler"] is not None
+            if args.preset == "performance" and enabler_available:
+                copy_verified(Path(package["enabler"]), enabler_relative)
+            base_text = Path(package["ini"]).read_text(encoding="utf-8", errors="replace") if package["ini"] else None
+            (folder / "OptiScaler.ini").write_text(build_optiscaler_ini(base_text, args.preset, enabler_available), encoding="utf-8")
+            written.append("OptiScaler.ini")
+
+            after = snapshot()
+            manifest = {
+                "schema_version": 3,
+                "created_unix": int(time.time()),
+                "route": ROUTE_OPTISCALER,
+                "game_exe": game.name,
+                "proxy_name": proxy_name,
+                "preset": args.preset,
+                "package": {
+                    "root": package["root"], "layout": package["layout"], "fork_version": package["fork_version"],
+                    "sha256sums_verified": package["sha256sums_verified"], "files": package["files"],
+                },
+                "weights": {"source": str(weights), **file_state(weights)},
+                "compatibility": {"x64": info["x64"], "fsr_markers": info["fsr_markers"], "dx12_evidence": info["dx12_evidence"], "anti_cheat_markers": info["anti_cheat_markers"]},
+                "previous_route": previous_manifest.get("previous_route") if previous_manifest else None,
+                "before": original_before,
+                "after": after,
+                "preexisting_dependencies": sorted(set((previous_manifest or {}).get("preexisting_dependencies", [])) | set(preexisting)),
+                "installed_proxy_names": [proxy_name],
+            }
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            legacy = folder / LEGACY_MANIFEST_NAME
+            if legacy.is_file():
+                legacy.unlink()
+            return manifest
+        except Exception:
+            for name in managed:
+                target = folder / name
+                if name in before:
+                    source = backup / name
+                    if source.is_file():
+                        shutil.copy2(source, target)
+                elif target.is_file():
+                    target.unlink()
+            deps_dir = folder / OPTI_DEPENDENCY_FOLDER
+            if deps_dir.is_dir() and not any(path.is_file() for path in deps_dir.rglob("*")):
+                shutil.rmtree(deps_dir, ignore_errors=True)
+            if previous_bytes is not None:
+                manifest_path.write_bytes(previous_bytes)
+            elif manifest_path.exists():
+                manifest_path.unlink()
+            raise
+
+
+def remove_optiscaler(args: argparse.Namespace) -> dict[str, Any]:
+    folder = Path(args.game).resolve().parent
+    manifest_path, manifest = _read_manifest(folder)
+    if manifest_path is None or manifest is None or manifest.get("route") != ROUTE_OPTISCALER:
+        raise RuntimeError("No managed pre-SR manifest was found")
+    before = manifest.get("before", {})
+    after = manifest.get("after", {})
+    preexisting = set(manifest.get("preexisting_dependencies", []))
+    removed: list[str] = []
+    preserved: list[str] = []
+    for name in dict.fromkeys([*after.keys(), *manifest.get("installed_proxy_names", [])]):
+        path = folder / name
+        if name in before or name in preexisting:
+            preserved.append(name)
+            continue
+        if not path.is_file():
+            continue
+        if after.get(name) == file_state(path):
+            path.unlink()
+            removed.append(name)
+        else:
+            preserved.append(name)
+    deps_dir = folder / OPTI_DEPENDENCY_FOLDER
+    if deps_dir.is_dir() and not any(path.is_file() for path in deps_dir.rglob("*")):
+        shutil.rmtree(deps_dir, ignore_errors=True)
+    remaining = sorted(name for name in after if name not in before and name not in preexisting and (folder / name).is_file())
+    if not remaining:
+        manifest_path.unlink()
+    return {"removed": sorted(removed), "preserved": sorted(set(preserved)), "manifest_retained": bool(remaining), "remaining_managed_files": remaining}
+
+
+def summarize_presr(folder: Path) -> dict[str, Any]:
+    def read(name: str) -> tuple[str, str | None, int]:
+        path = folder / name
+        if not path.is_file():
+            return "", None, 0
+        raw = path.read_bytes()
+        return raw[-1024 * 1024:].decode("utf-8", errors="replace"), hashlib.sha256(raw).hexdigest(), len(raw)
+
+    presr, presr_hash, presr_bytes = read("amd_presr.log")
+    opti, opti_hash, opti_bytes = read("OptiScaler.log")
+    completed = [int(value) for value in re.findall(r"Completed AMD pre-SR passes=(\d+)", presr)]
+    running = re.findall(r"DLSS-NR running [^:]*: target (\d+x\d+), model (\d+x\d+)", opti)
+    costs = [(float(total), float(model)) for total, model in re.findall(r"DLSS-NR cost: ([\d.]+) ms total = ([\d.]+) ms model", opti)]
+    fault = re.compile(r"^(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|.*hash mismatch|dlssnr_on_amd_weights\.bin is required|.*LoadLibrary failed|AMD engine initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")
+    faults = [line.strip() for line in presr.splitlines() if fault.match(line.strip())]
+    adapter = re.search(r"^HIP adapter:\s*(.+)$", presr, re.M)
+    return {
+        "pre_sr_active": bool(completed or running),
+        "hip_adapter": adapter.group(1).strip() if adapter else None,
+        "passes_initialized": len(re.findall(r"Initialized independent AMD pass \d+", presr)),
+        "passes_completed": completed[-1] if completed else None,
+        "target_size": running[-1][0] if running else None,
+        "model_size": running[-1][1] if running else None,
+        "mean_total_ms": sum(cost[0] for cost in costs) / len(costs) if costs else None,
+        "mean_model_ms": sum(cost[1] for cost in costs) / len(costs) if costs else None,
+        "cost_samples": len(costs),
+        "last_fault": faults[-1] if faults else None,
+        "presr_log_sha256": presr_hash, "presr_log_bytes": presr_bytes,
+        "optiscaler_log_sha256": opti_hash, "optiscaler_log_bytes": opti_bytes,
+    }
+
+
 def summarize_runtime_log(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -612,7 +1048,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game", required=True, help="Path to the game's .exe")
     action = parser.add_mutually_exclusive_group(required=True)
@@ -621,22 +1057,39 @@ def main() -> int:
     action.add_argument("--update", action="store_true")
     action.add_argument("--remove", action="store_true")
     action.add_argument("--diagnose", action="store_true")
+    parser.add_argument("--route", choices=("post-fsr", "optiscaler-presr"), default="post-fsr")
     parser.add_argument("--upstream-setup", help="User-downloaded official dlssnr_on_amd_setup.exe")
     parser.add_argument("--nr-dll", help="User-supplied nvngx_dlssnr.dll")
+    parser.add_argument("--package", help="User-supplied OptiScaler AMD pre-SR package folder")
+    parser.add_argument("--weights", help="Locally generated dlssnr_on_amd_weights.bin")
+    parser.add_argument("--preset", choices=("quality", "performance"), default="quality")
+    parser.add_argument("--proxy-name", default="dxgi.dll")
+    parser.add_argument("--passes", type=int, choices=(1, 2, 3))
     parser.add_argument("--force", action="store_true", help="Override uncertain FSR/DX12 detection; anti-cheat remains blocked")
     parser.add_argument("--remove-model", action="store_true", help="Also remove a model DLL copied by this helper")
     parser.add_argument("--output", type=Path, help="Write JSON result/diagnostic to this path")
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
+
+def main() -> int:
+    args = parse_args()
     try:
+        folder = Path(args.game).resolve().parent
+        route = manifest_route(folder)
         if args.install or args.update:
-            if not args.upstream_setup or not args.nr_dll:
-                raise RuntimeError("--install/--update require --upstream-setup and --nr-dll")
-            result = install(args)
+            if args.route == "optiscaler-presr":
+                result = install_optiscaler(args)
+            else:
+                if not args.upstream_setup or not args.nr_dll:
+                    raise RuntimeError("--install/--update require --upstream-setup and --nr-dll")
+                result = install(args)
         elif args.remove:
-            result = remove(args)
+            result = remove_optiscaler(args) if route == ROUTE_OPTISCALER else remove(args)
         elif args.diagnose:
             result = diagnose(args)
+            if route == ROUTE_OPTISCALER:
+                result["route"] = ROUTE_OPTISCALER
+                result["pre_sr"] = summarize_presr(folder)
         else:
             result = check_game(Path(args.game))
         encoded = json.dumps(result, indent=2) + "\n"
