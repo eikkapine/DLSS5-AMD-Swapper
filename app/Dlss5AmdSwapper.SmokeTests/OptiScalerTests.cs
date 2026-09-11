@@ -192,6 +192,27 @@ internal static class OptiScalerTests
             }
             return Task.CompletedTask;
         });
+
+        await run("Preset INI writer patches a package INI in place and writes a minimal INI otherwise", () =>
+        {
+            var baseIni = "; comment stays\n[Upscalers]\nDx12Upscaler=auto\n\n[DlssNr]\nEnabled=auto\nPasses=auto\n\n[Log]\nLogToFile=auto\n";
+            var quality = IniDocument.FromText(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Quality, enablerAvailable: false));
+            Check(quality.Get("Upscalers", "Dx12Upscaler") == "ffx", "Dx12Upscaler");
+            Check(quality.Get("DlssNr", "Enabled") == "true" && quality.Get("DlssNr", "RunBeforeSR") == "true" && quality.Get("DlssNr", "Passes") == "1", "DlssNr core keys");
+            Check(quality.Get("DlssNr", "LocalTone") == "0" && quality.Get("DlssNr", "LocalStructure") == "1" && quality.Get("DlssNr", "SkinStructure") == "1" && quality.Get("DlssNr", "ApplyAfterRR") == "false", "DlssNr layer keys");
+            Check(quality.Get("Log", "LogToFile") == "true" && quality.Get("Log", "LogLevel") == "2", "Log keys");
+            Check(quality.Get("FrameGen", "Enabled") is null && quality.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") is null, "Quality must not touch FG or ratio");
+            Check(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Quality, false).StartsWith("; comment stays", StringComparison.Ordinal), "comments preserved");
+
+            var perf = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Performance, enablerAvailable: true));
+            Check(perf.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") == "true" && perf.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "ratio override");
+            Check(perf.Get("FrameGen", "Enabled") == "true" && perf.Get("FrameGen", "FGInput") == "nvngxfg" && perf.Get("FrameGen", "FGNvngxReplacement") == "combo", "FG combo");
+            Check(perf.Get("DLSSG", "InterpolationCount") == "2", "3x interpolation");
+            var perfNoEnabler = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Performance, enablerAvailable: false));
+            Check(perfNoEnabler.Get("FrameGen", "FGNvngxReplacement") == "ffx", "ffx without enabler");
+            Check(perfNoEnabler.Get("DlssNr", "RunBeforeSR") == "true", "minimal INI still carries DlssNr");
+            return Task.CompletedTask;
+        });
     }
 
     internal static void Check(bool condition, string message)

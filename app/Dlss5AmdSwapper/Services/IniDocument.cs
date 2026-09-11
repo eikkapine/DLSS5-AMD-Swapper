@@ -14,6 +14,11 @@ public sealed class IniDocument
         return new IniDocument(File.Exists(path) ? File.ReadAllLines(path).ToList() : []);
     }
 
+    public static IniDocument FromText(string text) =>
+        new(text.Replace("\r\n", "\n").Split('\n').ToList());
+
+    public string ToText() => string.Join('\n', _lines).TrimEnd('\n') + "\n";
+
     public string? Get(string section, string key)
     {
         var active = string.Empty;
