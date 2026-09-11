@@ -20,13 +20,13 @@ DLSS5 AMD Swapper
 └─ Lossless Scaling installer / status / layer control
 ```
 
-Manifests are stored as `.dlss5-amd-swapper.json` (schema 3) with a top-level `route` field indicating either `amd-direct-runtime` (the post-FSR route) or `amd-optiscaler-presr` (the OptiScaler pre-SR route). The manifest records exact before/after file hashes for reversible rollback and safe restore.
+Manifests are stored as `.dlss5-amd-swapper.json` (schema 3) with a top-level `route` field indicating either `amd-fsr-direct` (the post-FSR route) or `amd-optiscaler-presr` (the OptiScaler pre-SR route). The manifest records exact before/after file hashes for reversible rollback and safe restore.
 
 ## Direct-game AMD paths
 
 Direct Game supports two execution backends:
 
-### 1. Official post-FSR runtime (`amd-direct-runtime`)
+### 1. Official post-FSR runtime (`amd-fsr-direct`)
 
 ```text
 game render-resolution colour + motion + depth
@@ -60,7 +60,7 @@ game render-resolution colour + motion + depth
          Neural Rendering (pre-SR)
                     │
                     ▼
-         OptiScaler (FSR 4 / XeSS)
+         OptiScaler (FSR (ffx))
                     │
                     ▼
          [optional DLSS-G / FFX FG]

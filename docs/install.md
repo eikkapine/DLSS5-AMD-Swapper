@@ -33,14 +33,14 @@ For the currently tested upstream route, use **AMD Software: Adrenalin Edition 2
 
 ### Direct Game — OptiScaler pre-SR
 
-Use this alternative direct-game backend when you want to evaluate neural rendering before super-resolution (FSR/XeSS) upscaling rather than after it.
+Use this alternative direct-game backend when you want to evaluate neural rendering before super-resolution (FSR (ffx)) upscaling rather than after it.
 
 1. In **Settings**, specify your user-supplied `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder or zip. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package archives (cached under `%LOCALAPPDATA%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
 2. Specify your locally generated `dlssnr_on_amd_weights.bin`. The manager reuses locally generated weights from the bridge runtime folder, Lossless Scaling folder, or previously managed game folders; all copies must agree in SHA-256 hash. Git LFS pointer stubs and undersized files are rejected. The project never downloads or bundles package files or weights.
 3. Open **Game library**, select a compatible x64 DirectX 12 target, and click **Set up**.
 4. In the route selection dialog, choose **OptiScaler pre-SR**.
-5. Select **Quality** (pre-SR neural pass with FSR 4 upscaling) or **Performance** (pre-SR with a 3.0x ratio override and multi-frame generation).
-6. Click **Install**. The manager validates PE x64 binaries, verifies the `amd-presr` version string and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
+5. Select **Quality** (pre-SR neural pass, the game's own FSR ratio, no frame generation) or **Performance** (pre-SR with a 3.0x ratio override and 3x frame generation through OptiScaler).
+6. Click **Set up**. The manager validates PE x64 binaries, verifies the `amd-presr` version string and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
 7. Launch the game with FSR enabled. Press `Insert` to open the in-game OptiScaler menu.
 8. Use **Refresh evidence** in the manager to verify active passes, render and target dimensions, and execution times.
 

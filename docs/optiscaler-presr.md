@@ -6,7 +6,7 @@ The OptiScaler pre-SR route evaluates the neural rendering model before the supe
 
 In a standard post-upscale path, neural reconstruction runs on the full final display buffer. Evaluating a 2560x1440 native frame requires evaluating every pixel at full resolution. In my Crimson Desert tests with the post-FSR route on an RX 9070 XT at 2560x1440, the runtime logged a median of about 45 ms of network GPU time per job in `dlssnr_on_amd.log`.
 
-With the pre-SR route, the neural model runs earlier in the pipeline on the unscaled render buffer before super-resolution (such as FSR or XeSS) scales it up. Neural evaluation cost scales directly with input pixel count: a 3840x2160 output frame rendered internally at 1280x720 feeds roughly one quarter the pixels of a native 2560x1440 pass into the network. Live verification and captured measurements for this pre-SR route in this project are currently pending.
+With the pre-SR route, the neural model runs earlier in the pipeline on the unscaled render buffer before super-resolution (FSR (ffx)) scales it up. Neural evaluation cost scales directly with input pixel count: a 3840x2160 output frame rendered internally at 1280x720 feeds roughly one quarter the pixels of a native 2560x1440 pass into the network. Live verification and captured measurements for this pre-SR route in this project are currently pending.
 
 ## What the published 60-plus-frames-per-second setup actually used
 
@@ -26,9 +26,7 @@ The reference package `OptiScaler-AMD-PreSR-Multipass-v1.2` (and the bare folder
 | --- | --- |
 | `OptiScaler.dll` | OptiScaler fork build with VersionInfo ProductName `OptiScaler` and ProductVersion `10.0.0-dev (amd-presr-multipass-local) (20260907_075847)` (or Vodkaman build `(20260907_145041)`). Installed as proxy `dxgi.dll`. |
 | `OptiScaler.ini` | Base configuration containing `[DlssNr]` and upscaler sections. |
-| `dlssnr_amd_pass1.dll` | DLSS-NR-on-AMD `version.dll` proxy build v0.2.14 (7,156,224 bytes), renamed. Embedded HLSL text defines pass 1. |
-| `dlssnr_amd_pass2.dll` | DLSS-NR-on-AMD `version.dll` proxy build v0.2.14 (7,156,224 bytes), renamed. Embedded HLSL text defines pass 2. |
-| `dlssnr_amd_pass3.dll` | DLSS-NR-on-AMD `version.dll` proxy build v0.2.14 (7,156,224 bytes), renamed. Embedded HLSL text defines pass 3. |
+| `dlssnr_amd_pass1/2/3.dll` | DLSS-NR-on-AMD `version.dll` proxy build v0.2.14 (7,156,224 bytes each). The three `dlssnr_amd_pass1/2/3.dll` files in a package are byte-identical copies; the fork loads each file name as an independent runtime instance so each pass owns its own temporal history. The embedded HLSL text differs only between the two published package variants (v1.2 vs the Vodkaman build), not between passes. |
 | `dlssnr_on_amd_weights.bin` | Neural network weights (147,689,451 bytes). Matches the SHA-256 hash generated locally from `nvngx_dlssnr.dll` 310.8.0.0. In git-stored packages, this may appear as an LFS pointer with the real file beside it. |
 | `OptiScaler\` | Dependency directory containing `amd_fidelityfx_framegeneration_dx12.dll`, `amd_fidelityfx_loader_dx12.dll`, `amd_fidelityfx_upscaler_dx12.dll`, `amd_fidelityfx_vk.dll`, `libxell.dll`, `libxess.dll`, `libxess_dx11.dll`, `libxess_fg.dll`, and `D3D12_OptiScaler\D3D12Core.dll`. |
 | `Licenses\` | License attributions for DirectX, FidelityFX v1/v2, OptiScaler GPL-3.0, RenoDX, and XeSS. |
@@ -55,11 +53,11 @@ The manager validates:
 
 ## Setup
 
-1. Open **Settings** in DLSS5 AMD Swapper. Under **OptiScaler pre-SR package**, select your verified package folder or zip. Under **Weights file**, select your locally generated `dlssnr_on_amd_weights.bin`.
+1. Open **Settings** in DLSS5 AMD Swapper. Under **OptiScaler pre-SR package**, select your verified package folder or zip. Under **Generated weights**, select your locally generated `dlssnr_on_amd_weights.bin`.
 2. Go to **Game library**, select a compatible x64 DirectX 12 game, and click **Set up**.
 3. In the route selection dialog, choose **OptiScaler pre-SR**.
 4. Select a preset: **Quality** (upscaling only) or **Performance** (ratio override and frame generation).
-5. Click **Install**. The manager installs `dxgi.dll`, patches `OptiScaler.ini`, stages the pass DLLs, copies the dependencies, and records a hash-backed manifest `.dlss5-amd-swapper.json`.
+5. Click **Set up**. The manager installs `dxgi.dll`, patches `OptiScaler.ini`, stages the pass DLLs, copies the dependencies, and records a hash-backed manifest `.dlss5-amd-swapper.json`.
 6. Launch the game with FSR / super-resolution enabled in game settings.
 7. Press `Insert` to open the in-game OptiScaler configuration menu.
 8. Check the **Diagnostics** panel in DLSS5 AMD Swapper to inspect runtime status.
@@ -130,17 +128,17 @@ If `dlss-enabler-headless.dll` is absent from the package directory, `FGNvngxRep
 
 The manager and CLI parse `amd_presr.log` and `OptiScaler.log` to extract:
 
-- `pre_sr_active`: whether the pre-SR hook confirmed execution.
+- `pre_sr_active`: true when the pre-SR log reports completed passes or OptiScaler.log reports "DLSS-NR running".
 - `hip_adapter`: the AMD GPU adapter recognized by the HIP runtime.
 - `passes_initialized`: number of neural passes successfully initialized (1 to 3).
 - `passes_completed`: number of neural passes completed for the frame.
 - `model_size`: internal render buffer dimensions fed into the neural network (such as 1280x720).
 - `target_size`: output buffer dimensions reconstructed by the upscaler (such as 3840x2160).
-- `mean_total_ms`: mean total frame time logged by the hook.
-- `mean_model_ms`: mean GPU time spent inside neural model evaluation.
+- `mean_total_ms`: mean total cost of the neural pass per frame (model plus OptiScaler's own composition).
+- `mean_model_ms`: model portion of the neural pass cost.
 - `cost_samples`: number of timing samples recorded.
 - `last_fault`: last recorded fault or error code.
-- `amd_presr_log_sha256`, `amd_presr_log_bytes`, `optiscaler_log_sha256`, `optiscaler_log_bytes`: file size and SHA-256 hashes of the inspected log files.
+- `presr_log_sha256`, `presr_log_bytes`, `optiscaler_log_sha256`, `optiscaler_log_bytes`: file size and SHA-256 hashes of the inspected log files.
 
 ## Restore
 
@@ -178,8 +176,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --install `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset quality
 ```
 
@@ -190,8 +188,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --install `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset performance `
   --proxy-name dxgi.dll
 ```
@@ -203,8 +201,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --update `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset quality
 ```
 

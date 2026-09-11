@@ -4,8 +4,8 @@ This route places Neural Rendering inside a supported game's FSR/DX12 path so it
 
 I use it mainly for supported single-player/offline 64-bit games. Common anti-cheat targets are blocked automatically. Two execution backends are available:
 
-1. **Official post-FSR runtime** (`amd-direct-runtime`): uses the official `DLSS-NR-on-AMD` setup and evaluates the neural model on the reconstructed output buffer.
-2. **OptiScaler pre-SR route** (`amd-optiscaler-presr`): evaluates the neural model on the unscaled render buffer before super-resolution (FSR/XeSS) scaling, with optional frame generation.
+1. **Official post-FSR runtime** (`amd-fsr-direct`): uses the official `DLSS-NR-on-AMD` setup and evaluates the neural model on the reconstructed output buffer.
+2. **OptiScaler pre-SR route** (`amd-optiscaler-presr`): evaluates the neural model on the unscaled render buffer before super-resolution (FSR (ffx)) scaling, with optional frame generation.
 
 ## Manager workflow
 
@@ -63,8 +63,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --install `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset quality
 ```
 
@@ -75,8 +75,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --install `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset performance `
   --proxy-name dxgi.dll
 ```
@@ -88,8 +88,8 @@ py .\direct-game\amd_dlss5.py `
   --game "D:\Games\Example\Game.exe" `
   --update `
   --route optiscaler-presr `
-  --package "C:\Users\Pine\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
-  --weights "C:\Users\Pine\AppData\Local\DLSS5 AMD Swapper\weights\dlssnr_on_amd_weights.bin" `
+  --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
+  --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
   --preset quality
 ```
 

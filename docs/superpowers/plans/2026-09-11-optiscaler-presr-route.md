@@ -3350,7 +3350,7 @@ Run: `.\app\Build-Package.ps1` → smoke tests pass, ZIP under `artifacts\`. Con
 
 - [ ] **Step 2: Prepare local sources**
 
-Extract `C:\Users\Pine\Downloads\Videos pro Tech-20260911T003509Z-1-001.zip` → `Arquivos necessarios.zip` → folder `OptiScaler-AMD-PreSR-Multipass-v1.2` into `%USERPROFILE%\Downloads\`. Keep the 147 MB weights out of the repo. Launch `artifacts\DLSS5-AMD-Swapper-local\Dlss5AmdSwapper.exe`; Settings must show `OptiScaler package: 10.0.0-dev (amd-presr-multipass-local) … SHA256SUMS verified · weights ready` with weights from `D:\SteamLibrary\steamapps\common\Lossless Scaling\nr-bridge\runtime`.
+Extract `C:\Downloads\Videos pro Tech-20260911T003509Z-1-001.zip` → `Arquivos necessarios.zip` → folder `OptiScaler-AMD-PreSR-Multipass-v1.2` into `%USERPROFILE%\Downloads\`. Keep the 147 MB weights out of the repo. Launch `artifacts\DLSS5-AMD-Swapper-local\Dlss5AmdSwapper.exe`; Settings must show `OptiScaler package: 10.0.0-dev (amd-presr-multipass-local) … SHA256SUMS verified · weights ready` with weights from `D:\SteamLibrary\steamapps\common\Lossless Scaling\nr-bridge\runtime`.
 
 - [ ] **Step 3: Install on Crimson Desert**
 
