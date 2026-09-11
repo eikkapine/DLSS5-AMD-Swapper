@@ -402,6 +402,47 @@ internal static class OptiScalerTests
             Check(manifest!.Before.ContainsKey("optiscaler\\libxess.dll"), "Before lookup must be case-insensitive after reload");
             Check(manifest.After.ContainsKey("OPTISCALER\\LIBXESS.DLL"), "After lookup must be case-insensitive after reload");
         });
+
+        await run("Pre-SR diagnostics parse pass counts, resolution, cost and faults", () =>
+        {
+            var presr = string.Join('\n',
+                "HIP runtime: 70260201",
+                "HIP adapter: AMD Radeon RX 9070 XT",
+                "Initialized independent AMD pass 1",
+                "Initialized independent AMD pass 2",
+                "AMD pre-SR: waiting for a DirectX 12 SR frame",
+                "Completed AMD pre-SR passes=2",
+                "HIP completion timeout pass 2");
+            var opti = string.Join('\n',
+                "[info] DlssNr_Dx12::Dispatch DLSS-NR running before SR: target 3840x2160, model 1280x720, guides 1280x720 (preset 0, intensity 1, style 0, build epoch 3)",
+                "[info] DlssNr_Dx12::Dispatch DLSS-NR cost: 12.40 ms total = 10.10 ms model + 2.30 ms ours (19% ours)",
+                "[info] DlssNr_Dx12::Dispatch DLSS-NR cost: 11.60 ms total = 9.90 ms model + 1.70 ms ours (15% ours)");
+            var result = OptiScalerDiagnosticsService.Parse(presr, opti);
+            Check(result.PreSrActive, "active");
+            Check(result.HipAdapter == "AMD Radeon RX 9070 XT", "adapter");
+            Check(result.PassesInitialized == 2 && result.PassesCompleted == 2, "passes");
+            Check(result.ModelSize == "1280x720" && result.TargetSize == "3840x2160", "sizes");
+            Check(result.CostSamples == 2 && Math.Abs(result.MeanTotalMs!.Value - 12.0) < 0.001 && Math.Abs(result.MeanModelMs!.Value - 10.0) < 0.001, "cost");
+            Check(result.LastFault == "HIP completion timeout pass 2", "last fault");
+            Check(result.Summary.Contains("1280x720") && result.Summary.Contains("12.0 ms"), "summary");
+            var idle = OptiScalerDiagnosticsService.Parse("AMD pre-SR: idle\n", string.Empty);
+            Check(!idle.PreSrActive && idle.LastFault is null, "idle is not a fault");
+            var missing = OptiScalerDiagnosticsService.Parse("dlssnr_on_amd_weights.bin is required\n", string.Empty);
+            Check(missing.LastFault == "dlssnr_on_amd_weights.bin is required", "weights fault");
+            return Task.CompletedTask;
+        });
+
+        await run("Pre-SR diagnostics hash the whole log while sampling the tail", async () =>
+        {
+            using var temp = new OptiTemp();
+            var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
+            var content = "Initialized independent AMD pass 1\n" + new string('x', 2 * 1024 * 1024) + "\nCompleted AMD pre-SR passes=1\n";
+            await File.WriteAllTextAsync(game.PreSrLogPath, content);
+            var result = await new OptiScalerDiagnosticsService().InspectAsync(game);
+            Check(result.PreSrActive && result.PassesCompleted == 1, "tail parsed");
+            Check(result.PreSrLogBytes == new FileInfo(game.PreSrLogPath).Length && result.PreSrLogSha256?.Length == 64, "hash covers full file");
+            Check(result.OptiLogSha256 is null && result.OptiLogBytes == 0, "absent OptiScaler.log tolerated");
+        });
     }
 
     internal static void Check(bool condition, string message)

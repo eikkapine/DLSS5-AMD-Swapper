@@ -72,6 +72,9 @@ public sealed class GameEntry : INotifyPropertyChanged
     public string LogPath => Path.Combine(DirectoryPath, "dlssnr_on_amd.log");
     public string ManifestPath => Path.Combine(DirectoryPath, ".dlss5-amd-swapper.json");
     public string LegacyManifestPath => Path.Combine(DirectoryPath, ".nr-auto-scale-direct.json");
+    public string OptiScalerIniPath => Path.Combine(DirectoryPath, "OptiScaler.ini");
+    public string PreSrLogPath => Path.Combine(DirectoryPath, "amd_presr.log");
+    public string OptiScalerLogPath => Path.Combine(DirectoryPath, "OptiScaler.log");
     public bool Eligible => X64 && HasFsr && HasDx12 && !HasAntiCheat;
 
     public bool Installed { get => _installed; set => Set(ref _installed, value); }
