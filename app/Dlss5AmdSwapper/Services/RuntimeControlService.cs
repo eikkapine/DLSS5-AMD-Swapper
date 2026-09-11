@@ -99,10 +99,11 @@ public sealed class RuntimeControlService
         lock (ConfigWriteLock)
         {
             var ini = IniDocument.Load(iniPath);
+            var structure = Math.Clamp(ini.GetDouble(Section, "LocalStructure", 1.0), 0.0, 2.0);
             var skin = ini.GetDouble(Section, "SkinStructure", 1.0);
             return new LayerState(
-                Math.Clamp(ini.GetDouble(Section, "LocalStructure", 1.0), 0.0, 2.0),
-                skin < 0 ? 1.0 : Math.Clamp(skin, 0.0, 2.0),
+                structure,
+                skin < 0 ? structure : Math.Clamp(skin, 0.0, 2.0),
                 Math.Clamp(ini.GetDouble(Section, "LocalTone", 0.0), 0.0, 2.0),
                 skin < 0);
         }
@@ -123,7 +124,7 @@ public sealed class RuntimeControlService
         return ChangeIniAsync(iniPath, ini =>
         {
             var current = ini.GetDouble(Section, key, key == "LocalTone" ? 0.0 : 1.0);
-            if (current < 0) current = ini.GetDouble(Section, "LocalStructure", 1.0);
+            if (key == "SkinStructure" && current < 0) current = ini.GetDouble(Section, "LocalStructure", 1.0);
             var next = Math.Clamp(Math.Round(current + delta, 1, MidpointRounding.AwayFromZero), 0.0, 2.0);
             ini.Set(Section, key, next.ToString("0.0", CultureInfo.InvariantCulture));
         }, cancellationToken);

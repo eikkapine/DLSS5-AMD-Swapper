@@ -515,6 +515,30 @@ internal static class OptiScalerTests
             Check(service.ReadLayers(ini).SkinFollowsStructure, "follow restored");
             try { await service.SetLayerAsync(ini, "Enabled", 1); throw new Exception("accepted"); }
             catch (ArgumentException) { }
+
+            await File.WriteAllTextAsync(ini, "[DlssNrOnAmd]\nLocalStructure=1.4\nSkinStructure=-1\n");
+            state = service.ReadLayers(ini);
+            Check(Math.Abs(state.Skin - 1.4) < 0.001 && state.SkinFollowsStructure, "skin follows structure value");
+            await service.AdjustLayerAsync(ini, "SkinStructure", 0.1);
+            state = service.ReadLayers(ini);
+            Check(Math.Abs(state.Skin - 1.5) < 0.001 && !state.SkinFollowsStructure, "adjust steps from structure");
+        });
+
+        await run("Pre-SR control writes structure and tone and reports next-launch message", async () =>
+        {
+            using var temp = new OptiTemp();
+            var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
+            await File.WriteAllTextAsync(game.ManifestPath, "{\"route\":\"amd-optiscaler-presr\",\"installed_proxy_names\":[\"dxgi.dll\"]}");
+            await File.WriteAllBytesAsync(Path.Combine(temp.Path, "dxgi.dll"), [1]);
+            await File.WriteAllTextAsync(game.OptiScalerIniPath, "[DlssNr]\nEnabled=true\n");
+
+            var control = new OptiScalerControlService();
+            var structureResult = await control.SetStructureAsync(game, 1.7);
+            var toneResult = await control.SetToneAsync(game, 0.4);
+
+            var ini = IniDocument.Load(game.OptiScalerIniPath);
+            Check(ini.Get("DlssNr", "LocalStructure") == "1.7" && ini.Get("DlssNr", "LocalTone") == "0.4", "INI structure and tone");
+            Check(structureResult.Message == "Saved for the next launch" && toneResult.Message == "Saved for the next launch", "next-launch message");
         });
     }
 
