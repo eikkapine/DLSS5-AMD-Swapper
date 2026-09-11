@@ -588,7 +588,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             changed_proxy = [name for name in KNOWN_PROXY_NAMES if name in after and before.get(name) != after.get(name)]
             if args.update:
                 old_manifest = json.loads(previous_manifest.decode("utf-8")) if previous_manifest else {}
-                installed_proxy = [name for name in old_manifest.get("installed_proxy_names", []) if name in after]
+                installed_proxy = [name for name in (old_manifest.get("installed_proxy_names") or []) if name in after]
                 if not installed_proxy:
                     installed_proxy = [name for name in KNOWN_PROXY_NAMES if name in after]
             else:
@@ -649,14 +649,14 @@ def remove(args: argparse.Namespace) -> dict[str, Any]:
     if manifest_path is None:
         raise RuntimeError("No managed direct-game manifest was found")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    after = manifest.get("after", {})
+    after = manifest.get("after") or {}
     removed: list[str] = []
     preserved: list[str] = []
 
     for name in list(KNOWN_PROXY_NAMES) + ["dlssnr_on_amd.ini", "dlssnr_on_amd_weights.bin", "dlssnr_on_amd.log"]:
         path = folder / name
         expected = after.get(name)
-        before = manifest.get("before", {}).get(name)
+        before = (manifest.get("before") or {}).get(name)
         if before is not None:
             preserved.append(name)
             continue
@@ -686,7 +686,7 @@ def remove(args: argparse.Namespace) -> dict[str, Any]:
             preserved.append("nvngx_dlssnr.dll")
 
     created_but_remaining = []
-    before = manifest.get("before", {})
+    before = manifest.get("before") or {}
     for name in list(KNOWN_PROXY_NAMES) + list(KNOWN_RUNTIME_FILES):
         if name not in before and (folder / name).exists():
             created_but_remaining.append(name)
@@ -737,9 +737,6 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
     weights = Path(args.weights).resolve()
     if not is_real_weights(weights):
         raise RuntimeError("--weights must point to a generated dlssnr_on_amd_weights.bin")
-    proxy_name = (args.proxy_name or "dxgi.dll").lower()
-    if proxy_name not in OPTI_PROXY_NAMES:
-        raise RuntimeError("Unsupported --proxy-name")
     folder = game.parent
     package_upscaler = Path(package["dependency_folder"]) / OPTI_REQUIRED_UPSCALER if package["dependency_folder"] else None
     if not (package_upscaler and package_upscaler.is_file()) and not (folder / OPTI_REQUIRED_UPSCALER).is_file():
@@ -756,12 +753,17 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
     if route is None and args.update:
         raise RuntimeError("--update requires an existing managed pre-SR manifest")
 
+    proxy_name = args.proxy_name or (previous_manifest.get("proxy_name") if previous_manifest else None) or "dxgi.dll"
+    if proxy_name.lower() not in OPTI_PROXY_NAMES:
+        raise RuntimeError("Unsupported --proxy-name")
+    proxy_name = proxy_name.lower()
+
     dependency_relatives: list[str] = []
     if package["dependency_folder"]:
         deps = Path(package["dependency_folder"])
         dependency_relatives = [str(Path(OPTI_DEPENDENCY_FOLDER) / path.relative_to(deps)) for path in sorted(deps.rglob("*")) if path.is_file()]
     enabler_relative = str(Path(OPTI_DEPENDENCY_FOLDER) / OPTI_ENABLER)
-    previous_after_keys = list(previous_manifest.get("after", {}).keys()) if previous_manifest else []
+    previous_after_keys = list((previous_manifest.get("after") or {}).keys()) if previous_manifest else []
     managed = list(dict.fromkeys([*OPTI_PROXY_NAMES, *OPTI_ROOT_MANAGED, *dependency_relatives, enabler_relative, *previous_after_keys]))
 
     def snapshot() -> dict[str, Any]:
@@ -772,7 +774,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
         unmanaged = [name for name in OPTI_PROXY_NAMES if name in before]
         if unmanaged:
             raise RuntimeError("A proxy DLL already exists in the game folder and is not managed by this helper: " + ", ".join(unmanaged))
-    elif previous_manifest and proxy_name not in [p.lower() for p in previous_manifest.get("installed_proxy_names", [])]:
+    elif previous_manifest and proxy_name.lower() not in [p.lower() for p in (previous_manifest.get("installed_proxy_names") or [])]:
         raise RuntimeError("Update must keep the proxy name recorded in the manifest")
 
     manifest_path = folder / MANIFEST_NAME
@@ -786,7 +788,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
             shutil.copy2(folder / name, target)
         written: list[str] = []
         preexisting: list[str] = []
-        original_before = previous_manifest.get("before") if previous_manifest and "before" in previous_manifest else before
+        original_before = (previous_manifest.get("before") or before) if previous_manifest else before
         try:
             def copy_verified(source: Path, relative: str) -> None:
                 destination = folder / relative
@@ -797,8 +799,9 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                 written.append(relative)
 
             copy_verified(Path(package["optiscaler_dll"]), proxy_name)
-            for index, name in enumerate(OPTI_PASS_NAMES):
-                source = package["pass_dlls"][index] if index < len(package["pass_dlls"]) else package["pass_dlls"][0]
+            for name in OPTI_PASS_NAMES:
+                match = next((p for p in package["pass_dlls"] if Path(p).name.lower() == name), None)
+                source = match if match is not None else package["pass_dlls"][0]
                 copy_verified(Path(source), name)
             copy_verified(weights, OPTI_WEIGHTS)
             for relative in dependency_relatives:
@@ -832,7 +835,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                 "previous_route": previous_manifest.get("previous_route") if previous_manifest else None,
                 "before": original_before,
                 "after": after,
-                "preexisting_dependencies": sorted(set((previous_manifest or {}).get("preexisting_dependencies", [])) | set(preexisting)),
+                "preexisting_dependencies": sorted(set(((previous_manifest.get("preexisting_dependencies") or []) if previous_manifest else [])) | set(preexisting)),
                 "installed_proxy_names": [proxy_name],
             }
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -864,12 +867,12 @@ def remove_optiscaler(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path, manifest = _read_manifest(folder)
     if manifest_path is None or manifest is None or manifest.get("route") != ROUTE_OPTISCALER:
         raise RuntimeError("No managed pre-SR manifest was found")
-    before = manifest.get("before", {})
-    after = manifest.get("after", {})
-    preexisting = set(manifest.get("preexisting_dependencies", []))
+    before = manifest.get("before") or {}
+    after = manifest.get("after") or {}
+    preexisting = set(manifest.get("preexisting_dependencies") or [])
     removed: list[str] = []
     preserved: list[str] = []
-    for name in dict.fromkeys([*after.keys(), *manifest.get("installed_proxy_names", [])]):
+    for name in dict.fromkeys([*after.keys(), *(manifest.get("installed_proxy_names") or [])]):
         path = folder / name
         if name in before or name in preexisting:
             preserved.append(name)
@@ -903,11 +906,11 @@ def summarize_presr(folder: Path) -> dict[str, Any]:
     completed = [int(value) for value in re.findall(r"Completed AMD pre-SR passes=(\d+)", presr)]
     running = re.findall(r"DLSS-NR running [^:]*: target (\d+x\d+), model (\d+x\d+)", opti)
     costs = [(float(total), float(model)) for total, model in re.findall(r"DLSS-NR cost: ([\d.]+) ms total = ([\d.]+) ms model", opti)]
-    fault = re.compile(r"^(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|.*hash mismatch|dlssnr_on_amd_weights\.bin is required|.*LoadLibrary failed|AMD engine initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")
-    faults = [line.strip() for line in presr.splitlines() if fault.match(line.strip())]
-    adapter = re.search(r"^HIP adapter:\s*(.+)$", presr, re.M)
+    fault = re.compile(r"(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|hash mismatch|weights\.bin is required|LoadLibrary failed|initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")
+    faults = [line.strip() for line in presr.splitlines() if fault.search(line.strip())]
+    adapter = re.search(r"HIP adapter:\s*(.+)", presr)
     return {
-        "pre_sr_active": bool(completed or running),
+        "pre_sr_active": bool(completed) or ("DLSS-NR running" in opti),
         "hip_adapter": adapter.group(1).strip() if adapter else None,
         "passes_initialized": len(re.findall(r"Initialized independent AMD pass \d+", presr)),
         "passes_completed": completed[-1] if completed else None,
@@ -1063,7 +1066,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--package", help="User-supplied OptiScaler AMD pre-SR package folder")
     parser.add_argument("--weights", help="Locally generated dlssnr_on_amd_weights.bin")
     parser.add_argument("--preset", choices=("quality", "performance"), default="quality")
-    parser.add_argument("--proxy-name", default="dxgi.dll")
+    parser.add_argument("--proxy-name", default=None)
     parser.add_argument("--passes", type=int, choices=(1, 2, 3))
     parser.add_argument("--force", action="store_true", help="Override uncertain FSR/DX12 detection; anti-cheat remains blocked")
     parser.add_argument("--remove-model", action="store_true", help="Also remove a model DLL copied by this helper")

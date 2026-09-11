@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import shutil
 import sys
@@ -127,6 +127,56 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(summary["passes_completed"], 1)
         self.assertAlmostEqual(summary["mean_total_ms"], 12.0)
         self.assertEqual(len(summary["presr_log_sha256"]), 64)
+
+    def test_diagnose_presr_tolerates_prefixed_lines(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        (f.game_dir / "amd_presr.log").write_text(
+            "[12:00:01] HIP adapter: AMD Radeon RX 9070 XT\r\n[12:00:02] AMD engine initialization failed\r\n",
+            encoding="utf-8",
+        )
+        (f.game_dir / "OptiScaler.log").write_text(
+            "[info] DlssNr_Dx12::Dispatch DLSS-NR running before SR (no sizes)\n",
+            encoding="utf-8",
+        )
+        summary = helper.summarize_presr(f.game_dir)
+        self.assertTrue(summary["pre_sr_active"])
+        self.assertEqual(summary["hip_adapter"], "AMD Radeon RX 9070 XT")
+        self.assertIsNotNone(summary["last_fault"])
+        self.assertTrue(summary["last_fault"].endswith("AMD engine initialization failed"))
+        self.assertIsNone(summary["model_size"])
+
+    def test_update_keeps_manifest_proxy_name(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        install_args = helper.parse_args([
+            "--game", str(f.exe),
+            "--install",
+            "--route", "optiscaler-presr",
+            "--package", str(f.package),
+            "--weights", str(f.weights),
+            "--proxy-name", "winmm.dll",
+        ])
+        manifest = helper.install_optiscaler(install_args, version_reader=fake_fork)
+        self.assertEqual(manifest["proxy_name"], "winmm.dll")
+        self.assertTrue((f.game_dir / "winmm.dll").exists())
+        self.assertFalse((f.game_dir / "dxgi.dll").exists())
+
+        update_args = helper.parse_args([
+            "--game", str(f.exe),
+            "--update",
+            "--route", "optiscaler-presr",
+            "--package", str(f.package),
+            "--weights", str(f.weights),
+            "--preset", "performance",
+        ])
+        updated_manifest = helper.install_optiscaler(update_args, version_reader=fake_fork)
+        self.assertTrue(updated_manifest)
+        self.assertTrue((f.game_dir / "winmm.dll").exists())
+        self.assertFalse((f.game_dir / "dxgi.dll").exists())
+        on_disk = json.loads((f.game_dir / ".dlss5-amd-swapper.json").read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["proxy_name"], "winmm.dll")
+        self.assertEqual(updated_manifest["proxy_name"], "winmm.dll")
 
 
 if __name__ == "__main__":
