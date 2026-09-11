@@ -7,6 +7,7 @@ var failures = new List<string>();
 
 await RuntimeControlRegressionTests.RunAsync(RunAsync);
 await DiagnosticsRegressionTests.RunAsync();
+await OptiScalerTests.RunAsync(RunAsync);
 
 await RunAsync("Installer restore preserves changed and pre-existing files", async () =>
 {
