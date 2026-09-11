@@ -302,6 +302,32 @@ internal static class OptiScalerTests
             Check(!f.Game.Busy, "busy flag cleared after failed update");
         });
 
+        await run("Pre-SR update keeps the manifest when the backup phase fails", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            var manifestBytes = await File.ReadAllBytesAsync(f.Game.ManifestPath);
+
+            // Point the backup root under a path whose parent is a FILE, so Directory.CreateDirectory
+            // fails inside the backup phase, after the manifest bytes are read but before any copy runs.
+            var blocker = Path.Combine(f.Temp.Path, "backup-blocker");
+            await File.WriteAllBytesAsync(blocker, [1]);
+            OptiScalerInstallerService.BackupRootOverride = () => Path.Combine(blocker, Guid.NewGuid().ToString("N"));
+            try
+            {
+                try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true); throw new InvalidOperationException("accepted"); }
+                catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
+                catch (Exception) { }
+            }
+            finally { OptiScalerInstallerService.BackupRootOverride = null; }
+
+            Check((await File.ReadAllBytesAsync(f.Game.ManifestPath)).SequenceEqual(manifestBytes), "manifest must be untouched when the backup phase itself fails");
+            Check(ManagedManifest.ReadRoute(f.Game) == InstallRoute.OptiScalerPreSr, "route must still read as pre-SR");
+            Check(File.Exists(Path.Combine(f.GameDir, "dxgi.dll")), "proxy must still be present");
+            Check(!f.Game.Busy, "busy flag cleared after a backup-phase failure");
+        });
+
         await run("Pre-SR install removes a managed post-FSR route first and records it", async () =>
         {
             var f = await MakeInstallFixtureAsync();

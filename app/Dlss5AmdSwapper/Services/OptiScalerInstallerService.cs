@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Dlss5AmdSwapper.Models;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Dlss5AmdSwapper.SmokeTests")]
+
 namespace Dlss5AmdSwapper.Services;
 
 public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGameInstallerService postFsr)
@@ -11,6 +13,10 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
     public static readonly string[] RootManagedNames = ["OptiScaler.ini", "OptiScaler.log", "amd_presr.log", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveFolders = new(StringComparer.OrdinalIgnoreCase);
+
+    // Test-only hook: when set, overrides where the pre-operation backup is staged, so tests can force the
+    // backup phase itself to fail (e.g. by pointing it under a path whose parent is a file). Null in production.
+    internal static Func<string>? BackupRootOverride;
 
     public async Task<OptiScalerInstallResult> InstallAsync(GameEntry game, OptiScalerPackage package, LocalWeights weights, OptiScalerPreset preset, bool update, string proxyName = "dxgi.dll", CancellationToken cancellationToken = default)
     {
@@ -68,7 +74,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             else if (previousManifest is not null && !previousManifest.InstalledProxyNames.Contains(proxyName, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Update must keep the proxy name recorded in the manifest.");
 
-            var backupRoot = Path.Combine(Path.GetTempPath(), "dlss5-amd-swapper", Guid.NewGuid().ToString("N"));
+            var backupRoot = BackupRootOverride?.Invoke() ?? Path.Combine(Path.GetTempPath(), "dlss5-amd-swapper", Guid.NewGuid().ToString("N"));
             byte[]? previousManifestBytes = null;
             var originalBefore = previousManifest?.Before ?? before;
 
@@ -77,6 +83,11 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             var keepBackup = false;
             try
             {
+                // Read the previous manifest bytes before anything that can fail (backup directory
+                // creation, the backup copy loop), so a mid-backup failure can still restore it in the
+                // catch below instead of falling through to the "no previous manifest" delete branch.
+                previousManifestBytes = File.Exists(game.ManifestPath) ? await File.ReadAllBytesAsync(game.ManifestPath, cancellationToken) : null;
+
                 Directory.CreateDirectory(backupRoot);
                 foreach (var relative in before.Keys)
                 {
@@ -84,7 +95,6 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     File.Copy(Path.Combine(folder, relative), target, true);
                 }
-                previousManifestBytes = File.Exists(game.ManifestPath) ? await File.ReadAllBytesAsync(game.ManifestPath, cancellationToken) : null;
 
                 async Task CopyVerifiedAsync(string source, string relative)
                 {
