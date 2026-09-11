@@ -83,17 +83,27 @@ class PackageTests(unittest.TestCase):
         self.assertIn("InterpolationCount=2", performance)
         self.assertIn("FGNvngxReplacement=ffx", helper.build_optiscaler_ini(None, "performance", False))
 
+    def test_ini_passes(self):
+        ini = helper.build_optiscaler_ini(None, "quality", False, passes=3)
+        self.assertIn("Passes=3", ini)
+        with self.assertRaises(ValueError):
+            helper.build_optiscaler_ini(None, "quality", False, passes=4)
+        with self.assertRaises(ValueError):
+            helper.build_optiscaler_ini(None, "quality", False, passes=0)
+
 
 class InstallTests(unittest.TestCase):
     def test_install_and_remove(self):
         f = Fixture()
         self.addCleanup(f.cleanup)
-        args = helper.parse_args(["--game", str(f.exe), "--install", "--route", "optiscaler-presr", "--package", str(f.package), "--weights", str(f.weights)])
+        self.assertEqual(helper.check_game(f.exe)["eligible_routes"], ["amd-fsr-direct", "amd-optiscaler-presr"])
+        args = helper.parse_args(["--game", str(f.exe), "--install", "--route", "optiscaler-presr", "--package", str(f.package), "--weights", str(f.weights), "--passes", "2"])
         manifest = helper.install_optiscaler(args, version_reader=fake_fork)
         self.assertEqual(manifest["route"], "amd-optiscaler-presr")
         self.assertEqual(manifest["schema_version"], 3)
         for name in ("dxgi.dll", "OptiScaler.ini", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin", os.path.join("OptiScaler", "amd_fidelityfx_upscaler_dx12.dll")):
             self.assertTrue((f.game_dir / name).exists(), name)
+        self.assertIn("Passes=2", (f.game_dir / "OptiScaler.ini").read_text(encoding="utf-8"))
         on_disk = json.loads((f.game_dir / ".dlss5-amd-swapper.json").read_text(encoding="utf-8"))
         self.assertEqual(on_disk["installed_proxy_names"], ["dxgi.dll"])
         self.assertIn("preexisting_dependencies", on_disk)

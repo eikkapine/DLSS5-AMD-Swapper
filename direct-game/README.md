@@ -56,6 +56,8 @@ py .\direct-game\amd_dlss5.py `
 
 ### OptiScaler pre-SR route
 
+Pass `--passes N` (1 to 3) to configure the neural pass count written to `OptiScaler.ini` (defaults to 1).
+
 Install (Quality preset):
 
 ```powershell

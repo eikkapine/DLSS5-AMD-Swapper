@@ -161,7 +161,7 @@ Restoring a game installation removes only files created by the manager that sti
 
 ## Advanced CLI
 
-The Python direct-game helper supports the pre-SR route:
+The Python direct-game helper supports the pre-SR route. Pass `--passes N` (1 to 3) to configure the neural pass count written to `OptiScaler.ini` (defaults to 1).
 
 ### Check compatibility
 

@@ -32,7 +32,7 @@ internal static class OptiScalerTests
             return Task.CompletedTask;
         });
 
-        await run("Package validation accepts the package layout and verifies SHA256SUMS", async () =>
+        await run("Package validation accepts the package layout and verifies SHA256SUMS", () =>
         {
             using var temp = new OptiTemp();
             var root = MakePackage(temp.Path, layout: "package", withSums: true);
@@ -45,6 +45,7 @@ internal static class OptiScalerTests
             Check(package.EnablerDllPath is null, "no enabler in fixture");
             Check(package.Files.ContainsKey("dlssnr_amd_pass1.dll"), "files recorded");
             Check(package.ForkVersion.Contains("amd-presr"), "fork version recorded");
+            return Task.CompletedTask;
         });
 
         await run("Package validation accepts the Vodkaman layout", () =>

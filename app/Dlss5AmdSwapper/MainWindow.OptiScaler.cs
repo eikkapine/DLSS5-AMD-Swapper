@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -56,7 +56,8 @@ public partial class MainWindow
                 }
                 catch (InvalidOperationException error) { failure ??= $"{Path.GetFileName(candidate)}: {error.Message}"; }
             }
-            _localWeights = await Task.Run(() => OptiScalerPackageService.FindLocalWeights(LocalWeightsPath, Games.Select(game => game.DirectoryPath), LosslessInstallPath));
+            var gameDirectories = Games.Select(game => game.DirectoryPath).ToArray();
+            _localWeights = await Task.Run(() => OptiScalerPackageService.FindLocalWeights(LocalWeightsPath, gameDirectories, LosslessInstallPath));
             if (_localWeights is not null && !string.Equals(LocalWeightsPath, _localWeights.Path, StringComparison.OrdinalIgnoreCase)) LocalWeightsPath = _localWeights.Path;
             OptiScalerPackageStatus = _optiPackage is null
                 ? "OptiScaler package: " + (failure ?? "none found. Put the OptiScaler-AMD-PreSR-Multipass folder or zip in Downloads, or choose it below.")
@@ -111,9 +112,11 @@ public partial class MainWindow
     private async Task UpdatePreSrAsync(GameEntry target)
     {
         if (!await ResolveOptiScalerSourcesAsync(false)) throw new InvalidOperationException(OptiScalerPackageStatus);
-        var preset = Enum.TryParse<OptiScalerPreset>(IniDocument.Load(target.OptiScalerIniPath).Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") == "true" ? "Performance" : "Quality", out var current) ? current : OptiScalerPreset.Quality;
+        var manifest = await OptiScalerInstallerService.ReadManifestAsync(target.ManifestPath, CancellationToken.None);
+        var proxyName = manifest?.ProxyName is { Length: > 0 } name ? name : "dxgi.dll";
+        var preset = string.Equals(manifest?.Preset, "performance", StringComparison.OrdinalIgnoreCase) ? OptiScalerPreset.Performance : OptiScalerPreset.Quality;
         ShowToast("Updating OptiScaler pre-SR…");
-        var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, preset, update: true);
+        var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, preset, update: true, proxyName);
         _runtime.Refresh(target);
         RecordActivity("Game updated (pre-SR)", $"{target.Name} · {result.Preset}");
         ShowToast($"Updated pre-SR for {target.Name}", true);
@@ -123,7 +126,11 @@ public partial class MainWindow
     {
         if (SelectedGame is not { IsPreSr: true } game || sender is not ComboBox combo || combo.SelectedItem is not int passes || passes == game.Passes) return;
         try { ShowToast((await _optiControl.SetPassesAsync(game, passes)).Message); }
-        catch (Exception ex) { ShowError(ex); }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+            combo.SelectedItem = game.Passes;
+        }
     }
 
     private async Task RefreshPreSrDiagnosticsAsync(GameEntry target, bool toast)

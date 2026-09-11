@@ -295,11 +295,13 @@ def _ini_set(lines: list[str], section: str, key: str, value: str) -> None:
     lines.insert(end, f"{key}={value}")
 
 
-def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool) -> str:
+def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, passes: int = 1) -> str:
+    if not 1 <= passes <= 3:
+        raise ValueError("passes must be between 1 and 3")
     lines = (base_text if base_text and base_text.strip() else MINIMAL_INI_HEADER).replace("\r\n", "\n").split("\n")
     for section, key, value in (
         ("Upscalers", "Dx12Upscaler", "ffx"),
-        ("DlssNr", "Enabled", "true"), ("DlssNr", "RunBeforeSR", "true"), ("DlssNr", "Passes", "1"),
+        ("DlssNr", "Enabled", "true"), ("DlssNr", "RunBeforeSR", "true"), ("DlssNr", "Passes", str(passes)),
         ("DlssNr", "LocalTone", "0"), ("DlssNr", "LocalStructure", "1"), ("DlssNr", "SkinStructure", "1"), ("DlssNr", "ApplyAfterRR", "false"),
         ("Log", "LogToFile", "true"), ("Log", "LogLevel", "2"),
     ):
@@ -428,6 +430,7 @@ def check_game(exe: Path) -> dict[str, Any]:
     machine = pe_machine(exe)
     fsr, anti_cheat = scan_tree(exe.parent)
     dx12 = dx12_evidence(exe, fsr)
+    eligible = machine == 0x8664 and bool(fsr) and bool(dx12) and not anti_cheat
     return {
         "game_exe": exe.name,
         "x64": machine == 0x8664,
@@ -436,7 +439,8 @@ def check_game(exe: Path) -> dict[str, Any]:
         "fsr_markers": fsr,
         "anti_cheat_markers": anti_cheat,
         "route": "amd-fsr-direct",
-        "eligible": machine == 0x8664 and bool(fsr) and bool(dx12) and not anti_cheat,
+        "eligible": eligible,
+        "eligible_routes": ["amd-fsr-direct", "amd-optiscaler-presr"] if eligible else [],
     }
 
 
@@ -815,7 +819,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
             if args.preset == "performance" and enabler_available:
                 copy_verified(Path(package["enabler"]), enabler_relative)
             base_text = Path(package["ini"]).read_text(encoding="utf-8", errors="replace") if package["ini"] else None
-            (folder / "OptiScaler.ini").write_text(build_optiscaler_ini(base_text, args.preset, enabler_available), encoding="utf-8")
+            (folder / "OptiScaler.ini").write_text(build_optiscaler_ini(base_text, args.preset, enabler_available, passes=args.passes or 1), encoding="utf-8")
             written.append("OptiScaler.ini")
 
             after = snapshot()
