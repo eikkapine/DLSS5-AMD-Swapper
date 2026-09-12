@@ -91,8 +91,10 @@ public partial class MainWindow
     private async Task SetUpNewRouteAsync(GameEntry target)
     {
         var preSrReady = await ResolveOptiScalerSourcesAsync(false);
+        var preSrBlock = preSrReady && _optiPackage is not null ? OptiScalerInstallerService.GetCompatibilityBlock(target, _optiPackage) : null;
+        if (preSrBlock is not null) preSrReady = false;
         var dialog = new SetupDialog(target.Name,
-            _optiPackage?.Summary ?? OptiScalerPackageStatus,
+            preSrBlock ?? _optiPackage?.Summary ?? OptiScalerPackageStatus,
             _localWeights is null ? "Weights: none found" : $"Weights: {Path.GetFileName(Path.GetDirectoryName(_localWeights.Path))} copy, {_localWeights.Size / (1024 * 1024)} MB",
             preSrReady, DefaultPreset) { Owner = this };
         if (dialog.ShowDialog() != true) return;
@@ -111,8 +113,17 @@ public partial class MainWindow
 
     private async Task UpdatePreSrAsync(GameEntry target)
     {
-        if (!await ResolveOptiScalerSourcesAsync(false)) throw new InvalidOperationException(OptiScalerPackageStatus);
         var manifest = await OptiScalerInstallerService.ReadManifestAsync(target.ManifestPath, CancellationToken.None);
+        if (OptiScalerInstallerService.GetCompatibilityBlock(target, manifest) is { } compatibilityBlock)
+        {
+            ShowToast("Migrating incompatible pre-SR route to the official AMD runtime…");
+            var removed = await OptiInstaller.RemoveForPostFsrMigrationAsync(target);
+            await InstallPostFsrAsync(target, update: false);
+            RecordActivity("Game migrated to post-FSR", $"{target.Name} · {removed.Preserved.Count} preserved text file(s) · {compatibilityBlock}");
+            return;
+        }
+
+        if (!await ResolveOptiScalerSourcesAsync(false)) throw new InvalidOperationException(OptiScalerPackageStatus);
         var proxyName = manifest?.ProxyName is { Length: > 0 } name ? name : "dxgi.dll";
         var preset = string.Equals(manifest?.Preset, "performance", StringComparison.OrdinalIgnoreCase) ? OptiScalerPreset.Performance : OptiScalerPreset.Quality;
         ShowToast("Updating OptiScaler pre-SR…");

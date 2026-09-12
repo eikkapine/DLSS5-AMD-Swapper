@@ -234,6 +234,12 @@ internal static class OptiScalerTests
             var perfNoEnabler = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Performance, enablerAvailable: false));
             Check(perfNoEnabler.Get("FrameGen", "FGNvngxReplacement") == "ffx", "ffx without enabler");
             Check(perfNoEnabler.Get("DlssNr", "RunBeforeSR") == "true", "minimal INI still carries DlssNr");
+
+            var crimson = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Quality, false, "CrimsonDesert.exe"));
+            Check(crimson.Get("Spoofing", "Dxgi") == "false", "Crimson Desert must disable DXGI spoofing even when the package INI enables it");
+
+            var otherGame = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Quality, false, "OtherGame.exe"));
+            Check(otherGame.Get("Spoofing", "Dxgi") == "true", "Other games must preserve their package DXGI spoofing setting");
             return Task.CompletedTask;
         });
 
@@ -397,6 +403,35 @@ internal static class OptiScalerTests
             var second = await f.Installer.RemoveAsync(f.Game);
             Check(!second.ManifestRetained && !File.Exists(f.Game.ManifestPath), "manifest deleted once nothing created remains");
             Check(!f.Installer.HasManagedInstall(f.Game), "not managed after restore");
+        });
+
+        await run("Pre-SR compatibility migration preserves edited text config and detaches the old route", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            var iniPath = Path.Combine(f.GameDir, "OptiScaler.ini");
+            await File.AppendAllTextAsync(iniPath, "\n; keep my edit\n");
+
+            var result = await f.Installer.RemoveForPostFsrMigrationAsync(f.Game);
+            Check(File.Exists(iniPath), "edited OptiScaler.ini must be preserved");
+            Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")), "pre-SR proxy must be removed");
+            Check(!File.Exists(f.Game.ManifestPath), "old pre-SR manifest must be detached");
+            Check(!result.ManifestRetained && result.RemainingManagedFiles.Count == 0, "migration must leave no managed pre-SR route");
+            Check(result.Preserved.Contains("OptiScaler.ini"), "preserved text config must remain visible in the result");
+        });
+
+        await run("Crimson Desert blocks only the observed incompatible AMD pre-SR proxy", () =>
+        {
+            var badFiles = new Dictionary<string, FileState>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["OptiScaler.dll"] = new FileState(25_889_280, OptiScalerInstallerService.CrimsonDesertIncompatibleProxySha256)
+            };
+            Check(OptiScalerInstallerService.GetCompatibilityBlock("C:\\Games\\CrimsonDesert.exe", badFiles) is not null, "known bad Crimson Desert proxy must be blocked");
+            Check(OptiScalerInstallerService.GetCompatibilityBlock("C:\\Games\\OtherGame.exe", badFiles) is null, "other games must stay eligible");
+            badFiles["OptiScaler.dll"] = new FileState(25_889_280, new string('a', 64));
+            Check(OptiScalerInstallerService.GetCompatibilityBlock("C:\\Games\\CrimsonDesert.exe", badFiles) is null, "a future fixed proxy must not be permanently blacklisted");
+            return Task.CompletedTask;
         });
 
         await run("Pre-SR restore removes the dependency folder when nothing user-owned remains", async () =>

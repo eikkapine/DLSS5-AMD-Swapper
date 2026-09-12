@@ -9,6 +9,9 @@ namespace Dlss5AmdSwapper.Services;
 
 public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGameInstallerService postFsr)
 {
+    internal const string CrimsonDesertExe = "CrimsonDesert.exe";
+    internal const string CrimsonDesertIncompatibleProxySha256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa";
+    public const string CrimsonDesertCompatibilityMessage = "This OptiScaler AMD pre-SR v1.2 proxy is incompatible with Crimson Desert startup. Use the official post-FSR route for this game.";
     public static readonly string[] ProxyNames = ["dxgi.dll", "version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll"];
     public static readonly string[] RootManagedNames = ["OptiScaler.ini", "OptiScaler.log", "amd_presr.log", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
@@ -17,6 +20,42 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
     // Test-only hook: when set, overrides where the pre-operation backup is staged, so tests can force the
     // backup phase itself to fail (e.g. by pointing it under a path whose parent is a file). Null in production.
     internal static Func<string>? BackupRootOverride;
+
+    private static readonly HashSet<string> SafeDetachedMigrationFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "OptiScaler.ini",
+        "OptiScaler.log",
+        "amd_presr.log"
+    };
+
+    public static string? GetCompatibilityBlock(string exePath, IReadOnlyDictionary<string, FileState>? packageFiles)
+    {
+        if (!string.Equals(Path.GetFileName(exePath), CrimsonDesertExe, StringComparison.OrdinalIgnoreCase) || packageFiles is null)
+            return null;
+        var proxy = packageFiles.FirstOrDefault(pair => string.Equals(Path.GetFileName(pair.Key), "OptiScaler.dll", StringComparison.OrdinalIgnoreCase)).Value;
+        return proxy is not null && proxy.Sha256.Equals(CrimsonDesertIncompatibleProxySha256, StringComparison.OrdinalIgnoreCase)
+            ? CrimsonDesertCompatibilityMessage
+            : null;
+    }
+
+    public static string? GetCompatibilityBlock(GameEntry game, OptiScalerPackage package) => GetCompatibilityBlock(game.ExePath, package.Files);
+    public static string? GetCompatibilityBlock(GameEntry game, OptiScalerManifest? manifest) => GetCompatibilityBlock(game.ExePath, manifest?.Package?.Files);
+
+    public async Task<RemoveResult> RemoveForPostFsrMigrationAsync(GameEntry game, CancellationToken cancellationToken = default)
+    {
+        var result = await RemoveAsync(game, cancellationToken);
+        var unsafeRemaining = result.RemainingManagedFiles.Where(relative => !SafeDetachedMigrationFiles.Contains(relative)).ToArray();
+        if (unsafeRemaining.Length > 0)
+            throw new InvalidOperationException("The pre-SR restore preserved files that can still affect game startup: " + string.Join(", ", unsafeRemaining) + ". Review or restore them before switching routes.");
+
+        // Changed text configuration/log files are intentionally preserved, but without an
+        // OptiScaler proxy they are inert. Detach the old manifest so the official post-FSR
+        // installer can create its own manifest without adopting those user-edited files.
+        if (File.Exists(game.ManifestPath)) File.Delete(game.ManifestPath);
+        if (File.Exists(game.LegacyManifestPath)) File.Delete(game.LegacyManifestPath);
+        game.Status = "Restored";
+        return result with { RemainingManagedFiles = [], ManifestRetained = false };
+    }
 
     public async Task<OptiScalerInstallResult> InstallAsync(GameEntry game, OptiScalerPackage package, LocalWeights weights, OptiScalerPreset preset, bool update, string proxyName = "dxgi.dll", CancellationToken cancellationToken = default)
     {
@@ -34,6 +73,8 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             if (compatibility.FsrMarkers.Count == 0) throw new InvalidOperationException("No supported FSR runtime marker was found near this game.");
             if (compatibility.Dx12Evidence.Count == 0) throw new InvalidOperationException("No DirectX 12 evidence was found near this game.");
             if (!OptiScalerPackageService.IsRealWeightsFile(weights.Path)) throw new InvalidOperationException("The selected weights file is not a generated dlssnr_on_amd_weights.bin.");
+            var compatibilityBlock = GetCompatibilityBlock(game, package);
+            if (compatibilityBlock is not null) throw new InvalidOperationException(compatibilityBlock);
 
             var packageUpscaler = package.DependencyFolder is null ? null : Path.Combine(package.DependencyFolder, OptiScalerPackageService.RequiredUpscalerDependency);
             if (!(packageUpscaler is not null && File.Exists(packageUpscaler)) && !File.Exists(Path.Combine(folder, OptiScalerPackageService.RequiredUpscalerDependency)))
@@ -131,7 +172,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     await CopyVerifiedAsync(package.EnablerDllPath!, enablerRelative);
 
                 var baseIni = package.IniPath is null ? null : await File.ReadAllTextAsync(package.IniPath, cancellationToken);
-                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable), new UTF8Encoding(false), cancellationToken);
+                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable, Path.GetFileName(game.ExePath)), new UTF8Encoding(false), cancellationToken);
                 written.Add("OptiScaler.ini");
 
                 var after = await SnapshotAsync(folder, managed, cancellationToken);

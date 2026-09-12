@@ -79,6 +79,8 @@ OPTI_DEPENDENCY_FOLDER = "OptiScaler"
 OPTI_REQUIRED_UPSCALER = "amd_fidelityfx_upscaler_dx12.dll"
 OPTI_FORK_MARKER = "amd-presr"
 OPTI_PASS_MARKER = b"dlssnr_amd"
+CRIMSON_DESERT_EXE = "crimsondesert.exe"
+CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa"
 
 
 def sha256(path: Path) -> str:
@@ -420,7 +422,14 @@ def fetch_latest_release() -> dict[str, Any]:
         if asset.get("name") == UPSTREAM_ASSET:
             digest = asset.get("digest")
             if not isinstance(digest, str) or not digest.startswith("sha256:"):
-                raise RuntimeError("GitHub did not provide a SHA-256 digest for the official setup asset")
+                known = {
+                    ("v0.2.18", 7_570_162): "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3",
+                    ("v0.2.17", 7_538_418): "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc",
+                }
+                fallback = known.get((data.get("tag_name"), int(asset["size"])))
+                if fallback is None:
+                    raise RuntimeError("GitHub did not provide a SHA-256 digest for the official setup asset")
+                digest = "sha256:" + fallback
             return {
                 "tag": data.get("tag_name"),
                 "asset": asset["name"],
@@ -770,6 +779,8 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
     if not args.package or not args.weights:
         raise RuntimeError("--route optiscaler-presr requires --package and --weights")
     package = validate_package(Path(args.package), version_reader)
+    if game.name.lower() == CRIMSON_DESERT_EXE and sha256(Path(package["optiscaler_dll"])) == CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256:
+        raise RuntimeError("This OptiScaler AMD pre-SR v1.2 proxy is incompatible with Crimson Desert startup. Use the official post-FSR route for this game.")
     weights = Path(args.weights).resolve()
     if not is_real_weights(weights):
         raise RuntimeError("--weights must point to a generated dlssnr_on_amd_weights.bin")

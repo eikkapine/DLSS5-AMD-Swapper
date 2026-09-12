@@ -90,11 +90,11 @@
   ],
   "external_runtime": {
     "project": "danielblnc/DLSS-NR-on-AMD",
-    "tested_version": "v0.2.17",
-    "latest_checked_version": "v0.2.17",
+    "tested_version": "v0.2.18",
+    "latest_checked_version": "v0.2.18",
     "redistributed": false,
-    "official_setup_bytes": 7538418,
-    "official_setup_sha256": "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc",
+    "official_setup_bytes": 7570162,
+    "official_setup_sha256": "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3",
     "direct_game_required_config": {
       "Enabled": 1,
       "UseFsrInputs": 1,
@@ -124,7 +124,8 @@
   "optiscaler_presr_live": {
     "date": "2026-09-12",
     "game": "Crimson Desert (bin64)",
-    "route_switch": "post-FSR manifest removed first, pre-SR installed with the Quality preset",
+    "result": "the AMD pre-SR v1.2 proxy with SHA-256 07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa exits during Crimson Desert startup and is now blocked for this game",
+    "safe_fallback": "official post-FSR v0.2.18 installed with rich config verified; CrimsonDesert.exe remained running beyond the 25-second launch-health window",
     "package_fork_version": "10.0.0-dev (amd-presr-multipass-local) (20260907_075847)",
     "package_sha256sums_verified": true,
     "package_sha256sums_warnings": [
@@ -133,7 +134,7 @@
       "Licenses\\FidelityFX_v2_LICENSE.md",
       "Licenses\\XeSS_LICENSE.txt"
     ],
-    "weights_source": "locally generated copy from the Lossless Scaling bridge runtime folder",
-    "gameplay_capture": "pending; no performance number is claimed until a hashed capture exists"
+    "weights_source": "user-supplied or locally generated runtime input; not redistributed by this project",
+    "gameplay_capture": "pending; launch health is verified, but no performance number is claimed until a hashed capture exists"
   }
 }

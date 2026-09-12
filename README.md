@@ -104,6 +104,8 @@ These are the two comparison crops approved for the public repository.
 - AMD Software: Adrenalin Edition 26.1.1 or newer for the currently tested upstream path
 - Your own legitimate `nvngx_dlssnr.dll`
 
+The manager checks route-specific compatibility before installing. The currently tested AMD pre-SR v1.2 proxy is blocked for **Crimson Desert** because that exact proxy build exits during startup; the setup flow falls back to the official post-FSR AMD runtime instead. A future pre-SR proxy with a different verified hash is not automatically blacklisted.
+
 ### Lossless Scaling
 
 - Windows 11
@@ -171,3 +173,9 @@ This project builds on public research and compatibility work from:
 - [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)
 
 My original project code is released under the [MIT License](LICENSE). Third-party software keeps its own license and terms.
+
+## Legal
+
+This project is not affiliated with or endorsed by NVIDIA Corporation or AMD. DLSS is a trademark of NVIDIA Corporation; AMD and Radeon are trademarks of Advanced Micro Devices, Inc. The repository and release packages do not redistribute NVIDIA proprietary DLSS Neural Rendering DLLs, models or weights, or third-party AMD compatibility runtimes. Required third-party files must be supplied by the user from legitimately obtained copies and remain subject to their own licences and terms.
+
+The project is provided as-is, without warranty. Use it at your own risk.

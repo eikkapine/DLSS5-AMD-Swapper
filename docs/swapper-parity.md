@@ -5,7 +5,7 @@ Checked on 10 September 2026. This is a dated comparison, not a claim of complet
 ## Sources
 
 - NVIDIA Swapper [v2.2.5, released 9 September 2026](https://github.com/rakanki911/DLSS5-Swapper/releases/tag/v2.2.5), at [50605be](https://github.com/rakanki911/DLSS5-Swapper/commit/50605be2895f171a2f5e93d109e320515cfdb28f). Its [README at that revision](https://github.com/rakanki911/DLSS5-Swapper/blob/50605be2895f171a2f5e93d109e320515cfdb28f/README.md) is the feature reference.
-- AMD runtime [v0.2.17, released 9 September 2026](https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.2.17). The public documentation is at [057c873, 6 September 2026](https://github.com/danielblnc/DLSS-NR-on-AMD/tree/057c87324bfd8131c45c6b7e7de7d22ab46844d5). The documentation commit and runtime release are different artifacts; the release contains newer runtime fixes.
+- AMD runtime [v0.2.18, released 11 September 2026](https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.2.18). The public documentation tree can lag the binary release, so release metadata and runtime logs are treated separately.
 - The NVIDIA overlay's [versioned command protocol](https://github.com/rakanki911/DLSS5-Swapper/blob/50605be2895f171a2f5e93d109e320515cfdb28f/src/overlay-protocol.js) distinguishes Feeder and RenoDX controls and rejects unavailable or stale commands. It does not establish an AMD control interface.
 
 ## Manager features
@@ -33,7 +33,7 @@ The table reflects the September manager update. Remaining gaps are explicit; th
 
 ## Runtime changes worth carrying forward
 
-AMD v0.2.17 improves exposure-texture handling, multi-GPU reliability and dynamic-resolution stability. These are relevant to direct-game use. The manager already targets this release; updating the manager alone does not prove every previously installed game has that runtime. Check the installed runtime and its logs before attributing behavior to the release.
+AMD v0.2.18 improves frame pacing, latency, stutter and keyboard input handling and adds GTA V Enhanced frame-generation support. The manager resolves the latest official release dynamically; updating the manager alone does not prove every previously installed game has that runtime. Check the installed runtime and its logs before attributing behavior to the release.
 
 Earlier AMD [v0.2.15](https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.2.15) addressed repeated FSR3 capture, and [v0.2.13](https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.2.13) addressed an unintended CPU-copy fallback. These are reasons to verify capture and copy-path evidence. Upstream speed claims are not measurements of this project and are intentionally not reproduced here.
 

@@ -133,6 +133,24 @@ class PackageTests(unittest.TestCase):
 
 
 class InstallTests(unittest.TestCase):
+    def test_crimson_desert_blocks_only_known_bad_presr_proxy(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        crimson = f.game_dir / "CrimsonDesert.exe"
+        f.exe.replace(crimson)
+        f.exe = crimson
+        bad_hash = helper.sha256(f.package / "OptiScaler.dll")
+        original = helper.CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256
+        helper.CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256 = bad_hash
+        try:
+            args = helper.parse_args(["--game", str(f.exe), "--install", "--route", "optiscaler-presr", "--package", str(f.package), "--weights", str(f.weights)])
+            with self.assertRaisesRegex(RuntimeError, "incompatible with Crimson Desert startup"):
+                helper.install_optiscaler(args, version_reader=fake_fork)
+            self.assertFalse((f.game_dir / "dxgi.dll").exists())
+            self.assertFalse((f.game_dir / ".dlss5-amd-swapper.json").exists())
+        finally:
+            helper.CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256 = original
+
     def test_install_and_remove(self):
         f = Fixture()
         self.addCleanup(f.cleanup)

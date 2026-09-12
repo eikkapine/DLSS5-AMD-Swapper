@@ -8,7 +8,7 @@ public static class OptiScalerIniWriter
 
     public static bool RequiresEnabler(OptiScalerPreset preset) => preset == OptiScalerPreset.Performance;
 
-    public static string Build(string? baseIniText, OptiScalerPreset preset, bool enablerAvailable)
+    public static string Build(string? baseIniText, OptiScalerPreset preset, bool enablerAvailable, string? gameExe = null)
     {
         var ini = IniDocument.FromText(string.IsNullOrWhiteSpace(baseIniText) ? MinimalHeader : baseIniText);
         ini.Set("Upscalers", "Dx12Upscaler", "ffx");
@@ -21,6 +21,13 @@ public static class OptiScalerIniWriter
         ini.Set("DlssNr", "ApplyAfterRR", "false");
         ini.Set("Log", "LogToFile", "true");
         ini.Set("Log", "LogLevel", "2");
+
+        // Upstream OptiScaler disables DXGI spoofing for Crimson Desert because the game can
+        // otherwise reject the adapter as unsupported during startup. Set it explicitly here so
+        // the compatibility rule also wins when an older/package INI already contains Dxgi=true.
+        if (string.Equals(gameExe, "CrimsonDesert.exe", StringComparison.OrdinalIgnoreCase))
+            ini.Set("Spoofing", "Dxgi", "false");
+
         if (preset == OptiScalerPreset.Performance)
         {
             ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true");
