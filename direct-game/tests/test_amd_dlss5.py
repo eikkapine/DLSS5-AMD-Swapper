@@ -282,6 +282,36 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(summary_with_older["engine_initialized"])
         self.assertTrue(summary_with_older["session_scoped"])
 
+    def test_log_without_session_header_rejects_rich_verdict(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        log = f.game_dir / "dlssnr_on_amd.log"
+        startup_and_jobs = (
+            "first ffxDispatch type TEST\n"
+            "staging ready: colour 640x480 dxgi 28 test; motion 640x480 dxgi 16; depth 640x480 dxgi 40 (inverted 1); exposure yes; residual on\n"
+            "env: swapchain 1920x1080 format 28,\n"
+            "network job 1 done in 8 ms (6.25 ms network on the GPU, 0.50 ms waiting for the capture; history on, zero-copy)\n"
+        )
+        log.write_text(startup_and_jobs, encoding="utf-8")
+        summary = helper.summarize_runtime_log(log, "SecretGame.exe")
+        self.assertIsNotNone(summary)
+        self.assertFalse(summary["session_scoped"])
+        self.assertIsNone(summary["runtime_version"])
+
+        args = helper.parse_args(["--game", str(f.exe), "--diagnose"])
+        diag = helper.diagnose(args)
+        self.assertFalse(diag["rich_runtime_path_observed"])
+        self.assertIsNotNone(diag["runtime_log"])
+        self.assertFalse(diag["runtime_log"]["session_scoped"])
+
+        log.write_text(
+            f"dlssnr_amd v0.2.17 (build test) loaded into {f.exe.name} as winmm.dll\n" + startup_and_jobs,
+            encoding="utf-8",
+        )
+        diag_rich = helper.diagnose(args)
+        self.assertTrue(diag_rich["rich_runtime_path_observed"])
+        self.assertTrue(diag_rich["runtime_log"]["session_scoped"])
+
     def test_update_keeps_manifest_proxy_name(self):
         f = Fixture()
         self.addCleanup(f.cleanup)

@@ -1141,6 +1141,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
     runtime_log = summarize_runtime_log(folder / "dlssnr_on_amd.log", game.name)
     rich_runtime = bool(
         runtime_log
+        and runtime_log.get("session_scoped")
         and runtime_log.get("fidelityfx_dispatch_detected")
         and runtime_log.get("fsr_inputs")
         and runtime_log.get("timed_job_samples", 0) > 0

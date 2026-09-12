@@ -31,6 +31,13 @@ internal static class DiagnosticsRegressionTests
                 var boundary = await new RuntimeDiagnosticsService().InspectAsync(game);
                 Require(boundary.TimedJobs == 1, "Head/tail boundary duplicated a timing sample.");
             }
+            var noHeaderLog = startup + job;
+            await File.WriteAllTextAsync(game.LogPath, noHeaderLog);
+            var noHeaderResult = await new RuntimeDiagnosticsService().InspectAsync(game);
+            Require(!noHeaderResult.Sampled, "Small log should not be sampled.");
+            Require(!noHeaderResult.SessionScoped, "Log without a session header must not be session scoped.");
+            Require(!noHeaderResult.RichPathObserved, "Log without a session header claimed a rich verdict.");
+            Require(noHeaderResult.Summary.Contains("No runtime session for this executable was found in the log", StringComparison.Ordinal), "Summary did not report missing runtime session header.");
             var oldSession = string.Join('\n',
                 "dlssnr_amd v0.2.17 (build old) loaded into SecretGame.exe as winmm.dll",
                 "engine init ok",

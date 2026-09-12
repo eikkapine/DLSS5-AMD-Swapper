@@ -12,9 +12,7 @@ public sealed class RuntimeDiagnosticsService
         if (!File.Exists(game.LogPath)) return RuntimeDiagnostics.Empty(game.Running ? "Waiting for runtime log" : "Launch the game to collect runtime evidence");
         // Hash a fixed-length snapshot without allocating the complete (potentially huge) log.
         // Parse only bounded startup/recent evidence; this is not a full-session benchmark.
-        const int headLimit = 128 * 1024;
         const int tailLimit = 1024 * 1024;
-        var head = new byte[headLimit];
         var tail = new byte[tailLimit];
         var buffer = new byte[64 * 1024];
         long total = 0;
@@ -29,7 +27,6 @@ public sealed class RuntimeDiagnosticsService
                 var read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, snapshotLength - total)), cancellationToken);
                 if (read == 0) break;
                 hasher.AppendData(buffer, 0, read);
-                if (total < headLimit) Array.Copy(buffer, 0, head, (int)total, (int)Math.Min(read, headLimit - total));
                 int first = Math.Min(read, tailLimit - tailPosition);
                 Array.Copy(buffer, 0, tail, tailPosition, first);
                 if (read > first) Array.Copy(buffer, first, tail, 0, read - first);
@@ -107,7 +104,7 @@ public sealed class RuntimeDiagnosticsService
 
         // Without the session header in the sample the startup lines cannot be attributed to the
         // recent jobs, so no verified verdict is possible from the sample alone.
-        var rich = !sessionStartOutsideSample && dispatch && stage.Success && jobMatches.Count > 0;
+        var rich = sessionScoped && !sessionStartOutsideSample && dispatch && stage.Success && jobMatches.Count > 0;
         var startupStalled = sessionScoped && !engineInitialized && (presentQueue || gameDevice);
         var hooksFailed = sessionScoped && hookFailures > 0 && !engineInitialized;
         var summary = sessionStartOutsideSample
@@ -116,12 +113,13 @@ public sealed class RuntimeDiagnosticsService
                 : "Session start is outside the sampled window; no verdict from the recent sample"
             : rich
             ? faults + gpuErrors == 0 ? "Rich AMD Neural Rendering path observed" : "Rich path observed with runtime errors"
-            : dispatch ? "FidelityFX hook observed; waiting for complete neural jobs"
+            : sessionScoped && dispatch ? "FidelityFX hook observed; waiting for complete neural jobs"
             : hooksFailed ? $"AMD runtime {runtimeVersion} loaded, but {hookFailures} render hook(s) failed to install ({string.Join(", ", failedHooks)}); no frame reached the runtime, so Neural Rendering cannot activate in this launch" + (faults > 0 ? "; startup faults were logged" : string.Empty)
             : startupStalled && faults > 0 ? $"AMD runtime {runtimeVersion} reached game rendering but stalled before neural engine initialization; startup faults were logged"
             : startupStalled ? $"AMD runtime {runtimeVersion} reached game rendering but stalled before neural engine initialization"
             : sessionScoped && !engineInitialized ? $"AMD runtime {runtimeVersion} loaded; neural engine has not initialized in the latest session"
-            : engineInitialized ? "AMD neural engine initialized; waiting for FidelityFX dispatch"
+            : sessionScoped && engineInitialized ? "AMD neural engine initialized; waiting for FidelityFX dispatch"
+            : !sessionScoped && !sampled ? "No runtime session for this executable was found in the log"
             : "No rich FidelityFX neural dispatch observed in sampled evidence";
         if (sampled) summary += " · startup/recent log sample";
 

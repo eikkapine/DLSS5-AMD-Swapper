@@ -98,6 +98,7 @@ await RunAsync("Runtime log proves rich path", async () =>
     using var temp = new TempDirectory();
     var game = new GameEntry { Name = "Fixture", ExePath = Path.Combine(temp.Path, "FixtureGame.exe") };
     var log = string.Join('\n',
+        "dlssnr_amd v0.2.17 (build test) loaded into FixtureGame.exe as winmm.dll",
         "env: HIP: 1 device(s), driver 60241134, runtime 70100;",
         "env: swapchain 2560x1440 format 28, test",
         "first ffxDispatch type FFX_API_DISPATCH_UPSCALE_GENERATE_REACTIVE_DESCRIPTION",
@@ -111,6 +112,15 @@ await RunAsync("Runtime log proves rich path", async () =>
     Assert(result.OutputResolution == "2560×1440", "Output resolution was not parsed.");
     Assert(result.ZeroCopySamples == 1, "Zero-copy job was not counted.");
     Assert(result.LogSha256?.Length == 64, "Log SHA-256 was not recorded.");
+
+    var noHeaderLog = string.Join('\n',
+        "first ffxDispatch type FFX_API_DISPATCH_UPSCALE_GENERATE_REACTIVE_DESCRIPTION",
+        "staging ready: colour 1706x960 dxgi 28 test; motion 1706x960 dxgi 16; depth 1706x960 dxgi 40 (inverted 1); exposure yes; residual on",
+        "network job 1 done in 8 ms (6.25 ms network on the GPU, 0.50 ms waiting for the capture; history on, zero-copy)");
+    await File.WriteAllTextAsync(game.LogPath, noHeaderLog);
+    var noHeaderResult = await new RuntimeDiagnosticsService().InspectAsync(game);
+    Assert(!noHeaderResult.RichPathObserved, "Log without session header should not observe rich path.");
+    Assert(noHeaderResult.Summary.Contains("No runtime session", StringComparison.Ordinal), "Summary did not explain missing runtime session.");
 });
 
 await RunAsync("PE x64 validation works", () =>
