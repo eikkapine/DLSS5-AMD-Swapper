@@ -57,7 +57,11 @@ public partial class MainWindow
                 catch (InvalidOperationException error) { failure ??= $"{Path.GetFileName(candidate)}: {error.Message}"; }
             }
             var gameDirectories = Games.Select(game => game.DirectoryPath).ToArray();
-            _localWeights = await Task.Run(() => OptiScalerPackageService.FindLocalWeights(LocalWeightsPath, gameDirectories, LosslessInstallPath));
+            _localWeights = await Task.Run(() => OptiScalerPackageService.FindLocalWeights(
+                LocalWeightsPath,
+                gameDirectories,
+                LosslessInstallPath,
+                _optiPackage is null ? null : [_optiPackage.WeightsPath]));
             if (_localWeights is not null && !string.Equals(LocalWeightsPath, _localWeights.Path, StringComparison.OrdinalIgnoreCase)) LocalWeightsPath = _localWeights.Path;
             OptiScalerPackageStatus = _optiPackage is null
                 ? "OptiScaler package: " + (failure ?? "none found. Put the OptiScaler-AMD-PreSR-Multipass folder or zip in Downloads, or choose it below.")

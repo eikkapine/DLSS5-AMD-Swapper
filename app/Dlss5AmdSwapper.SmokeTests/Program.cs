@@ -9,6 +9,15 @@ await RuntimeControlRegressionTests.RunAsync(RunAsync);
 await DiagnosticsRegressionTests.RunAsync();
 await OptiScalerTests.RunAsync(RunAsync);
 
+await RunAsync("Crimson Desert selects the verified compatibility runtime", () =>
+{
+    var crimson = new GameEntry { ExePath = @"C:\Games\Crimson Desert\CrimsonDesert.exe" };
+    var other = new GameEntry { ExePath = @"C:\Games\Other\OtherGame.exe" };
+    Assert(RuntimeSourceService.GetPreferredUpstreamTag(crimson) == RuntimeSourceService.CrimsonDesertStableTag, "Crimson Desert compatibility tag was not selected.");
+    Assert(RuntimeSourceService.GetPreferredUpstreamTag(other) is null, "Compatibility tag leaked to unrelated games.");
+    return Task.CompletedTask;
+});
+
 await RunAsync("Installer restore preserves changed and pre-existing files", async () =>
 {
     using var temp = new TempDirectory();
@@ -42,6 +51,15 @@ await RunAsync("Installer refuses removal while a game is running", async () =>
     try { await installer.RemoveAsync(game, false); throw new Exception("Running game was accepted."); }
     catch (InvalidOperationException error) { Assert(error.Message.Contains("Close the game"), "Wrong rejection reason."); }
     Assert(!game.Busy, "Rejected operation left the game busy.");
+});
+
+await RunAsync("Installer detects a second proxy added after install", () =>
+{
+    var unexpected = DirectGameInstallerService.FindUnexpectedProxyNames(
+        ["VERSION.DLL", "dxgi.dll", "dlssnr_on_amd.ini"],
+        ["version.dll"]);
+    Assert(unexpected.SequenceEqual(["dxgi.dll"], StringComparer.OrdinalIgnoreCase), "Unexpected proxy detection did not isolate the added loader.");
+    return Task.CompletedTask;
 });
 
 

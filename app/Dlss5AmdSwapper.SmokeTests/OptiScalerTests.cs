@@ -48,6 +48,20 @@ internal static class OptiScalerTests
             return Task.CompletedTask;
         });
 
+        await run("Package validation detects community-bundle sibling enabler and weights", async () =>
+        {
+            using var temp = new OptiTemp();
+            var root = MakePackage(temp.Path, layout: "package", withSums: false);
+            var enabler = Path.Combine(temp.Path, "dlss-enabler-headless.dll");
+            var weights = Path.Combine(temp.Path, "dlssnr_on_amd_weights.bin");
+            await File.WriteAllBytesAsync(enabler, [1, 2, 3, 4]);
+            await File.WriteAllBytesAsync(weights, new byte[1024 * 1024 + 9]);
+            var package = OptiScalerPackageService.Validate(root, FakeFork);
+            Check(package.EnablerDllPath == enabler, "sibling enabler was not detected");
+            Check(package.WeightsPath == weights, "sibling weights were not detected");
+            Check(!package.Files.Keys.Any(key => key.Contains("..", StringComparison.Ordinal)), "external sibling leaked into package-relative file map");
+        });
+
         await run("Package validation accepts the Vodkaman layout", () =>
         {
             using var temp = new OptiTemp();
@@ -183,6 +197,15 @@ internal static class OptiScalerTests
             try { OptiScalerPackageService.FindLocalWeights(null, [game], ls); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("differ"), "disagreeing copies must fail"); }
             Check(OptiScalerPackageService.FindLocalWeights(null, [], Path.Combine(temp.Path, "nowhere")) is null, "no candidates must be null");
+        });
+
+        await run("Local weights resolver accepts a validated package candidate", async () =>
+        {
+            using var temp = new OptiTemp();
+            var weightsPath = Path.Combine(temp.Path, "bundle-weights.bin");
+            await File.WriteAllBytesAsync(weightsPath, new byte[1024 * 1024 + 11]);
+            var weights = OptiScalerPackageService.FindLocalWeights(null, [], null, [weightsPath]);
+            Check(weights?.Path == weightsPath, "validated package weights candidate was ignored");
         });
 
         await run("Discovery skips unreadable folders and finds packages", () =>
@@ -553,6 +576,9 @@ internal static class OptiScalerTests
             await control.SetSkinAsync(game, 2.0);
             var ini = IniDocument.Load(game.OptiScalerIniPath);
             Check(ini.Get("DlssNr", "Passes") == "3" && ini.Get("DlssNr", "Enabled") == "false" && ini.Get("DlssNr", "SkinStructure") == "2.0", "control writes");
+            game.Enabled = true; // deliberately stale; toggle must read the INI
+            await control.ToggleEnabledAsync(game);
+            Check(IniDocument.Load(game.OptiScalerIniPath).GetBool("DlssNr", "Enabled", false), "OptiScaler toggle used stale view-model state");
             try { await control.SetPassesAsync(game, 4); throw new Exception("accepted"); }
             catch (ArgumentOutOfRangeException) { }
         });

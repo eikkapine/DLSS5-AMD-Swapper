@@ -74,17 +74,17 @@ For an installed copy with Desktop and Start menu shortcuts, run `Install.cmd` f
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + Alt + F6` | Toggle the effect |
+| `Ctrl + Alt + F6` | Toggle the saved direct-game on/off state |
 | `Ctrl + Alt + F7` | Decrease strength |
 | `Ctrl + Alt + F8` | Increase strength |
 
 Lossless Scaling owns these keys while its bridge is active. The Swapper registers the same keys for a running managed direct-game target. The Lossless Scaling route supports effect strength up to `4.0`.
 
-Direct-game hotkeys save runtime settings. A saved value does not prove the running game applied it; press `End` for the upstream live overlay.
+Direct-game hotkeys save runtime settings. A saved value does not prove the running game applied it; press `End` for the upstream live overlay and use its live toggle for A/B testing.
 
 ## Latest compatibility research
 
-I track AMD runtime changes separately from manager features. See the [September AMD research](docs/amd-research-20260910.md) and [feature comparison](docs/swapper-parity.md) for tested boundaries, upstream changes, and features that still need an AMD-compatible consumer. Newer FSR technologies are not drop-in Neural Rendering replacements. This update does not claim a measured neural-rendering speedup.
+I track AMD runtime changes separately from manager features. See the [September AMD research](docs/amd-research-20260910.md) and [feature comparison](docs/swapper-parity.md) for tested boundaries, upstream changes, and features that still need an AMD-compatible consumer. Fresh testing on the updated Crimson Desert build is detailed in [Direct Game verification — 12 September 2026](docs/verification-20260912.md). Newer FSR technologies are not drop-in Neural Rendering replacements. This update does not claim a measured neural-rendering speedup.
 
 ## Before / after
 
@@ -153,6 +153,7 @@ The release contains my manager plus project-built bridge/wrapper files and scri
 | [Architecture](docs/architecture.md) | Manager, scanner, bridge, direct-game path, trust boundaries |
 | [Performance](docs/performance.md) | Measurement policy and analyzer output |
 | [Verification](docs/verification.md) | Runtime evidence and publication checks |
+| [12 September verification](docs/verification-20260912.md) | Direct-game Crimson Desert re-test, hook-failure evidence, and session diagnostics |
 | [Development](docs/development.md) | Building and working on the project |
 | [Licensing](docs/licensing.md) | Third-party boundary and redistribution rules |
 

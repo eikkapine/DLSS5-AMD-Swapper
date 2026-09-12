@@ -12,6 +12,24 @@ public sealed class OptiScalerControlService
     public Task<RuntimeChangeResult> SetEnabledAsync(GameEntry game, bool enabled, CancellationToken cancellationToken = default) =>
         ChangeAsync(game, ini => ini.Set(Section, "Enabled", enabled ? "true" : "false"), cancellationToken);
 
+    public Task<RuntimeChangeResult> ToggleEnabledAsync(GameEntry game, CancellationToken cancellationToken = default)
+    {
+        lock (WriteLock)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (game.Busy) throw new InvalidOperationException("Wait for the current game operation to finish before changing settings.");
+            if (!File.Exists(game.OptiScalerIniPath)) throw new InvalidOperationException("OptiScaler.ini is not installed for this game.");
+            var ini = IniDocument.Load(game.OptiScalerIniPath);
+            var enabled = !ini.GetBool(Section, "Enabled", true);
+            ini.Set(Section, "Enabled", enabled ? "true" : "false");
+            ini.SaveAtomic(game.OptiScalerIniPath);
+            _runtime.Refresh(game);
+            return Task.FromResult(new RuntimeChangeResult(false, game.Running
+                ? $"Saved {(enabled ? "ON" : "OFF")}. Use Insert for the live OptiScaler Neural Rendering control in this session."
+                : $"Saved {(enabled ? "ON" : "OFF")} for the next launch."));
+        }
+    }
+
     public Task<RuntimeChangeResult> SetPassesAsync(GameEntry game, int passes, CancellationToken cancellationToken = default)
     {
         if (passes is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(passes), "Passes must be 1, 2 or 3.");

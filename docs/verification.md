@@ -27,7 +27,7 @@ The current bridge keeps the accepted native-source compositor behavior:
 - unstable broad colour/luminance residuals are filtered
 - stale chroma/correction magnitude is reduced during motion
 - correction history is reused only where the source is effectively unchanged
-- `Ctrl+Alt+F6/F7/F8` control toggle/decrease/increase
+- `Ctrl+Alt+F6/F7/F8` save toggle/decrease/increase settings; use the upstream live overlay to verify the active renderer state
 
 The only public gameplay images are the two previously approved CS2 crops under `docs/images/`.
 
@@ -38,6 +38,10 @@ The direct route has been exercised with the official upstream setup on a local 
 The manager and Python helper both block common anti-cheat markers. The WPF probe specifically checks that anti-cheat evidence overrides an otherwise compatible x64/FSR/DX12 target.
 
 The direct installer records a reversible manifest and preserves files whose current hashes no longer match the install-time state instead of deleting them blindly.
+
+### Session-scoped evidence
+
+The manager evaluates runtime diagnostics strictly per session: only the newest `dlssnr_amd ... loaded into <game exe>` session in `dlssnr_on_amd.log` counts. Older successful runs can no longer mask a newer failed or stalled launch. When render detour failures (`detour of <function> failed (<code>)`) occur without engine initialization, the manager reports that render hooks failed to install, explains that no frames reached the runtime, and sets the game status to `Neural engine stalled - render hooks failed this launch`. Setting `Enabled=1` in the configuration or having high rendering performance does not prove Neural Rendering is active; only logged engine initialization, FidelityFX dispatch, and network job executions constitute verified evidence.
 
 ## Reference-image comparison
 

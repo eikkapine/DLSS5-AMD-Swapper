@@ -158,7 +158,7 @@ Restoring a game installation removes only files created by the manager that sti
 - **Frame generation requirements**: The performance preset requires the target game to support and call DLSS-G / Streamline frame generation.
 - **No runtime INI hot reload**: Hot reloading of `OptiScaler.ini` is unproven. The in-game `Insert` menu is the authoritative control surface while the game is running.
 - **Lossless Scaling incompatibility**: OptiScaler cannot be run inside Lossless Scaling. Lossless Scaling presents captured frames using Direct3D 11, whereas OptiScaler pre-SR requires a DirectX 12 super-resolution call.
-- **Crimson Desert**: the currently tested AMD pre-SR v1.2 proxy (`07a1e2ca…b2b0caa`) exits during startup. DLSS5 AMD Swapper blocks that exact build for `CrimsonDesert.exe` and uses the official post-FSR route instead. This is hash-specific so a future fixed AMD pre-SR build can be tested without changing the game blacklist.
+- **Crimson Desert**: the pre-SR v1.2 proxy (SHA-256 `07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa`) is blocked for Crimson Desert because it causes startup access-violation faults, and the manager migrates such installs back to the post-FSR route. This is hash-specific so a future fixed AMD pre-SR build can be tested without changing the game blacklist.
 
 ## Advanced CLI
 

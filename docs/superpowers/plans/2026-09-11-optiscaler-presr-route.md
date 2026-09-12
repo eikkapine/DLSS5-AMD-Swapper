@@ -3350,11 +3350,11 @@ Run: `.\app\Build-Package.ps1` → smoke tests pass, ZIP under `artifacts\`. Con
 
 - [ ] **Step 2: Prepare local sources**
 
-Extract `C:\Downloads\Videos pro Tech-20260911T003509Z-1-001.zip` → `Arquivos necessarios.zip` → folder `OptiScaler-AMD-PreSR-Multipass-v1.2` into `%USERPROFILE%\Downloads\`. Keep the 147 MB weights out of the repo. Launch `artifacts\DLSS5-AMD-Swapper-local\Dlss5AmdSwapper.exe`; Settings must show `OptiScaler package: 10.0.0-dev (amd-presr-multipass-local) … SHA256SUMS verified · weights ready` with weights from `D:\SteamLibrary\steamapps\common\Lossless Scaling\nr-bridge\runtime`.
+Extract `C:\Downloads\Videos pro Tech-20260911T003509Z-1-001.zip` → `Arquivos necessarios.zip` → folder `OptiScaler-AMD-PreSR-Multipass-v1.2` into `%USERPROFILE%\Downloads\`. Keep the 147 MB weights out of the repo. Launch `artifacts\DLSS5-AMD-Swapper-local\Dlss5AmdSwapper.exe`; Settings must show `OptiScaler package: 10.0.0-dev (amd-presr-multipass-local) … SHA256SUMS verified · weights ready` with weights from `<runtime source folder>\runtime`.
 
 - [ ] **Step 3: Install on Crimson Desert**
 
-Games → Crimson Desert → Restore (post-FSR route) → Set up → OptiScaler pre-SR, Quality → confirm. Verify in `D:\SteamLibrary\steamapps\common\Crimson Desert\bin64`: `dxgi.dll`, `OptiScaler.ini` (`[DlssNr] RunBeforeSR=true`), `dlssnr_amd_pass1..3.dll`, `dlssnr_on_amd_weights.bin`, `OptiScaler\`, manifest route `amd-optiscaler-presr`, no `winmm.dll`.
+Games → Crimson Desert → Restore (post-FSR route) → Set up → OptiScaler pre-SR, Quality → confirm. Verify in `<game folder>\bin64`: `dxgi.dll`, `OptiScaler.ini` (`[DlssNr] RunBeforeSR=true`), `dlssnr_amd_pass1..3.dll`, `dlssnr_on_amd_weights.bin`, `OptiScaler\`, manifest route `amd-optiscaler-presr`, no `winmm.dll`.
 
 - [ ] **Step 4: Owner plays**
 

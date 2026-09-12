@@ -38,6 +38,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _runtimeNrStatus = "NVIDIA runtime: searching local copies";
     private bool _closing;
     private bool _installOperation;
+    private int _diagnosticsRefreshInFlight;
+    private bool _diagnosticsRefreshPending;
     private long _pollCount;
     private bool _losslessDeviceInitialized;
     private HashSet<string> _runningProcessNames = new(StringComparer.OrdinalIgnoreCase);
@@ -106,6 +108,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ = ResolveOptiScalerSourcesAsync(false);
         RefreshLosslessLayers();
         Navigate(_settings.LastPage);
+        // Process/hotkey polling must not wait for a potentially long library scan.
+        // As managed games are discovered, the timer can make a running target live immediately.
+        RefreshProcessSnapshot();
+        _runtimeTimer.Start();
+        UpdateHotkeyRegistration();
         IsScanning = true;
         _scanCancellation = new CancellationTokenSource();
         try { await LoadGamesAsync(_scanCancellation.Token); }
@@ -115,7 +122,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await RefreshRuntimeSourcesAsync(false);
         Navigate(_settings.LastPage);
         RefreshProcessSnapshot();
-        _runtimeTimer.Start();
         UpdateHotkeyRegistration();
     }
 
@@ -308,7 +314,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async Task InstallPostFsrAsync(GameEntry target, bool update)
     {
         ShowToast("Preparing verified runtime sources…");
-        var sources = await ResolveRuntimeSourcesAsync(promptForNr: true);
+        var sources = await ResolveRuntimeSourcesAsync(promptForNr: true, target);
         ShowToast(update ? "Updating AMD Neural Rendering…" : "Installing AMD Neural Rendering…");
         var result = await _installer.InstallAsync(target, sources.SetupPath, sources.NrDllPath!, update);
         _runtime.Refresh(target);
@@ -371,36 +377,58 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshDiagnosticsAsync(bool toast)
     {
-        if (SelectedGame is null)
+        if (Interlocked.CompareExchange(ref _diagnosticsRefreshInFlight, 1, 0) != 0)
         {
-            DiagnosticsSummary = "Select a game to inspect runtime evidence.";
-            DiagnosticsDetail = string.Empty;
-            return;
-        }
-        if (SelectedGame.IsPreSr)
-        {
-            try { await RefreshPreSrDiagnosticsAsync(SelectedGame, toast); }
-            catch (Exception ex) { if (toast) ShowError(ex); }
+            _diagnosticsRefreshPending = true;
+            if (toast) ShowToast("Evidence refresh already running.");
             return;
         }
         try
         {
-            var target = SelectedGame;
-            var diag = await _diagnostics.InspectAsync(target);
-            if (!ReferenceEquals(SelectedGame, target) || _closing) return;
-            DiagnosticsSummary = diag.Summary;
-            var parts = new List<string> { diag.EvidenceScope };
-            if (diag.InputResolution is not null) parts.Add($"FSR input {diag.InputResolution}");
-            if (diag.OutputResolution is not null) parts.Add($"output {diag.OutputResolution}");
-            if (diag.MeanNetworkGpuMs is not null) parts.Add($"network {diag.MeanNetworkGpuMs:0.00} ms GPU mean ({diag.TimedJobs} samples)");
-            if (diag.Interop is not null) parts.Add(diag.Interop);
-            if (diag.FaultLines + diag.GpuErrorLines > 0) parts.Add($"{diag.FaultLines} fault / {diag.GpuErrorLines} GPU-error lines");
-            if (diag.FullOutputResolutionInput) parts.Add("FSR input currently equals output resolution; an in-game FSR quality mode can reduce the hidden neural workload");
-            DiagnosticsDetail = string.Join(" · ", parts);
-            if (diag.RichPathObserved) SelectedGame.RuntimeStatus = "Rich runtime observed";
-            if (toast) ShowToast(diag.Summary, diag.RichPathObserved);
+            if (SelectedGame is null)
+            {
+                DiagnosticsSummary = "Select a game to inspect runtime evidence.";
+                DiagnosticsDetail = string.Empty;
+                return;
+            }
+            if (SelectedGame.IsPreSr)
+            {
+                try { await RefreshPreSrDiagnosticsAsync(SelectedGame, toast); }
+                catch (Exception ex) { if (toast) ShowError(ex); }
+                return;
+            }
+            try
+            {
+                var target = SelectedGame;
+                var diag = await _diagnostics.InspectAsync(target);
+                if (!ReferenceEquals(SelectedGame, target) || _closing) return;
+                DiagnosticsSummary = diag.Summary;
+                var parts = new List<string> { diag.EvidenceScope };
+                if (diag.InputResolution is not null) parts.Add($"FSR input {diag.InputResolution}");
+                if (diag.OutputResolution is not null) parts.Add($"output {diag.OutputResolution}");
+                if (diag.MeanNetworkGpuMs is not null) parts.Add($"network {diag.MeanNetworkGpuMs:0.00} ms GPU mean ({diag.TimedJobs} samples)");
+                if (diag.Interop is not null) parts.Add(diag.Interop);
+                if (diag.FaultLines + diag.GpuErrorLines > 0) parts.Add($"{diag.FaultLines} fault / {diag.GpuErrorLines} GPU-error lines");
+                if (diag.FullOutputResolutionInput) parts.Add("FSR input currently equals output resolution; an in-game FSR quality mode can reduce the hidden neural workload");
+                DiagnosticsDetail = string.Join(" · ", parts);
+                if (target.Running)
+                {
+                    if (diag.RichPathObserved) target.RuntimeStatus = "Neural Rendering active - log verified";
+                    else if (diag.HooksFailed) target.RuntimeStatus = "Neural engine stalled - render hooks failed this launch";
+                    else if (diag.StartupStalled) target.RuntimeStatus = "Neural engine stalled - effect inactive this launch";
+                    else if (diag.FidelityFxDispatchObserved) target.RuntimeStatus = "FidelityFX hooked - waiting for neural jobs";
+                    else if (diag.EngineInitialized) target.RuntimeStatus = "Neural engine initialized - waiting for FidelityFX";
+                    else if (diag.SessionScoped) target.RuntimeStatus = "Runtime loaded - Neural Rendering not active yet";
+                }
+                if (toast) ShowToast(diag.Summary, diag.RichPathObserved);
+            }
+            catch (Exception ex) { if (toast) ShowError(ex); }
         }
-        catch (Exception ex) { if (toast) ShowError(ex); }
+        finally
+        {
+            Interlocked.Exchange(ref _diagnosticsRefreshInFlight, 0);
+            if (_diagnosticsRefreshPending) { _diagnosticsRefreshPending = false; _ = RefreshDiagnosticsAsync(false); }
+        }
     }
 
     private void RuntimeTimer_Tick(object? sender, EventArgs e)
@@ -411,8 +439,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             var processName = Path.GetFileNameWithoutExtension(game.ExePath);
             var running = _runningProcessNames.Contains(processName) && RuntimeControlService.IsRunning(game.ExePath);
+            var wasRunning = game.Running;
             if (running || game.Running != running || ReferenceEquals(game, SelectedGame) || _pollCount % 15 == 0)
                 _runtime.Refresh(game, running);
+            if (ReferenceEquals(game, SelectedGame) && running && (!wasRunning || _pollCount % 5 == 0))
+                _ = RefreshDiagnosticsAsync(false);
         }
         UpdateHotkeyRegistration();
     }
@@ -449,7 +480,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             HotkeyStatus = bridgeRunning ? "Lossless Scaling bridge owns F6/F7/F8" : RegisterHotkeys ? "Waiting for a managed game or Lossless Scaling" : "Hotkeys disabled";
             return;
         }
-        var label = wanted == HotkeySet.DirectGame ? $"F6/F7/F8 → {target!.Name}" : $"F9/F10/F11 → Lossless Scaling layers ({_losslessLayerTarget})";
+        var label = wanted == HotkeySet.DirectGame ? $"Ctrl+Alt+F6/F7/F8 → {target!.Name}" : $"Ctrl+Alt+F9/F10/F11 → Lossless Scaling layers ({_losslessLayerTarget})";
         if (_hotkeys is not null) { HotkeyStatus = label; return; }
         try
         {
@@ -474,7 +505,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             RuntimeChangeResult result = hotkey switch
             {
-                SwapperHotkey.Toggle => target.IsPreSr ? await _optiControl.SetEnabledAsync(target, !target.Enabled) : await _runtime.SetEnabledAsync(target, !target.Enabled),
+                SwapperHotkey.Toggle => target.IsPreSr ? await _optiControl.ToggleEnabledAsync(target) : await _runtime.ToggleEnabledAsync(target),
                 SwapperHotkey.Decrease => target.IsPreSr ? await _optiControl.SetStructureAsync(target, target.LocalStructure - 0.1) : await _runtime.AdjustStructureAsync(target, -0.1),
                 SwapperHotkey.Increase => target.IsPreSr ? await _optiControl.SetStructureAsync(target, target.LocalStructure + 0.1) : await _runtime.AdjustStructureAsync(target, 0.1),
                 _ => new RuntimeChangeResult(false, "No action")
@@ -509,17 +540,19 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private async Task<RuntimeSourceResult> ResolveRuntimeSourcesAsync(bool promptForNr)
+    private async Task<RuntimeSourceResult> ResolveRuntimeSourcesAsync(bool promptForNr, GameEntry? target = null)
     {
-        RuntimeSourcesStatus = "Checking automatic runtime sources…";
-        RuntimeSetupStatus = "Official setup: checking GitHub release and SHA-256";
+        var preferredTag = RuntimeSourceService.GetPreferredUpstreamTag(target);
+        RuntimeSourcesStatus = preferredTag is null ? "Checking automatic runtime sources…" : $"Checking {preferredTag} compatibility runtime…";
+        RuntimeSetupStatus = preferredTag is null ? "Official setup: checking GitHub release and SHA-256" : $"Official setup: verifying {preferredTag} for {target!.Name}";
         RuntimeNrStatus = "NVIDIA runtime: searching local copies";
 
         var result = await _runtimeSources.EnsureAsync(
             UpstreamSetupPath,
             NvngxDlssNrPath,
             Games,
-            [LosslessNrPath]);
+            [LosslessNrPath],
+            preferredTag);
 
         if (!string.Equals(UpstreamSetupPath, result.SetupPath, StringComparison.OrdinalIgnoreCase))
             UpstreamSetupPath = result.SetupPath;
@@ -539,7 +572,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             result = result with { NrDllPath = selected, NrDllFound = true };
         }
 
-        RuntimeSetupStatus = $"Official setup: {result.UpstreamTag} verified{(result.SetupDownloaded ? " and cached" : string.Empty)}";
+        RuntimeSetupStatus = $"Official setup: {result.UpstreamTag} verified{(result.SetupDownloaded ? " and cached" : string.Empty)}{(preferredTag is null ? string.Empty : " · compatibility selected")}";
         RuntimeNrStatus = result.NrDllFound
             ? "NVIDIA runtime: validated local x64 DLL ready"
             : "NVIDIA runtime: no local copy found yet — it will be requested only when needed";

@@ -52,3 +52,7 @@ For the current direct-game path, follow the runtime's documented AMD driver req
 5. Defer new kernel routes, async gameplay defaults, multipass and low-resolution neural presets until implementation rights, runtime support and measured quality/performance evidence exist.
 
 No runtime binaries were downloaded, patched or installed for this review.
+
+## Update — 12 September 2026
+
+Following the 11 September 2026 Crimson Desert update, re-testing on the development machine confirmed that the game executable now breaks three essential render detours in both upstream v0.2.17 and v0.2.18, stalling the runtime before neural engine initialization. The OptiScaler AMD pre-SR v1.2 proxy also causes startup access violations and is now blocked for this title. I updated the manager and CLI diagnostics to enforce session-scoped verification, detect failed render hooks, and report inactive runtime sessions truthfully. Full test logs, mitigation checks, and reproduction details are documented in [Direct Game verification — 12 September 2026](verification-20260912.md).

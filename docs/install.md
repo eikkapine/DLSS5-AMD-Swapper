@@ -87,14 +87,14 @@ Sources below the cap are not enlarged for the neural pass.
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Alt+F6` | Toggle effect |
+| `Ctrl+Alt+F6` | Toggle saved direct-game on/off state |
 | `Ctrl+Alt+F7` | Decrease strength |
 | `Ctrl+Alt+F8` | Increase strength |
 | `Ctrl+Alt+F9` | Cycle selected layer (Structure, Skin, Tone) |
 | `Ctrl+Alt+F10` | Decrease selected layer strength (-0.1) |
 | `Ctrl+Alt+F11` | Increase selected layer strength (+0.1) |
 
-Lossless Scaling owns `Ctrl+Alt+F6/F7/F8` while its bridge is active, and accepts `Ctrl+Alt+F9/F10/F11` to adjust layer settings in the bridge runtime INI while `LosslessScaling.exe` runs. The manager registers `Ctrl+Alt+F6/F7/F8` for a running managed direct-game target.
+Lossless Scaling owns `Ctrl+Alt+F6/F7/F8` while its bridge is active, and accepts `Ctrl+Alt+F9/F10/F11` to adjust layer settings in the bridge runtime INI while `LosslessScaling.exe` runs. The manager registers `Ctrl+Alt+F6/F7/F8` for a running managed direct-game target. For the official post-FSR runtime, F6 saves the configured state; use the upstream `End` overlay for the authoritative live toggle.
 
 ## Restore / uninstall
 

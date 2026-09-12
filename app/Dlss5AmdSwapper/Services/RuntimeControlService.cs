@@ -14,6 +14,7 @@ public sealed class RuntimeControlService
     {
         lock (ConfigWriteLock)
         {
+            var wasRunning = game.Running;
             game.LiveAcknowledged = false;
             game.Route = ManagedManifest.ReadRoute(game);
             game.Running = runningOverride ?? IsRunning(game.ExePath);
@@ -30,7 +31,9 @@ public sealed class RuntimeControlService
                     game.Passes = int.TryParse(ini.Get(OptiScalerControlService.Section, "Passes"), out var passes) ? Math.Clamp(passes, 1, 3) : 1;
                 }
                 else ResetControls(game);
-                game.RuntimeStatus = !game.Installed ? "Not installed" : game.Running ? "Game running - Insert opens the OptiScaler menu" : "Ready for next launch";
+                if (!game.Installed) game.RuntimeStatus = "Not installed";
+                else if (!game.Running) game.RuntimeStatus = "Ready for next launch";
+                else if (!wasRunning || !IsEvidenceRuntimeStatus(game.RuntimeStatus)) game.RuntimeStatus = "Game running - Insert opens the OptiScaler menu";
                 return;
             }
 
@@ -45,9 +48,22 @@ public sealed class RuntimeControlService
             }
             else ResetControls(game);
             game.Passes = 1;
-            game.RuntimeStatus = !game.Installed ? "Not installed" : game.Running ? "Game running - End opens AMD live controls" : "Ready for next launch";
+            if (!game.Installed)
+                game.RuntimeStatus = "Not installed";
+            else if (!game.Running)
+                game.RuntimeStatus = "Ready for next launch";
+            else if (!wasRunning || !IsEvidenceRuntimeStatus(game.RuntimeStatus))
+                game.RuntimeStatus = "Game running - verifying Neural Rendering";
         }
     }
+
+    private static bool IsEvidenceRuntimeStatus(string status) =>
+        status.StartsWith("Neural Rendering active", StringComparison.Ordinal)
+        || status.StartsWith("Pre-SR observed", StringComparison.Ordinal)
+        || status.StartsWith("Neural engine stalled", StringComparison.Ordinal)
+        || status.StartsWith("Neural engine initialized", StringComparison.Ordinal)
+        || status.StartsWith("FidelityFX hooked", StringComparison.Ordinal)
+        || status.StartsWith("Runtime loaded", StringComparison.Ordinal);
 
     private static void ResetControls(GameEntry game)
     {
@@ -59,6 +75,23 @@ public sealed class RuntimeControlService
     public async Task<RuntimeChangeResult> SetEnabledAsync(GameEntry game, bool enabled, CancellationToken cancellationToken = default)
     {
         return await ChangeAsync(game, ini => ini.Set(Section, "Enabled", enabled ? "1" : "0"), cancellationToken);
+    }
+
+    public Task<RuntimeChangeResult> ToggleEnabledAsync(GameEntry game, CancellationToken cancellationToken = default)
+    {
+        lock (ConfigWriteLock)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureEditable(game);
+            var ini = IniDocument.Load(game.ConfigPath);
+            var enabled = !ini.GetBool(Section, "Enabled", true);
+            ini.Set(Section, "Enabled", enabled ? "1" : "0");
+            ini.SaveAtomic(game.ConfigPath);
+            Refresh(game);
+            return Task.FromResult(new RuntimeChangeResult(false, game.Running
+                ? $"Saved {(enabled ? "ON" : "OFF")}. The post-FSR runtime has no supported external live-toggle API; use End for its live controls in this session, or relaunch."
+                : $"Saved {(enabled ? "ON" : "OFF")} for the next launch."));
+        }
     }
 
     public async Task<RuntimeChangeResult> AdjustStructureAsync(GameEntry game, double delta, CancellationToken cancellationToken = default)

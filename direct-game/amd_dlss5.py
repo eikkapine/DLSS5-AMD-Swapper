@@ -22,12 +22,15 @@ import sys
 import tempfile
 import time
 from typing import Any
+import urllib.parse
 import urllib.request
 
 
 UPSTREAM_API = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/latest"
+UPSTREAM_TAG_API = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/tags/"
 UPSTREAM_RELEASES = "https://github.com/danielblnc/DLSS-NR-on-AMD/releases"
 UPSTREAM_ASSET = "dlssnr_on_amd_setup.exe"
+CRIMSON_DESERT_STABLE_TAG = "v0.2.17"
 MANIFEST_NAME = ".dlss5-amd-swapper.json"
 LEGACY_MANIFEST_NAME = ".nr-auto-scale-direct.json"
 
@@ -414,10 +417,13 @@ def dx12_evidence(exe: Path, fsr_markers: list[str]) -> list[str]:
     return sorted(set(evidence))
 
 
-def fetch_latest_release() -> dict[str, Any]:
-    request = urllib.request.Request(UPSTREAM_API, headers={"User-Agent": "DLSS5-AMD-Swapper direct-game helper"})
+def fetch_release(tag: str | None = None) -> dict[str, Any]:
+    url = UPSTREAM_API if tag is None else UPSTREAM_TAG_API + urllib.parse.quote(tag, safe="")
+    request = urllib.request.Request(url, headers={"User-Agent": "DLSS5-AMD-Swapper direct-game helper"})
     with urllib.request.urlopen(request, timeout=15) as response:
         data = json.load(response)
+    if tag is not None and data.get("tag_name") != tag:
+        raise RuntimeError(f"GitHub returned {data.get('tag_name')!r} instead of requested official release {tag}")
     for asset in data.get("assets", []):
         if asset.get("name") == UPSTREAM_ASSET:
             digest = asset.get("digest")
@@ -437,21 +443,25 @@ def fetch_latest_release() -> dict[str, Any]:
                 "sha256": digest[7:].lower(),
                 "release_page": UPSTREAM_RELEASES,
             }
-    raise RuntimeError("The latest official release has no dlssnr_on_amd_setup.exe asset")
+    raise RuntimeError("The requested official release has no dlssnr_on_amd_setup.exe asset")
 
 
-def validate_setup(path: Path) -> dict[str, Any]:
+def validate_setup(path: Path, compatibility_tag: str | None = None) -> dict[str, Any]:
     if not path.is_file():
         raise RuntimeError(f"Setup executable not found: {path}")
-    release = fetch_latest_release()
     actual = sha256(path)
     size = path.stat().st_size
-    if actual != release["sha256"] or size != release["size"]:
-        raise RuntimeError(
-            "The supplied setup file does not match the latest official GitHub release digest. "
-            f"Download it from {UPSTREAM_RELEASES}."
-        )
-    return release
+    release = fetch_release()
+    if actual == release["sha256"] and size == release["size"]:
+        return release
+    if compatibility_tag is not None:
+        compatible = fetch_release(compatibility_tag)
+        if actual == compatible["sha256"] and size == compatible["size"]:
+            return compatible
+    raise RuntimeError(
+        "The supplied setup file does not match the current official release or the selected compatibility release. "
+        f"Download it from {UPSTREAM_RELEASES}."
+    )
 
 
 def validate_nr_dll(path: Path) -> dict[str, Any]:
@@ -587,7 +597,8 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
 
     setup_source = Path(args.upstream_setup).resolve()
     nr_source = Path(args.nr_dll).resolve()
-    release = validate_setup(setup_source)
+    compatibility_tag = CRIMSON_DESERT_STABLE_TAG if game.name.lower() == "crimsondesert.exe" else None
+    release = validate_setup(setup_source, compatibility_tag)
     nr_meta = validate_nr_dll(nr_source)
     folder = game.parent
     manifest_path = folder / MANIFEST_NAME
@@ -600,6 +611,18 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(f"A managed install already exists: {existing_manifest_path}. Use --update")
 
     before = snapshot(folder)
+    if args.update and existing_manifest_path is not None:
+        try:
+            prior_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            prior_manifest = {}
+        managed_proxies = [p.lower() for p in ((prior_manifest or {}).get("installed_proxy_names") or [])]
+        unexpected = [name for name in KNOWN_PROXY_NAMES if name in before and name.lower() not in managed_proxies]
+        if unexpected:
+            raise RuntimeError(
+                "Additional proxy DLLs appeared after this managed install: " + ", ".join(unexpected)
+                + ". Restore or remove the other loader before updating Neural Rendering so two injection routes do not compete during game startup"
+            )
     if not args.update:
         existing_proxy = [name for name in KNOWN_PROXY_NAMES if name in before]
         if existing_proxy:
@@ -609,8 +632,9 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     previous_manifest = existing_manifest_path.read_bytes() if existing_manifest_path is not None else None
+    previous_manifest_data = json.loads(previous_manifest.decode("utf-8")) if previous_manifest else None
     local_setup = folder / UPSTREAM_ASSET
-    if local_setup.exists() and sha256(local_setup) != release["sha256"]:
+    if local_setup.exists() and sha256(local_setup) != release["sha256"] and not args.update:
         raise RuntimeError(f"A different {UPSTREAM_ASSET} already exists in the game folder")
     local_nr = folder / "nvngx_dlssnr.dll"
     if local_nr.exists() and sha256(local_nr) != nr_meta["sha256"]:
@@ -623,7 +647,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             if source.is_file():
                 shutil.copy2(source, backup / name)
         try:
-            if not local_setup.exists():
+            if not local_setup.exists() or sha256(local_setup) != release["sha256"]:
                 shutil.copy2(setup_source, local_setup)
             if not local_nr.exists():
                 shutil.copy2(nr_source, local_nr)
@@ -632,7 +656,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             after = snapshot(folder)
             changed_proxy = [name for name in KNOWN_PROXY_NAMES if name in after and before.get(name) != after.get(name)]
             if args.update:
-                old_manifest = json.loads(previous_manifest.decode("utf-8")) if previous_manifest else {}
+                old_manifest = previous_manifest_data or {}
                 installed_proxy = [name for name in (old_manifest.get("installed_proxy_names") or []) if name in after]
                 if not installed_proxy:
                     installed_proxy = [name for name in KNOWN_PROXY_NAMES if name in after]
@@ -657,11 +681,11 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
                 "nvngx_dlssnr": nr_meta,
                 "compatibility": info,
                 "verified_config": verified_config,
-                "before": before,
+                "before": (previous_manifest_data or {}).get("before", before) if args.update else before,
                 "after": after,
                 "installed_proxy_names": installed_proxy,
-                "managed_setup_was_created": UPSTREAM_ASSET not in before,
-                "model_was_copied": "nvngx_dlssnr.dll" not in before,
+                "managed_setup_was_created": (previous_manifest_data or {}).get("managed_setup_was_created", UPSTREAM_ASSET not in before) if args.update else UPSTREAM_ASSET not in before,
+                "model_was_copied": (previous_manifest_data or {}).get("model_was_copied", "nvngx_dlssnr.dll" not in before) if args.update else "nvngx_dlssnr.dll" not in before,
             }
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
             if existing_manifest_path is not None and existing_manifest_path != manifest_path and existing_manifest_path.exists():
@@ -972,11 +996,23 @@ def summarize_presr(folder: Path) -> dict[str, Any]:
     }
 
 
-def summarize_runtime_log(path: Path) -> dict[str, Any] | None:
+def summarize_runtime_log(path: Path, game_exe: str | None = None) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     raw = path.read_bytes()
     text = raw.decode("utf-8", errors="replace")
+    session_version = None
+    session_scoped = False
+    if game_exe:
+        sessions = list(re.finditer(
+            rf"(?im)^dlssnr_amd (?P<version>v[^\s]+).* loaded into {re.escape(game_exe)}(?:\s|$).*",
+            text,
+        ))
+        if sessions:
+            latest = sessions[-1]
+            session_version = latest.group("version")
+            text = text[latest.start():]
+            session_scoped = True
     job_rows = [
         (int(job), int(wall), float(gpu), float(wait), history.lower() == "on", zero_copy.lower() == "zero-copy")
         for job, wall, gpu, wait, history, zero_copy in re.findall(
@@ -1002,14 +1038,36 @@ def summarize_runtime_log(path: Path) -> dict[str, Any] | None:
     )
     hip = re.search(r"env: HIP: (\d+) device\(s\), driver (\d+), runtime (\d+);", text)
     swapchain = re.search(r"env: swapchain (\d+)x(\d+) format \d+,", text)
+    engine_initialized = bool(re.search(r"(?im)^engine init ok\s*$", text))
+    present_queue_observed = bool(re.search(r"(?im)^present queue ", text))
+    device_observed = bool(re.search(r"(?im)^device .*\(from the first presented swapchain\)", text))
+    startup_stalled = bool(session_scoped and not engine_initialized and (present_queue_observed or device_observed))
+    hook_failure_matches = re.findall(r"(?im)^detour of (.+) failed \((-?\d+)\)", text) if session_scoped else []
+    hook_failures = len(hook_failure_matches)
+    failed_hooks = [name.strip() for name, _ in hook_failure_matches]
+    swapchains_created = len(re.findall(r"(?im)^swapchain .* created on queue", text)) if session_scoped else 0
+    crashpad_match = re.search(r"(?im)^.*loaded into crashpad_handler\.exe", text) if session_scoped else None
+    pre_crashpad_text = text[:crashpad_match.start()] if crashpad_match else text
+    hooks_installed = len(re.findall(r"(?im)^hooked ", pre_crashpad_text)) if session_scoped else 0
+    hooks_failed = bool(hook_failures > 0)
     result: dict[str, Any] = {
         "sha256": hashlib.sha256(raw).hexdigest(),
         "bytes": len(raw),
+        "session_scoped": session_scoped,
+        "runtime_version": session_version,
+        "engine_initialized": engine_initialized,
         "fidelityfx_dispatch_detected": bool(re.search(r"(?im)^first ffxDispatch type ", text)),
         "fidelityfx_upscaler_hooks": len(re.findall(r"(?im)^hooked amd_fidelityfx_.*!ffxDispatch", text)),
         "fault_lines": len(re.findall(r"(?im)^FAULT:", text)),
         "gpu_error_lines": len(re.findall(r"(?im)^job \d+ GPU errors:", text)),
         "timed_job_samples": len(jobs),
+        "hook_failures": hook_failures,
+        "failed_hooks": failed_hooks,
+        "swapchains_created": swapchains_created,
+        "hooks_installed": hooks_installed,
+        "present_queue_observed": present_queue_observed,
+        "startup_stalled": startup_stalled,
+        "hooks_failed": hooks_failed,
     }
     if staging:
         result["fsr_inputs"] = {
@@ -1080,7 +1138,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
     config_values = read_runtime_config(config_path)
     safe_config_keys = ("Enabled", "UseFsrInputs", "UseDepth", "Temporal", "Interop", "Inline")
     safe_config = {key: config_values.get(key) for key in safe_config_keys if key in config_values}
-    runtime_log = summarize_runtime_log(folder / "dlssnr_on_amd.log")
+    runtime_log = summarize_runtime_log(folder / "dlssnr_on_amd.log", game.name)
     rich_runtime = bool(
         runtime_log
         and runtime_log.get("fidelityfx_dispatch_detected")

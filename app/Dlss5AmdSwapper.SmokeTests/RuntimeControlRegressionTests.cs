@@ -26,6 +26,22 @@ internal static class RuntimeControlRegressionTests
             Check(fixture.Game.RuntimeStatus == "Not installed", "Removed config retained running status.");
             return Task.CompletedTask;
         });
+        await run("Runtime polling preserves log-backed status until the run ends", async () =>
+        {
+            using var fixture = new Fixture();
+            await File.WriteAllTextAsync(fixture.Game.ConfigPath, "[DlssNrOnAmd]\nEnabled=1\n");
+            await File.WriteAllBytesAsync(Path.Combine(fixture.Path, "winmm.dll"), [1]);
+            var runtime = new RuntimeControlService();
+            runtime.Refresh(fixture.Game, true);
+            Check(fixture.Game.RuntimeStatus == "Game running - verifying Neural Rendering", "A new run did not enter verification state.");
+            fixture.Game.RuntimeStatus = "Neural engine stalled - effect inactive this launch";
+            runtime.Refresh(fixture.Game, true);
+            Check(fixture.Game.RuntimeStatus == "Neural engine stalled - effect inactive this launch", "Polling overwrote log-backed runtime evidence.");
+            runtime.Refresh(fixture.Game, false);
+            Check(fixture.Game.RuntimeStatus == "Ready for next launch", "Ended run retained stale evidence status.");
+            runtime.Refresh(fixture.Game, true);
+            Check(fixture.Game.RuntimeStatus == "Game running - verifying Neural Rendering", "A later run inherited stale evidence.");
+        });
         await run("Generic reload log does not prove a requested value was applied", async () =>
         {
             using var fixture = new Fixture();
@@ -35,6 +51,16 @@ internal static class RuntimeControlRegressionTests
             var result = await new RuntimeControlService().SetEnabledAsync(fixture.Game, false);
             Check(!result.LiveAcknowledged && !fixture.Game.LiveAcknowledged, "Uncorrelated runtime log claimed live acknowledgment.");
             Check(!IniDocument.Load(fixture.Game.ConfigPath).GetBool("DlssNrOnAmd", "Enabled", true), "Requested value was not saved.");
+        });
+        await run("Hotkey toggle reads the current file value instead of stale UI state", async () =>
+        {
+            using var fixture = new Fixture();
+            await File.WriteAllTextAsync(fixture.Game.ConfigPath, "[DlssNrOnAmd]\nEnabled=0\n");
+            fixture.Game.Enabled = true;
+            await new RuntimeControlService().ToggleEnabledAsync(fixture.Game);
+            Check(IniDocument.Load(fixture.Game.ConfigPath).GetBool("DlssNrOnAmd", "Enabled", false), "Toggle did not invert the file value.");
+            await new RuntimeControlService().ToggleEnabledAsync(fixture.Game);
+            Check(!IniDocument.Load(fixture.Game.ConfigPath).GetBool("DlssNrOnAmd", "Enabled", true), "Second toggle did not invert the latest file value.");
         });
         await run("Cancelled runtime changes do not modify the file", async () =>
         {

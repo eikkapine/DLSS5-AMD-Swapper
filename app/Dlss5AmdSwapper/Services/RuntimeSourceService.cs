@@ -7,7 +7,9 @@ namespace Dlss5AmdSwapper.Services;
 public sealed class RuntimeSourceService
 {
     private const string UpstreamApi = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/latest";
+    private const string UpstreamTagApi = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/tags/";
     private const string UpstreamAssetName = "dlssnr_on_amd_setup.exe";
+    public const string CrimsonDesertStableTag = "v0.2.17";
     private readonly HttpClient _http = CreateHttpClient();
 
     public async Task<RuntimeSourceResult> EnsureAsync(
@@ -15,9 +17,10 @@ public sealed class RuntimeSourceService
         string configuredNrPath,
         IEnumerable<GameEntry> games,
         IEnumerable<string>? additionalNrCandidates = null,
+        string? upstreamTag = null,
         CancellationToken cancellationToken = default)
     {
-        var release = await FetchLatestSetupAsync(cancellationToken);
+        var release = await FetchSetupAsync(upstreamTag, cancellationToken);
         var setup = await EnsureSetupAsync(configuredSetupPath, release, cancellationToken);
         var nrPath = FindNrDll(configuredNrPath, games, additionalNrCandidates);
         return new RuntimeSourceResult(
@@ -27,6 +30,11 @@ public sealed class RuntimeSourceService
             setup.Downloaded,
             nrPath is not null);
     }
+
+    public static string? GetPreferredUpstreamTag(GameEntry? game) =>
+        game is not null && Path.GetFileName(game.ExePath).Equals("CrimsonDesert.exe", StringComparison.OrdinalIgnoreCase)
+            ? CrimsonDesertStableTag
+            : null;
 
     public static bool IsValidNrDll(string? path)
     {
@@ -119,14 +127,19 @@ public sealed class RuntimeSourceService
             .FirstOrDefault(IsValidNrDll);
     }
 
-    private async Task<SetupAsset> FetchLatestSetupAsync(CancellationToken cancellationToken)
+    private async Task<SetupAsset> FetchSetupAsync(string? requestedTag, CancellationToken cancellationToken)
     {
-        using var response = await _http.GetAsync(UpstreamApi, cancellationToken);
+        var api = string.IsNullOrWhiteSpace(requestedTag)
+            ? UpstreamApi
+            : UpstreamTagApi + Uri.EscapeDataString(requestedTag);
+        using var response = await _http.GetAsync(api, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         var root = document.RootElement;
         var tag = root.TryGetProperty("tag_name", out var tagValue) ? tagValue.GetString() : null;
+        if (!string.IsNullOrWhiteSpace(requestedTag) && !string.Equals(tag, requestedTag, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"GitHub returned {tag ?? "an unknown release"} instead of requested official release {requestedTag}.");
         foreach (var asset in root.GetProperty("assets").EnumerateArray())
         {
             if (!string.Equals(asset.GetProperty("name").GetString(), UpstreamAssetName, StringComparison.Ordinal)) continue;
@@ -134,7 +147,12 @@ public sealed class RuntimeSourceService
             var digest = asset.TryGetProperty("digest", out var digestValue) ? digestValue.GetString() : null;
             var url = asset.TryGetProperty("browser_download_url", out var urlValue) ? urlValue.GetString() : null;
             if (digest is null || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current official setup.");
+            {
+                // GitHub omits the digest on some releases; fall back to the digests recorded from verified downloads.
+                var known = UpstreamReleases.KnownSha256(tag, size);
+                if (known is null) throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current official setup.");
+                digest = "sha256:" + known;
+            }
             if (string.IsNullOrWhiteSpace(url))
                 throw new InvalidOperationException("GitHub did not publish a download URL for the current official setup.");
             if (size <= 0 || digest.Length != 71 || !digest[7..].All(Uri.IsHexDigit)

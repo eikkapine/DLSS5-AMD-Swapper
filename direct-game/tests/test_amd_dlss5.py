@@ -214,6 +214,74 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(summary["last_fault"].endswith("AMD engine initialization failed"))
         self.assertIsNone(summary["model_size"])
 
+    def test_post_fsr_diagnostics_use_latest_game_session(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        log = f.game_dir / "dlssnr_on_amd.log"
+        log.write_text(
+            "dlssnr_amd v0.2.17 (build old) loaded into FixtureGame.exe as winmm.dll\n"
+            "engine init ok\n"
+            "first ffxDispatch type TEST\n"
+            "staging ready: colour 640x480 dxgi 28 test; motion 640x480 dxgi 16; depth 640x480 dxgi 40 (inverted 1); exposure yes; residual on\n"
+            "network job 1 done in 8 ms (6.25 ms network on the GPU, 0.50 ms waiting for the capture; history on, zero-copy)\n"
+            "dlssnr_amd v0.2.18 (build new) loaded into FixtureGame.exe as winmm.dll\n"
+            "hooked ID3D12CommandQueue::ExecuteCommandLists\n",
+            encoding="utf-8",
+        )
+        summary = helper.summarize_runtime_log(log, f.exe.name)
+        self.assertTrue(summary["session_scoped"])
+        self.assertEqual(summary["runtime_version"], "v0.2.18")
+        self.assertFalse(summary["engine_initialized"])
+        self.assertFalse(summary["fidelityfx_dispatch_detected"])
+        self.assertEqual(summary["timed_job_samples"], 0)
+
+    def test_summarize_runtime_log_reports_hook_failures(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        log = f.game_dir / "dlssnr_on_amd.log"
+        fixture = (
+            "dlssnr_amd v0.2.17 (build 976a3fa0) loaded into SecretGame.exe as winmm.dll from X:\\Games\\SecretGame\\bin64\\; log X:\\Games\\SecretGame\\bin64\\dlssnr_on_amd.log; settings X:\\Games\\SecretGame\\bin64\\dlssnr_on_amd.ini\n"
+            "detour of ID3D12CommandQueue::ExecuteCommandLists failed (5)\n"
+            "hooked IDXGIFactory2::CreateSwapChainForHwnd\n"
+            "detour of IDXGIFactory::CreateSwapChain failed (5)\n"
+            "detour of IDXGISwapChain::Present failed (5)\n"
+            "hooked IDXGISwapChain1::Present1\n"
+            "dlssnr_amd v0.2.17 (build 976a3fa0) loaded into crashpad_handler.exe as winmm.dll from X:\\Games\\SecretGame\\bin64\\; log X:\\Games\\SecretGame\\bin64\\dlssnr_on_amd.log; settings X:\\Games\\SecretGame\\bin64\\dlssnr_on_amd.ini\n"
+            "hooked ID3D12CommandQueue::ExecuteCommandLists\n"
+            "hooked IDXGIFactory2::CreateSwapChainForHwnd\n"
+            "hooked IDXGIFactory::CreateSwapChain\n"
+            "hooked IDXGISwapChain::Present\n"
+            "hooked IDXGISwapChain1::Present1\n"
+            "swapchain 0000000071031300 created on queue 0000000070A75760 (device 0000000070776F40)\n"
+            "swapchain 000000010F3E1170 created on queue 00000000DD119140 (device 0000000070776F40)\n"
+        )
+        log.write_text(fixture, encoding="utf-8")
+        summary = helper.summarize_runtime_log(log, "SecretGame.exe")
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["hook_failures"], 3)
+        self.assertEqual(summary["swapchains_created"], 2)
+        self.assertEqual(summary["hooks_installed"], 2)
+        self.assertTrue(summary["hooks_failed"])
+        self.assertFalse(summary["engine_initialized"])
+        self.assertTrue(summary["session_scoped"])
+
+        older_success = (
+            "dlssnr_amd v0.2.16 (build old) loaded into SecretGame.exe as winmm.dll\n"
+            "engine init ok\n"
+            "first ffxDispatch type TEST\n"
+            "staging ready: colour 640x480 dxgi 28 test; motion 640x480 dxgi 16; depth 640x480 dxgi 40 (inverted 1); exposure yes; residual on\n"
+            "network job 1 done in 8 ms (6.25 ms network on the GPU, 0.50 ms waiting for the capture; history on, zero-copy)\n"
+        )
+        log.write_text(older_success + fixture, encoding="utf-8")
+        summary_with_older = helper.summarize_runtime_log(log, "SecretGame.exe")
+        self.assertIsNotNone(summary_with_older)
+        self.assertEqual(summary_with_older["hook_failures"], 3)
+        self.assertEqual(summary_with_older["swapchains_created"], 2)
+        self.assertEqual(summary_with_older["hooks_installed"], 2)
+        self.assertTrue(summary_with_older["hooks_failed"])
+        self.assertFalse(summary_with_older["engine_initialized"])
+        self.assertTrue(summary_with_older["session_scoped"])
+
     def test_update_keeps_manifest_proxy_name(self):
         f = Fixture()
         self.addCleanup(f.cleanup)

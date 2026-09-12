@@ -162,7 +162,7 @@
                             <StackPanel>
                                 <TextBlock Text="GLOBAL CONTROLS" Foreground="{DynamicResource MutedBrush}" FontSize="9" FontWeight="Bold"/>
                                 <TextBlock Text="Ctrl + Alt + F6" FontWeight="SemiBold" Margin="0,8,0,0"/>
-                                <TextBlock Text="Toggle effect" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
+                                <TextBlock Text="Toggle saved on/off state" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
                                 <TextBlock Text="F7  /  F8" FontWeight="SemiBold" Margin="0,8,0,0"/>
                                 <TextBlock Text="Decrease / increase" Foreground="{DynamicResource MutedBrush}" FontSize="11"/>
                                 <TextBlock Text="{Binding HotkeyStatus}" Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
@@ -382,7 +382,7 @@
                                             <StackPanel>
                                                 <TextBlock Text="Log-backed diagnostics" FontSize="16" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding DiagnosticsSummary}" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
-                                                <TextBlock Text="{Binding DiagnosticsDetail}" Foreground="{DynamicResource SuccessBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                                                <TextBlock Text="{Binding DiagnosticsDetail}" Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="18,0,0,0">
                                                 <Button Style="{StaticResource GhostButton}" Content="Refresh evidence" Click="RefreshDiagnostics_Click"/>
@@ -580,7 +580,7 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <StackPanel HorizontalAlignment="Left">
                                             <TextBlock Text="Global hotkeys" FontWeight="SemiBold" FontSize="15"/>
-                                            <TextBlock Text="The manager registers Ctrl+Alt+F6/F7/F8 while a managed direct-game target is running, and Ctrl+Alt+F9/F10/F11 for Lossless Scaling layers while Lossless Scaling is running. The bridge keeps F6/F7/F8 while it is active." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="690" Margin="0,4,0,0" HorizontalAlignment="Left" TextAlignment="Left"/>
+                                            <TextBlock Text="The manager registers Ctrl+Alt+F6/F7/F8 while a managed direct-game target is running. F6 saves the next on/off state; use the upstream End overlay for an authoritative live toggle. Ctrl+Alt+F9/F10/F11 control Lossless Scaling layers while Lossless Scaling is running." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="690" Margin="0,4,0,0" HorizontalAlignment="Left" TextAlignment="Left"/>
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Style="{StaticResource SwitchStyle}" IsChecked="{Binding RegisterHotkeys, Mode=TwoWay}" Click="HotkeysSetting_Click" VerticalAlignment="Center" Margin="18,0,0,0"/>
                                     </Grid>

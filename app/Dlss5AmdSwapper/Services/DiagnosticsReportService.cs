@@ -18,7 +18,10 @@ public static class DiagnosticsReportService
         state = new { game.Installed, game.Enabled, game.Running, game.LiveAcknowledged },
         evidence = new
         {
-            evidence.RichPathObserved, evidence.EvidenceScope, evidence.BytesHashed,
+            evidence.RichPathObserved, evidence.EngineInitialized, evidence.FidelityFxDispatchObserved,
+            evidence.PresentQueueObserved, evidence.StartupStalled,
+            evidence.HookFailures, evidence.FailedHooks, evidence.SwapchainsCreated, evidence.HooksInstalled,
+            evidence.EvidenceScope, evidence.BytesHashed,
             evidence.InputResolution, evidence.OutputResolution, evidence.FullOutputResolutionInput,
             evidence.TimedJobs, evidence.MeanNetworkGpuMs, evidence.ZeroCopySamples,
             evidence.FaultLines, evidence.GpuErrorLines, evidence.LogSha256,

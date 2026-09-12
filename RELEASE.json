@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "version": "0.3.0-pre.1",
-  "tag": "v0.3.0-pre.1",
+  "version": "0.3.0-pre.2",
+  "tag": "v0.3.0-pre.2",
   "status": "experimental-preview",
   "date": "2026-09-12",
-  "published": true,
-  "previous_published_version": "0.2.0-pre.1",
+  "published": false,
+  "previous_published_version": "0.3.0-pre.1",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
@@ -35,7 +35,7 @@
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "99accf04e5aba5d1bd131e210ffbf05e183b03f2f5531358270cba81dda8535e",
       "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "4ced0aac71052abc457d10e03843360d012d188503a58469a70b98e00a3f69d8"
+      "VERSION": "6bfdc85ae8af300ef6849f3d6f6045519273fd74bd47d3a91c422293fdd2e94d"
     }
   },
   "verification": {
@@ -63,7 +63,11 @@
     "optiscaler_presr_python_tests_passed": true,
     "optiscaler_presr_live_install_verified": true,
     "optiscaler_presr_capture_recorded": false,
-    "optiscaler_presr_package_validated_real_files": true
+    "optiscaler_presr_package_validated_real_files": true,
+    "session_scoped_diagnostics_verified": true,
+    "hook_failure_detection_verified": true,
+    "diagnostics_refresh_single_flight": true,
+    "crimson_desert_neural_rendering_active_on_current_build": false
   },
   "working_resolution": {
     "lossless_scaling_mode": "native visible output + capped neural branch",
@@ -103,14 +107,15 @@
       "Interop": 1,
       "Inline": 1
     },
-    "lossless_scaling_guide_buffer_note": "The color-only Lossless Scaling path does not receive engine motion/depth guide buffers."
+    "lossless_scaling_guide_buffer_note": "The color-only Lossless Scaling path does not receive engine motion/depth guide buffers.",
+    "crimson_desert_pinned_version": "v0.2.17"
   },
   "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available.",
   "manager_release": {
-    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.1-win-x64.zip",
+    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.2-win-x64.zip",
     "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
-    "sha256": "203e17cff658d5d41ce3b681beec4e7a582aaa59e12d0c541ea24ebcf3615297",
-    "bytes": 66003114,
+    "sha256": "",
+    "bytes": 0,
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
@@ -121,20 +126,12 @@
     "downloaded": false,
     "source": "user-supplied"
   },
-  "optiscaler_presr_live": {
-    "date": "2026-09-12",
-    "game": "Crimson Desert (bin64)",
-    "result": "the AMD pre-SR v1.2 proxy with SHA-256 07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa exits during Crimson Desert startup and is now blocked for this game",
-    "safe_fallback": "official post-FSR v0.2.18 installed with rich config verified; CrimsonDesert.exe remained running beyond the 25-second launch-health window",
-    "package_fork_version": "10.0.0-dev (amd-presr-multipass-local) (20260907_075847)",
-    "package_sha256sums_verified": true,
-    "package_sha256sums_warnings": [
-      "LEIA-ME-AMD.md",
-      "Licenses\\FidelityFX_v1_LICENSE.md",
-      "Licenses\\FidelityFX_v2_LICENSE.md",
-      "Licenses\\XeSS_LICENSE.txt"
-    ],
-    "weights_source": "user-supplied or locally generated runtime input; not redistributed by this project",
-    "gameplay_capture": "pending; launch health is verified, but no performance number is claimed until a hashed capture exists"
+  "direct_game_live_20260912": {
+    "game": "Crimson Desert (Steam build 25246367, updated 2026-09-11)",
+    "pre_sr_result": "v1.2 proxy exits during startup; blocked for this game",
+    "post_fsr_result": "runtime v0.2.17 loads; 3 render hooks fail to install; no present, engine init, FidelityFX dispatch or network jobs in a fresh session",
+    "neural_rendering_verified_on_current_build": false,
+    "last_verified_neural_session": "2026-09-09 on the previous game build",
+    "evidence_doc": "docs/verification-20260912.md"
   }
 }

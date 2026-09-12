@@ -54,8 +54,8 @@ public sealed class OptiScalerPackageService
 
         var ini = Path.Combine(root, "OptiScaler.ini");
         var dependencies = Path.Combine(root, DependencyFolderName);
-        var enabler = Path.Combine(root, EnablerName);
-        var weights = Path.Combine(root, WeightsName);
+        var enabler = FindPackageOrBundleSibling(root, EnablerName);
+        var weights = FindPackageOrBundleSibling(root, WeightsName, IsRealWeightsFile);
         var sums = Path.Combine(root, "SHA256SUMS.txt");
 
         var files = new Dictionary<string, FileState>(StringComparer.OrdinalIgnoreCase);
@@ -67,7 +67,7 @@ public sealed class OptiScalerPackageService
         Record(fork);
         foreach (var pass in passes) Record(pass);
         if (File.Exists(ini)) Record(ini);
-        if (File.Exists(enabler)) Record(enabler);
+        if (enabler is not null && IsInsideRoot(root, enabler)) Record(enabler);
         if (Directory.Exists(dependencies))
             foreach (var file in Directory.EnumerateFiles(dependencies, "*", SearchOption.AllDirectories)) Record(file);
 
@@ -104,8 +104,8 @@ public sealed class OptiScalerPackageService
             root, fork, passes,
             File.Exists(ini) ? ini : null,
             Directory.Exists(dependencies) ? dependencies : null,
-            File.Exists(enabler) ? enabler : null,
-            IsRealWeightsFile(weights) ? weights : null,
+            enabler,
+            weights is not null && IsRealWeightsFile(weights) ? weights : null,
             File.Exists(sums) ? sums : null,
             version.ProductVersion,
             files, sumsVerified, layout, sumsWarnings);
@@ -158,6 +158,26 @@ public sealed class OptiScalerPackageService
         var head = new byte[32];
         var read = stream.Read(head, 0, head.Length);
         return !Encoding.ASCII.GetString(head, 0, read).StartsWith("version https://git-lfs", StringComparison.Ordinal);
+    }
+
+    private static string? FindPackageOrBundleSibling(string root, string name, Func<string, bool>? accept = null)
+    {
+        accept ??= File.Exists;
+        var local = Path.Combine(root, name);
+        if (File.Exists(local) && accept(local)) return local;
+
+        if (!Path.GetFileName(Path.TrimEndingDirectorySeparator(root)).StartsWith(PackageFolderPrefix, StringComparison.OrdinalIgnoreCase))
+            return null;
+        var parent = Directory.GetParent(root)?.FullName;
+        if (parent is null) return null;
+        var sibling = Path.Combine(parent, name);
+        return File.Exists(sibling) && accept(sibling) ? sibling : null;
+    }
+
+    private static bool IsInsideRoot(string root, string path)
+    {
+        var prefix = Path.GetFullPath(root).TrimEnd('\\') + "\\";
+        return Path.GetFullPath(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool ContainsAsciiMarker(string path, string marker)
@@ -278,7 +298,7 @@ public sealed class OptiScalerPackageService
         return !files && directories.Length == 1 ? directories[0] : folder;
     }
 
-    public static LocalWeights? FindLocalWeights(string? configuredPath, IEnumerable<string> gameDirectories, string? losslessInstallPath)
+    public static LocalWeights? FindLocalWeights(string? configuredPath, IEnumerable<string> gameDirectories, string? losslessInstallPath, IEnumerable<string?>? additionalCandidates = null)
     {
         var candidates = new List<string>();
         if (!string.IsNullOrWhiteSpace(configuredPath)) candidates.Add(configuredPath);
@@ -288,6 +308,8 @@ public sealed class OptiScalerPackageService
             candidates.Add(Path.Combine(losslessInstallPath, WeightsName));
         }
         foreach (var directory in gameDirectories) candidates.Add(Path.Combine(directory, WeightsName));
+        if (additionalCandidates is not null)
+            candidates.AddRange(additionalCandidates.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!));
 
         LocalWeights? chosen = null;
         foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase).Where(IsRealWeightsFile))

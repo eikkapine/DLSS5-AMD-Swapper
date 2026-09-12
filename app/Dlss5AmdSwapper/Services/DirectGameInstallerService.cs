@@ -11,8 +11,11 @@ namespace Dlss5AmdSwapper.Services;
 public sealed class DirectGameInstallerService(GameProbeService probe)
 {
     private const string UpstreamApi = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/latest";
+    private const string UpstreamTagApi = "https://api.github.com/repos/danielblnc/DLSS-NR-on-AMD/releases/tags/";
     public const string UpstreamReleasePage = "https://github.com/danielblnc/DLSS-NR-on-AMD/releases";
     private const string UpstreamAsset = "dlssnr_on_amd_setup.exe";
+    private const long V0217Size = 7_538_418;
+    private const string V0217Sha256 = "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc";
     private static readonly string[] ProxyNames = ["version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll", "dxgi.dll"];
     private static readonly string[] RuntimeNames = ["dlssnr_on_amd.ini", "dlssnr_on_amd_weights.bin", "dlssnr_on_amd.log"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
@@ -34,7 +37,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             if (compatibility.FsrMarkers.Count == 0) throw new InvalidOperationException("No supported FSR runtime marker was found near this game.");
             if (compatibility.Dx12Evidence.Count == 0) throw new InvalidOperationException("No DirectX 12 evidence was found near this game.");
 
-            var release = await ValidateSetupAsync(setupSource, cancellationToken);
+            var release = await ValidateSetupAsync(setupSource, game, cancellationToken);
             var nrMeta = await ValidateNrDllAsync(nrSource, cancellationToken);
             var folder = game.DirectoryPath;
             var existingManifest = FindManifest(game);
@@ -51,6 +54,12 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                 var unmanagedProxy = ProxyNames.Where(before.ContainsKey).ToArray();
                 if (unmanagedProxy.Length > 0)
                     throw new InvalidOperationException("A proxy DLL already exists and is not managed by this app: " + string.Join(", ", unmanagedProxy));
+            }
+            else if (originalManifest is not null)
+            {
+                var unexpectedProxy = FindUnexpectedProxyNames(before.Keys, originalManifest.InstalledProxyNames);
+                if (unexpectedProxy.Length > 0)
+                    throw new InvalidOperationException("Additional proxy DLLs appeared after this managed install: " + string.Join(", ", unexpectedProxy) + ". Restore or remove the other loader before updating Neural Rendering so two injection routes do not compete during game startup.");
             }
 
             var localSetup = Path.Combine(folder, UpstreamAsset);
@@ -208,20 +217,36 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
 
     public bool HasManagedInstall(GameEntry game) => ManagedManifest.ReadRoute(game) == InstallRoute.PostFsrRuntime;
 
+    internal static string[] FindUnexpectedProxyNames(IEnumerable<string> presentFiles, IEnumerable<string>? managedProxyNames)
+    {
+        var present = new HashSet<string>(presentFiles, StringComparer.OrdinalIgnoreCase);
+        var managed = new HashSet<string>(managedProxyNames ?? [], StringComparer.OrdinalIgnoreCase);
+        return ProxyNames.Where(name => present.Contains(name) && !managed.Contains(name)).ToArray();
+    }
+
     private static string? FindManifest(GameEntry game) => ManagedManifest.FindManifestPath(game);
 
-    private async Task<ReleaseAsset> ValidateSetupAsync(string path, CancellationToken cancellationToken)
+    private async Task<ReleaseAsset> ValidateSetupAsync(string path, GameEntry game, CancellationToken cancellationToken)
     {
         if (!File.Exists(path)) throw new FileNotFoundException("Official DLSS-NR-on-AMD setup was not found.", path);
         if (!Path.GetFileName(path).Equals(UpstreamAsset, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"The setup file must be named {UpstreamAsset}.");
 
-        var release = await FetchLatestReleaseAsync(cancellationToken);
         var info = new FileInfo(path);
         var digest = await Sha256Async(path, cancellationToken);
-        if (info.Length != release.Size || !digest.Equals(release.Sha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The supplied setup does not match the SHA-256 and size published for the latest official DLSS-NR-on-AMD release.");
-        return release;
+        var latest = await FetchReleaseAsync(null, cancellationToken);
+        if (info.Length == latest.Size && digest.Equals(latest.Sha256, StringComparison.OrdinalIgnoreCase)) return latest;
+
+        // Crimson Desert currently uses the last log-verified stable runtime rather than the
+        // latest package. Keep this exception narrow and validate it against GitHub metadata.
+        if (RuntimeSourceService.GetPreferredUpstreamTag(game) == RuntimeSourceService.CrimsonDesertStableTag
+            && info.Length == V0217Size && digest.Equals(V0217Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            var stable = await FetchReleaseAsync(RuntimeSourceService.CrimsonDesertStableTag, cancellationToken);
+            if (info.Length == stable.Size && digest.Equals(stable.Sha256, StringComparison.OrdinalIgnoreCase)) return stable;
+        }
+
+        throw new InvalidOperationException("The supplied setup does not match the current official release or a supported compatibility-pinned official release.");
     }
 
     private static async Task<FileState> ValidateNrDllAsync(string path, CancellationToken cancellationToken)
@@ -234,13 +259,18 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         return await GetFileStateAsync(path, cancellationToken) ?? throw new InvalidOperationException("Could not inspect nvngx_dlssnr.dll.");
     }
 
-    private async Task<ReleaseAsset> FetchLatestReleaseAsync(CancellationToken cancellationToken)
+    private async Task<ReleaseAsset> FetchReleaseAsync(string? requestedTag, CancellationToken cancellationToken)
     {
-        using var response = await _http.GetAsync(UpstreamApi, cancellationToken);
+        var api = string.IsNullOrWhiteSpace(requestedTag)
+            ? UpstreamApi
+            : UpstreamTagApi + Uri.EscapeDataString(requestedTag);
+        using var response = await _http.GetAsync(api, cancellationToken);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         var tag = doc.RootElement.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() : null;
+        if (!string.IsNullOrWhiteSpace(requestedTag) && !string.Equals(tag, requestedTag, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"GitHub returned {tag ?? "an unknown release"} instead of requested official release {requestedTag}.");
         foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
         {
             if (!asset.GetProperty("name").GetString()!.Equals(UpstreamAsset, StringComparison.Ordinal)) continue;
@@ -251,8 +281,8 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
 
             if (string.Equals(tag, "v0.2.18", StringComparison.OrdinalIgnoreCase) && size == 7_570_162)
                 return new ReleaseAsset(tag, UpstreamAsset, size, "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3", UpstreamReleasePage);
-            if (string.Equals(tag, "v0.2.17", StringComparison.OrdinalIgnoreCase) && size == 7_538_418)
-                return new ReleaseAsset(tag, UpstreamAsset, size, "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc", UpstreamReleasePage);
+            if (string.Equals(tag, "v0.2.17", StringComparison.OrdinalIgnoreCase) && size == V0217Size)
+                return new ReleaseAsset(tag, UpstreamAsset, size, V0217Sha256, UpstreamReleasePage);
             throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current setup asset.");
         }
         throw new InvalidOperationException("The latest official DLSS-NR-on-AMD release has no setup asset.");
