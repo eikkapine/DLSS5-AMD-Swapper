@@ -4,7 +4,7 @@
   "tag": "v0.3.0-pre.2",
   "status": "experimental-preview",
   "date": "2026-09-12",
-  "published": false,
+  "published": true,
   "previous_published_version": "0.3.0-pre.1",
   "artifacts": [
     {
@@ -114,8 +114,8 @@
   "manager_release": {
     "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.2-win-x64.zip",
     "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
-    "sha256": "",
-    "bytes": 0,
+    "sha256": "1bd3eb3116e33ddfe6736ae13fd3809e5e77f469e8952fbb10341e599575b104",
+    "bytes": 66001372,
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
