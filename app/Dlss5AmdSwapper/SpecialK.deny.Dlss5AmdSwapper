@@ -1,0 +1,4 @@
+This file opts only the Swapper manager out of Special K's global graphics injection.
+The manager is a WPF configuration tool. Injected graphics hooks can create an
+extra blank window and prevent native process teardown after WPF has exited.
+Keep this file beside Dlss5AmdSwapper.exe. Game injection settings are unaffected.

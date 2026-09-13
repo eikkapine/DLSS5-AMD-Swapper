@@ -42,7 +42,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             var folder = game.DirectoryPath;
             var existingManifest = FindManifest(game);
             if (existingManifest is not null && ManagedManifest.ReadRoute(existingManifest) == InstallRoute.OptiScalerPreSr)
-                throw new InvalidOperationException("This game is managed by the OptiScaler pre-SR route. Restore it before installing the post-FSR runtime.");
+                throw new InvalidOperationException("This game is managed by the OptiScaler pre-SR route. Restore it before installing the official AMD runtime.");
             if (update && existingManifest is null) throw new InvalidOperationException("Update requires an existing managed install.");
             if (!update && existingManifest is not null) throw new InvalidOperationException("This game already has a managed install. Use Update instead.");
 
@@ -51,13 +51,13 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             var before = await SnapshotAsync(folder, cancellationToken);
             if (!update)
             {
-                var unmanagedProxy = ProxyNames.Where(before.ContainsKey).ToArray();
+                var unmanagedProxy = FindConflictingProxyNames(folder, before.Keys);
                 if (unmanagedProxy.Length > 0)
                     throw new InvalidOperationException("A proxy DLL already exists and is not managed by this app: " + string.Join(", ", unmanagedProxy));
             }
             else if (originalManifest is not null)
             {
-                var unexpectedProxy = FindUnexpectedProxyNames(before.Keys, originalManifest.InstalledProxyNames);
+                var unexpectedProxy = FindConflictingProxyNames(folder, before.Keys, originalManifest.InstalledProxyNames);
                 if (unexpectedProxy.Length > 0)
                     throw new InvalidOperationException("Additional proxy DLLs appeared after this managed install: " + string.Join(", ", unexpectedProxy) + ". Restore or remove the other loader before updating Neural Rendering so two injection routes do not compete during game startup.");
             }
@@ -90,7 +90,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                     || !string.Equals(await Sha256Async(localNr, cancellationToken), nrMeta.Sha256, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Runtime sources changed while preparing the installation.");
 
-                var setup = await RunSetupAsync(localSetup, folder, update, cancellationToken);
+                var setup = await RunSetupAsync(localSetup, folder, update, release.Sha256, cancellationToken);
                 var after = await SnapshotAsync(folder, cancellationToken);
                 var changedProxy = ProxyNames.Where(name => after.ContainsKey(name) && (!before.TryGetValue(name, out var old) || old != after[name])).ToArray();
                 string[] installedProxy;
@@ -109,7 +109,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
                     throw new InvalidOperationException($"The upstream setup did not produce a verifiable install (exit {setup.ExitCode}).\n{tail}");
                 }
 
-                var verifiedConfig = VerifyRichConfig(game.ConfigPath);
+                var verifiedConfig = VerifyRichConfig(game.ConfigPath, release.Tag);
                 var manifest = new DirectManifest
                 {
                     SchemaVersion = 2,
@@ -217,11 +217,29 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
 
     public bool HasManagedInstall(GameEntry game) => ManagedManifest.ReadRoute(game) == InstallRoute.PostFsrRuntime;
 
-    internal static string[] FindUnexpectedProxyNames(IEnumerable<string> presentFiles, IEnumerable<string>? managedProxyNames)
+    // A proxy-named DLL only conflicts when it is really another loader. Games legitimately ship
+    // Microsoft's own dbghelp.dll beside the executable for crash reporting: Cyberpunk 2077 ships
+    // it in bin\x64 next to dbgcore.dll and symsrv.dll, and every Unreal title ships one too.
+    // Matching on the name alone made those games impossible to set up.
+    internal static string[] FindConflictingProxyNames(string folder, IEnumerable<string> presentFiles, IEnumerable<string>? managedProxyNames = null)
     {
         var present = new HashSet<string>(presentFiles, StringComparer.OrdinalIgnoreCase);
         var managed = new HashSet<string>(managedProxyNames ?? [], StringComparer.OrdinalIgnoreCase);
-        return ProxyNames.Where(name => present.Contains(name) && !managed.Contains(name)).ToArray();
+        return ProxyNames
+            .Where(name => present.Contains(name) && !managed.Contains(name) && !IsMicrosoftSystemDll(Path.Combine(folder, name)))
+            .ToArray();
+    }
+
+    // ponytail: publisher check only. Anything without a Microsoft version resource still blocks,
+    // which is the safe direction; tighten to a signature check if a game ever ships an unsigned copy.
+    internal static bool IsMicrosoftSystemDll(string path)
+    {
+        try
+        {
+            var company = FileVersionInfo.GetVersionInfo(path).CompanyName;
+            return company is not null && company.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
     }
 
     private static string? FindManifest(GameEntry game) => ManagedManifest.FindManifestPath(game);
@@ -288,7 +306,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         throw new InvalidOperationException("The latest official DLSS-NR-on-AMD release has no setup asset.");
     }
 
-    private static Dictionary<string, int> VerifyRichConfig(string path)
+    internal static Dictionary<string, int> VerifyRichConfig(string path, string? releaseTag = null)
     {
         var ini = IniDocument.Load(path);
         var required = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -297,9 +315,19 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             ["UseFsrInputs"] = 1,
             ["UseDepth"] = 1,
             ["Temporal"] = 1,
-            ["Interop"] = 1,
-            ["Inline"] = 1
+            ["Interop"] = 1
         };
+        // The verified v0.3.0 setup replaced Inline with inverse Async and ships
+        // pre-upscale neural processing. Require its complete synchronous default;
+        // accepting a missing legacy Inline alone would also accept broken configs.
+        // https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.3.0
+        if (Version.TryParse(releaseTag?.TrimStart('v', 'V'), out var version) && version >= new Version(0, 3, 0))
+        {
+            required["Async"] = 0;
+            required["PreUpscale"] = 1;
+            required["PreHistory"] = 0;
+        }
+        else required["Inline"] = 1;
         var verified = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var missing = new List<string>();
         foreach (var pair in required)
@@ -313,38 +341,58 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
         return verified;
     }
 
-    private static async Task<SetupRun> RunSetupAsync(string setup, string folder, bool update, CancellationToken cancellationToken)
+    private static async Task<SetupRun> RunSetupAsync(string setup, string folder, bool update, string expectedSha256, CancellationToken cancellationToken)
     {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo
+        // Setup probes DXGI itself. Running it beside an installed dxgi.dll loads
+        // the game proxy into setup and prevents setup from overwriting that DLL.
+        // The upstream positional target argument keeps its loader search in an
+        // isolated folder while directing all installation writes to the game.
+        var launchFolder = Path.Combine(Path.GetTempPath(), "dlss5-amd-swapper-setup", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(launchFolder);
+        try
         {
-            FileName = setup,
-            WorkingDirectory = folder,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.StandardInput.WriteAsync(update ? "y\nu\n\n\n\n" : "y\n\n\n\n");
-        process.StandardInput.Close();
+            var launchSetup = Path.Combine(launchFolder, UpstreamAsset);
+            File.Copy(setup, launchSetup);
+            if (!string.Equals(expectedSha256, await Sha256Async(launchSetup, cancellationToken), StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Runtime setup changed while preparing its isolated launch.");
+            // This marker has no effect when Special K is absent.
+            await File.WriteAllTextAsync(Path.Combine(launchFolder, "SpecialK.deny.dlssnr_on_amd_setup"), "", cancellationToken);
+            using var process = new Process();
+            process.StartInfo = new ProcessStartInfo
+            {
+                FileName = launchSetup,
+                WorkingDirectory = launchFolder,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            process.StartInfo.ArgumentList.Add(Path.GetFullPath(folder));
+            process.Start();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.StandardInput.WriteAsync(update ? "u\n\n\n\n" : "\n\n\n");
+            process.StandardInput.Close();
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(2));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException)
-        {
-            try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
-            await process.WaitForExitAsync(CancellationToken.None);
-            try { await Task.WhenAll(stdoutTask, stderrTask); } catch (OperationCanceledException) { }
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new TimeoutException("The upstream setup did not finish within two minutes.");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromMinutes(2));
+            try { await process.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException)
+            {
+                try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
+                await process.WaitForExitAsync(CancellationToken.None);
+                try { await Task.WhenAll(stdoutTask, stderrTask); } catch (OperationCanceledException) { }
+                cancellationToken.ThrowIfCancellationRequested();
+                throw new TimeoutException("The upstream setup did not finish within two minutes.");
+            }
+            var output = (await stdoutTask) + Environment.NewLine + (await stderrTask);
+            return new SetupRun(process.ExitCode, output.Trim());
         }
-        var output = (await stdoutTask) + Environment.NewLine + (await stderrTask);
-        return new SetupRun(process.ExitCode, output.Trim());
+        finally
+        {
+            try { Directory.Delete(launchFolder, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static async Task<Dictionary<string, FileState>> SnapshotAsync(string folder, CancellationToken cancellationToken)

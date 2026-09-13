@@ -11,7 +11,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
 {
     internal const string CrimsonDesertExe = "CrimsonDesert.exe";
     internal const string CrimsonDesertIncompatibleProxySha256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa";
-    public const string CrimsonDesertCompatibilityMessage = "This OptiScaler AMD pre-SR v1.2 proxy is incompatible with Crimson Desert startup. Use the official post-FSR route for this game.";
+    public const string CrimsonDesertCompatibilityMessage = "This OptiScaler AMD pre-SR v1.2 proxy is incompatible with Crimson Desert startup. Use the official AMD runtime for this game.";
     public static readonly string[] ProxyNames = ["dxgi.dll", "version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll"];
     public static readonly string[] RootManagedNames = ["OptiScaler.ini", "OptiScaler.log", "amd_presr.log", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
@@ -40,6 +40,52 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
 
     public static string? GetCompatibilityBlock(GameEntry game, OptiScalerPackage package) => GetCompatibilityBlock(game.ExePath, package.Files);
     public static string? GetCompatibilityBlock(GameEntry game, OptiScalerManifest? manifest) => GetCompatibilityBlock(game.ExePath, manifest?.Package?.Files);
+
+    public static string GetActivationGuidance(GameEntry game)
+    {
+        // Upstream's game compatibility pages recommend DLSS/XeSS for ACR because its
+        // custom FSR input path is disabled by a runtime quirk. Do not undo that quirk.
+        var exe = Path.GetFileName(game.ExePath);
+        if (exe.Equals("acr.exe", StringComparison.OrdinalIgnoreCase))
+            return "Choose DLSS or XeSS in Assetto Corsa Rally's graphics settings. OptiScaler converts that input to AMD FSR; its FSR input hooks are disabled for this game. Press Del to verify Neural Rendering.";
+        if (exe.Equals("Cyberpunk2077.exe", StringComparison.OrdinalIgnoreCase))
+            return "Choose XeSS or FSR in Cyberpunk's graphics settings, especially with path tracing. OptiScaler converts the input to AMD FSR. Press Del to verify Neural Rendering.";
+        return "Enable a supported DLSS, FSR or XeSS input in the DX12 game's graphics settings. OptiScaler converts that input to AMD FSR. Press Del to verify Neural Rendering.";
+    }
+
+    public static IReadOnlyList<string> GetMissingRequiredFiles(GameEntry game)
+    {
+        var required = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "OptiScaler.ini", OptiScalerPackageService.WeightsName };
+        var requestedPasses = 1;
+        if (File.Exists(game.OptiScalerIniPath))
+        {
+            var ini = IniDocument.Load(game.OptiScalerIniPath);
+            if (int.TryParse(ini.Get("DlssNr", "Passes"), out var count)) requestedPasses = Math.Clamp(count, 1, 3);
+        }
+        foreach (var pass in OptiScalerPackageService.PassNames.Take(requestedPasses)) required.Add(pass);
+        var proxyNames = new List<string>();
+        try
+        {
+            using var stream = File.Open(game.ManifestPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var document = JsonDocument.Parse(stream);
+            if (document.RootElement.TryGetProperty("installed_proxy_names", out var names) && names.ValueKind == JsonValueKind.Array)
+                foreach (var name in names.EnumerateArray())
+                    if (name.ValueKind == JsonValueKind.String && ProxyNames.Contains(name.GetString(), StringComparer.OrdinalIgnoreCase))
+                        proxyNames.Add(name.GetString()!);
+            if (proxyNames.Count == 0 && document.RootElement.TryGetProperty("proxy_name", out var proxy) && proxy.ValueKind == JsonValueKind.String
+                && ProxyNames.Contains(proxy.GetString(), StringComparer.OrdinalIgnoreCase)) proxyNames.Add(proxy.GetString()!);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
+        if (proxyNames.Count == 0) proxyNames.Add("dxgi.dll");
+        foreach (var proxy in proxyNames) required.Add(proxy);
+        var missing = required.Where(name => !File.Exists(Path.Combine(game.DirectoryPath, name))).ToList();
+        var weightsPath = Path.Combine(game.DirectoryPath, OptiScalerPackageService.WeightsName);
+        if (File.Exists(weightsPath) && !OptiScalerPackageService.IsRealWeightsFile(weightsPath)) missing.Add(OptiScalerPackageService.WeightsName);
+        if (!File.Exists(Path.Combine(game.DirectoryPath, OptiScalerPackageService.RequiredUpscalerDependency))
+            && !File.Exists(Path.Combine(game.DirectoryPath, OptiScalerPackageService.DependencyFolderName, OptiScalerPackageService.RequiredUpscalerDependency)))
+            missing.Add(Path.Combine(OptiScalerPackageService.DependencyFolderName, OptiScalerPackageService.RequiredUpscalerDependency));
+        return missing;
+    }
 
     public async Task<RemoveResult> RemoveForPostFsrMigrationAsync(GameEntry game, CancellationToken cancellationToken = default)
     {
@@ -85,12 +131,12 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
             OptiScalerManifest? previousManifest = null;
             if (existingRoute == InstallRoute.PostFsrRuntime)
             {
-                if (update) throw new InvalidOperationException("This game has the post-FSR route installed; set it up as a new pre-SR install instead of updating.");
+                if (update) throw new InvalidOperationException("This game has the official AMD runtime installed; set it up as a new pre-SR install instead of updating.");
                 game.Busy = false; // the post-FSR installer owns the busy flag while it runs
                 try { previousRemoval = await postFsr.RemoveAsync(game, false, cancellationToken); }
                 finally { game.Busy = true; game.Status = "Installing"; }
                 if (ManagedManifest.ReadRoute(game) != InstallRoute.None)
-                    throw new InvalidOperationException("The post-FSR route left changed files behind. Review them, then set up again.");
+                    throw new InvalidOperationException("The official AMD runtime left changed files behind. Review them, then set up again.");
             }
             else if (existingRoute == InstallRoute.OptiScalerPreSr)
             {
@@ -109,11 +155,25 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
 
             if (!update)
             {
-                var unmanaged = ProxyNames.Where(before.ContainsKey).ToArray();
+                var unmanaged = DirectGameInstallerService.FindConflictingProxyNames(folder, before.Keys);
                 if (unmanaged.Length > 0) throw new InvalidOperationException("A proxy DLL already exists and is not managed by this app: " + string.Join(", ", unmanaged));
             }
             else if (previousManifest is not null && !previousManifest.InstalledProxyNames.Contains(proxyName, StringComparer.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Update must keep the proxy name recorded in the manifest.");
+
+            if (update && previousManifest is not null)
+            {
+                var unexpected = DirectGameInstallerService.FindConflictingProxyNames(folder, before.Keys, previousManifest.InstalledProxyNames);
+                if (unexpected.Length > 0)
+                    throw new InvalidOperationException("An additional unmanaged proxy DLL was found: " + string.Join(", ", unexpected) + ". Restore or resolve it before updating.");
+            }
+
+            // A temporary rollback snapshot is not an uninstall backup. Never replace a
+            // user's different dependency and then discard the only copy of its original.
+            foreach (var relative in dependencyRelatives)
+                if (before.TryGetValue(relative, out var existing) && (previousManifest is null || previousManifest.Before.ContainsKey(relative))
+                    && !existing.Sha256.Equals(await DirectGameInstallerService.Sha256Async(Path.Combine(package.Root, relative), cancellationToken), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("A different pre-existing dependency would be overwritten: " + relative + ". Keep it backed up or select a clean game folder before installing.");
 
             var backupRoot = BackupRootOverride?.Invoke() ?? Path.Combine(Path.GetTempPath(), "dlss5-amd-swapper", Guid.NewGuid().ToString("N"));
             byte[]? previousManifestBytes = null;
@@ -171,8 +231,10 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                 if (OptiScalerIniWriter.RequiresEnabler(preset) && enablerAvailable)
                     await CopyVerifiedAsync(package.EnablerDllPath!, enablerRelative);
 
-                var baseIni = package.IniPath is null ? null : await File.ReadAllTextAsync(package.IniPath, cancellationToken);
-                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable, Path.GetFileName(game.ExePath)), new UTF8Encoding(false), cancellationToken);
+                var baseIniPath = update && File.Exists(game.OptiScalerIniPath) ? game.OptiScalerIniPath : package.IniPath;
+                var baseIni = baseIniPath is null ? null : await File.ReadAllTextAsync(baseIniPath, cancellationToken);
+                var preserveControls = update && string.Equals(previousManifest?.Preset, preset.ToString(), StringComparison.OrdinalIgnoreCase);
+                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable, Path.GetFileName(game.ExePath), preserveControls), new UTF8Encoding(false), cancellationToken);
                 written.Add("OptiScaler.ini");
 
                 var after = await SnapshotAsync(folder, managed, cancellationToken);

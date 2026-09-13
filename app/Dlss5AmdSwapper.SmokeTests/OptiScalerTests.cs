@@ -7,6 +7,7 @@ internal static class OptiScalerTests
 {
     public static async Task RunAsync(Func<string, Func<Task>, Task> run)
     {
+        await OptiScalerRegressionTests.RunAsync(run);
         await run("Manifest route reader distinguishes routes", async () =>
         {
             using var temp = new OptiTemp();
@@ -263,6 +264,14 @@ internal static class OptiScalerTests
 
             var otherGame = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Quality, false, "OtherGame.exe"));
             Check(otherGame.Get("Spoofing", "Dxgi") == "true", "Other games must preserve their package DXGI spoofing setting");
+
+            Check(quality.Get("Menu", "OverlayMenu") == "true" && quality.Get("Menu", "ShortcutKey") == "0x2E", "in-game overlay enabled on Del");
+            Check(quality.Get("Menu", "FpsOverlayType") == "2" && quality.Get("Menu", "FpsShortcutKey") == "0x21", "live status overlay configured");
+            var rebound = IniDocument.FromText(OptiScalerIniWriter.Build("[Menu]\nShortcutKey=0x08\n", OptiScalerPreset.Quality, false));
+            Check(rebound.Get("Menu", "ShortcutKey") == "0x08", "a key the player rebound in the overlay must survive an update");
+            var rally = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Quality, false, "acr.exe"));
+            Check(rally.Get("Hotfix", "ManualInputPolling") == "true", "Rally loses the WndProc subclass, so input must be polled for the overlay");
+            Check(quality.Get("Hotfix", "ManualInputPolling") is null, "other games keep upstream input hooking");
             return Task.CompletedTask;
         });
 
@@ -492,8 +501,8 @@ internal static class OptiScalerTests
                 "Initialized independent AMD pass 1",
                 "Initialized independent AMD pass 2",
                 "AMD pre-SR: waiting for a DirectX 12 SR frame",
-                "Completed AMD pre-SR passes=2",
-                "HIP completion timeout pass 2");
+                "HIP completion timeout pass 2",
+                "Completed AMD pre-SR passes=2");
             var opti = string.Join('\n',
                 "[info] DlssNr_Dx12::Dispatch DLSS-NR running before SR: target 3840x2160, model 1280x720, guides 1280x720 (preset 0, intensity 1, style 0, build epoch 3)",
                 "[info] DlssNr_Dx12::Dispatch DLSS-NR cost: 12.40 ms total = 10.10 ms model + 2.30 ms ours (19% ours)",
@@ -530,7 +539,7 @@ internal static class OptiScalerTests
             var presr = "[12:00:01] HIP adapter: AMD Radeon RX 9070 XT\r\n[12:00:02] AMD engine initialization failed\r\n";
             var opti = "[info] DlssNr_Dx12::Dispatch DLSS-NR running before SR (no sizes)\n";
             var result = OptiScalerDiagnosticsService.Parse(presr, opti);
-            Check(result.PreSrActive, "active from opti log");
+            Check(!result.PreSrActive, "a running announcement without completed work is not neural activity");
             Check(result.HipAdapter == "AMD Radeon RX 9070 XT", "adapter from prefixed line");
             Check(result.LastFault?.EndsWith("AMD engine initialization failed", StringComparison.Ordinal) ?? false, "generic fault pattern matches real fork text");
             Check(result.ModelSize is null, "no resolution when running format drifts");
@@ -563,6 +572,7 @@ internal static class OptiScalerTests
             var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
             await File.WriteAllTextAsync(game.ManifestPath, "{\"route\":\"amd-optiscaler-presr\",\"installed_proxy_names\":[\"dxgi.dll\"]}");
             await File.WriteAllBytesAsync(Path.Combine(temp.Path, "dxgi.dll"), [1]);
+            await WriteRuntimeDependenciesAsync(temp.Path);
             await File.WriteAllTextAsync(game.OptiScalerIniPath, "[DlssNr]\nEnabled=true\nPasses=2\nLocalStructure=1.5\nSkinStructure=0.5\nLocalTone=0\n");
             new RuntimeControlService().Refresh(game, false);
             Check(game.Route == InstallRoute.OptiScalerPreSr && game.IsPreSr, "route");
@@ -640,6 +650,13 @@ internal static class OptiScalerTests
     internal static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static async Task WriteRuntimeDependenciesAsync(string path)
+    {
+        foreach (var pass in OptiScalerPackageService.PassNames) await File.WriteAllBytesAsync(Path.Combine(path, pass), [1]);
+        await File.WriteAllBytesAsync(Path.Combine(path, OptiScalerPackageService.RequiredUpscalerDependency), [1]);
+        await File.WriteAllBytesAsync(Path.Combine(path, OptiScalerPackageService.WeightsName), new byte[1024 * 1024 + 1]);
     }
 
     internal sealed class OptiTemp : IDisposable

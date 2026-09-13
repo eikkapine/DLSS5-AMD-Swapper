@@ -22,7 +22,7 @@ The manager verifies the upstream setup or OptiScaler package before it modifies
 
 ## Runtime controls
 
-`Ctrl+Alt+F6` toggles the configured effect and `Ctrl+Alt+F7/F8` decrease/increase strength for the active managed game. A setting change is only shown as live when the runtime log acknowledges it. For the pre-SR route, the in-game **Insert** menu is the authoritative live control surface.
+`Ctrl+Alt+F6` toggles the configured effect and `Ctrl+Alt+F7/F8` decrease/increase strength for the active managed game. A setting change is only shown as live when the runtime log acknowledges it. For the pre-SR route, the in-game **Del** menu is the authoritative live control surface.
 
 ## Advanced CLI
 

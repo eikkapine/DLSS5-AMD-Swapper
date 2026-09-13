@@ -27,7 +27,7 @@ public static class InstallRoutes
 
     public static string Label(InstallRoute route) => route switch
     {
-        InstallRoute.PostFsrRuntime => "Post-FSR runtime",
+        InstallRoute.PostFsrRuntime => "Official AMD runtime",
         InstallRoute.OptiScalerPreSr => "OptiScaler pre-SR",
         _ => "Not installed"
     };

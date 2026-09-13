@@ -23,9 +23,10 @@ public partial class MainWindow
         _diagnosticExportBusy = true;
         try
         {
-            var evidence = await Task.Run(() => _diagnostics.InspectAsync(game));
+            var report = await Task.Run(async () => game.IsPreSr
+                ? DiagnosticsReportService.Create(game, await _optiDiagnostics.InspectAsync(game))
+                : DiagnosticsReportService.Create(game, await _diagnostics.InspectAsync(game)));
             if (_closing) return;
-            var report = DiagnosticsReportService.Create(game, evidence);
             ShowDiagnosticsOverlay("Review diagnostics", "Only the fields below will be saved. No raw logs, game names, paths or activity history are included. Nothing is uploaded.", report,
                 "Save report", () =>
                 {

@@ -5,8 +5,12 @@ namespace Dlss5AmdSwapper.Services;
 
 public sealed class AppSettingsService
 {
-    private readonly string _folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DLSS5 AMD Swapper");
+    private readonly string _folder;
     private string FilePath => Path.Combine(_folder, "settings.json");
+
+    public AppSettingsService() : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DLSS5 AMD Swapper")) { }
+
+    internal AppSettingsService(string folder) => _folder = Path.GetFullPath(folder);
 
     public AppSettings Load()
     {

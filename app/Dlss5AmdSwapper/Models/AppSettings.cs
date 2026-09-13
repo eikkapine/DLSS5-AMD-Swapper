@@ -13,7 +13,7 @@ public sealed class AppSettings
     public bool ShowHiddenGames { get; set; }
     public bool GroupGamesByStore { get; set; }
     public string LibrarySort { get; set; } = "Name A–Z";
-    public bool MinimizeToTray { get; set; } = true;
+    public bool MinimizeToTray { get; set; }
     public string Theme { get; set; } = "Dark";
     public bool ScanAllDrives { get; set; }
     public List<string> AdditionalScanFolders { get; set; } = [];

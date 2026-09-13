@@ -44,6 +44,7 @@ public partial class MainWindow
         try
         {
             var candidates = await Task.Run(() => _optiPackages.DiscoverCandidates(OptiScalerPackagePath));
+            if (_closing) return false;
             string? failure = null;
             foreach (var candidate in candidates)
             {
@@ -51,6 +52,7 @@ public partial class MainWindow
                 {
                     var root = candidate.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? await Task.Run(() => _optiPackages.EnsureExtracted(candidate)) : candidate;
                     _optiPackage = await Task.Run(() => OptiScalerPackageService.Validate(root));
+                    if (_closing) return false;
                     if (!string.Equals(OptiScalerPackagePath, candidate, StringComparison.OrdinalIgnoreCase)) OptiScalerPackagePath = candidate;
                     break;
                 }
@@ -62,10 +64,11 @@ public partial class MainWindow
                 gameDirectories,
                 LosslessInstallPath,
                 _optiPackage is null ? null : [_optiPackage.WeightsPath]));
+            if (_closing) return false;
             if (_localWeights is not null && !string.Equals(LocalWeightsPath, _localWeights.Path, StringComparison.OrdinalIgnoreCase)) LocalWeightsPath = _localWeights.Path;
             OptiScalerPackageStatus = _optiPackage is null
                 ? "OptiScaler package: " + (failure ?? "none found. Put the OptiScaler-AMD-PreSR-Multipass folder or zip in Downloads, or choose it below.")
-                : $"OptiScaler package: {_optiPackage.Summary}" + (_localWeights is null ? " · weights: none found (run the post-FSR route once so the runtime generates them)" : " · weights ready");
+                : $"OptiScaler package: {_optiPackage.Summary}" + (_localWeights is null ? " · weights: none found (run the official AMD runtime setup once to generate them)" : " · weights ready");
             if (showToast) ShowToast(OptiScalerPackageStatus, _optiPackage is not null && _localWeights is not null);
             return _optiPackage is not null && _localWeights is not null;
         }
@@ -100,7 +103,7 @@ public partial class MainWindow
         var dialog = new SetupDialog(target.Name,
             preSrBlock ?? _optiPackage?.Summary ?? OptiScalerPackageStatus,
             _localWeights is null ? "Weights: none found" : $"Weights: {Path.GetFileName(Path.GetDirectoryName(_localWeights.Path))} copy, {_localWeights.Size / (1024 * 1024)} MB",
-            preSrReady, DefaultPreset) { Owner = this };
+            preSrReady, DefaultPreset, OptiScalerInstallerService.GetActivationGuidance(target)) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         if (dialog.Route == InstallRoute.PostFsrRuntime)
         {
@@ -112,7 +115,7 @@ public partial class MainWindow
         _runtime.Refresh(target);
         if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
         RecordActivity("Game installed (pre-SR)", $"{target.Name} · {result.Preset} · {result.Written.Count} files");
-        ShowToast($"Installed pre-SR for {target.Name} · {result.Preset} preset · launch the game with FSR enabled", true);
+        ShowToast($"Files installed for {target.Name} · {result.Preset}. " + OptiScalerInstallerService.GetActivationGuidance(target), true);
     }
 
     private async Task UpdatePreSrAsync(GameEntry target)
@@ -123,7 +126,7 @@ public partial class MainWindow
             ShowToast("Migrating incompatible pre-SR route to the official AMD runtime…");
             var removed = await OptiInstaller.RemoveForPostFsrMigrationAsync(target);
             await InstallPostFsrAsync(target, update: false);
-            RecordActivity("Game migrated to post-FSR", $"{target.Name} · {removed.Preserved.Count} preserved text file(s) · {compatibilityBlock}");
+            RecordActivity("Game migrated to official AMD runtime", $"{target.Name} · {removed.Preserved.Count} preserved text file(s) · {compatibilityBlock}");
             return;
         }
 
@@ -134,7 +137,8 @@ public partial class MainWindow
         var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, preset, update: true, proxyName);
         _runtime.Refresh(target);
         RecordActivity("Game updated (pre-SR)", $"{target.Name} · {result.Preset}");
-        ShowToast($"Updated pre-SR for {target.Name}", true);
+        if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
+        ShowToast($"Files updated for {target.Name}. " + OptiScalerInstallerService.GetActivationGuidance(target), true);
     }
 
     private async void PassesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -157,8 +161,11 @@ public partial class MainWindow
         if (diag.HipAdapter is not null) parts.Add("HIP " + diag.HipAdapter);
         if (diag.MeanModelMs is not null) parts.Add($"model {diag.MeanModelMs:0.0} ms mean ({diag.CostSamples} samples)");
         if (diag.PassesInitialized > 0) parts.Add($"{diag.PassesInitialized} pass runtime(s) initialised");
+        if (!diag.PreSrActive) parts.Add(diag.ActivationGuidance);
+        if (diag.InputHookWarning) parts.Add("The log reports an input hook warning. If Del does not open the overlay, set ManualInputPolling=true under [Hotfix] in OptiScaler.ini, then restart the game.");
         DiagnosticsDetail = string.Join(" · ", parts);
-        if (diag.PreSrActive) target.RuntimeStatus = "Pre-SR observed";
+        // A previous successful inspection must not survive a later failure or removed install.
+        target.RuntimeStatus = diag.Summary;
         if (toast) ShowToast(diag.Summary, diag.PreSrActive);
     }
 

@@ -25,7 +25,7 @@ public sealed class OptiScalerControlService
             ini.SaveAtomic(game.OptiScalerIniPath);
             _runtime.Refresh(game);
             return Task.FromResult(new RuntimeChangeResult(false, game.Running
-                ? $"Saved {(enabled ? "ON" : "OFF")}. Use Insert for the live OptiScaler Neural Rendering control in this session."
+                ? $"Saved {(enabled ? "ON" : "OFF")}. Use Del for the live OptiScaler Neural Rendering control in this session."
                 : $"Saved {(enabled ? "ON" : "OFF")} for the next launch."));
         }
     }
@@ -58,7 +58,7 @@ public sealed class OptiScalerControlService
             ini.SaveAtomic(game.OptiScalerIniPath);
             _runtime.Refresh(game);
             return Task.FromResult(new RuntimeChangeResult(false, game.Running
-                ? "Saved. OptiScaler reads OptiScaler.ini at startup; use the Insert menu for live changes."
+                ? "Saved. OptiScaler reads OptiScaler.ini at startup; use the Del menu for live changes."
                 : "Saved for the next launch"));
         }
     }
