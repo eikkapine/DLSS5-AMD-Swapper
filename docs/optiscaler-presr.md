@@ -56,7 +56,7 @@ The manager validates:
 1. Open **Settings** in DLSS5 AMD Swapper. Under **OptiScaler pre-SR package**, select your verified package folder or zip. Under **Generated weights**, select your locally generated `dlssnr_on_amd_weights.bin`.
 2. Go to **Game library**, select a compatible x64 DirectX 12 game, and click **Set up**.
 3. In the route selection dialog, choose **OptiScaler pre-SR**.
-4. Select a preset: **Quality** (upscaling only) or **Performance** (ratio override and frame generation).
+4. Select a preset: **Light**, **Balanced** (recommended), **Detail** or **Max**. Each preset also selects a scaling tier, which decides the internal render resolution.
 5. Click **Set up**. The manager installs `dxgi.dll`, patches `OptiScaler.ini`, stages the pass DLLs, copies the dependencies, and records a hash-backed manifest `.dlss5-amd-swapper.json`.
 6. Enable a supported temporal upscaler input in game settings. In **Assetto Corsa Rally**, select **DLSS or XeSS**: upstream disables FSR inputs for this title. The game's selected input and OptiScaler's AMD `ffx` output are separate settings.
 7. Press `Del` to open the in-game OptiScaler configuration menu.
@@ -78,11 +78,45 @@ This pre-SR integration requires DirectX 12. A DirectX 11 or Vulkan app drawing 
 
 ## Presets
 
-The manager writes presets by patching the package's base `OptiScaler.ini` or creating a minimal configuration if none exists.
+The manager writes presets by patching the package's base `OptiScaler.ini` or creating a minimal
+configuration if none exists. Each preset sets the neural controls and a scaling tier together,
+because raising every slider to its maximum usually looks worse rather than better.
 
-### Quality preset
+| Preset | Passes | Structure | Skin | Tone | Scaling tier |
+| --- | --- | --- | --- | --- | --- |
+| Light | 1 | 1.0 | 1.0 | 0 | Quality (1.5x) |
+| Balanced (default) | 1 | 1.5 | 1.5 | 0 | Balanced (1.7x) |
+| Detail | 2 | 2.0 | 2.0 | 0 | Performance (2.0x) |
+| Max | 3 | 2.0 | 2.0 | 0.5 | Ultra Performance (3.0x) |
 
-Focuses on neural rendering before standard super-resolution reconstruction without overriding game aspect ratios or enabling frame generation:
+Each additional pass owns an independent temporal history and costs a further share of GPU frame
+time, so passes trade framerate for detail.
+
+**No preset enables frame generation.** An earlier `Performance` preset combined a 3.0x ratio with
+`InterpolationCount=2`, which switched frame generation on for anyone who chose it for speed. Frame
+generation is now left to OptiScaler's own overlay, where it is an explicit choice.
+
+### Scaling tiers
+
+Scaling is the largest image-quality lever on this route: the neural pass runs on the internal
+render buffer, so a more aggressive tier gives the network fewer pixels to work with.
+
+| Tier | Ratio | 3840x2160 output | 2560x1440 output | 1920x1080 output |
+| --- | --- | --- | --- | --- |
+| Game controlled | - | the game's own setting | the game's own setting | the game's own setting |
+| DLAA | 1.0 | 3840x2160 | 2560x1440 | 1920x1080 |
+| Ultra Quality | 1.3 | 2954x1662 | 1969x1108 | 1477x831 |
+| Quality | 1.5 | 2560x1440 | 1707x960 | 1280x720 |
+| Balanced | 1.7 | 2259x1271 | 1506x847 | 1129x635 |
+| Performance | 2.0 | 1920x1080 | 1280x720 | 960x540 |
+| Ultra Performance | 3.0 | 1280x720 | 853x480 | 640x360 |
+
+A forced ratio replaces whatever upscaler quality the game itself offers. **Game controlled** writes
+`UpscaleRatioOverrideEnabled=false` so the in-game setting stays in charge instead of being silently
+overridden. The tier is recorded in the manifest so an update cannot change the resolution behind
+your back, and it can also be changed live in the overlay under **Upscale Ratio Override**.
+
+A Balanced install writes:
 
 ```ini
 [Upscalers]
@@ -93,30 +127,8 @@ Enabled=true
 RunBeforeSR=true
 Passes=1
 LocalTone=0
-LocalStructure=1
-SkinStructure=1
-ApplyAfterRR=false
-
-[Log]
-LogToFile=true
-LogLevel=2
-```
-
-### Performance preset
-
-Adds a 3.0x upscale ratio override and multi-frame generation:
-
-```ini
-[Upscalers]
-Dx12Upscaler=ffx
-
-[DlssNr]
-Enabled=true
-RunBeforeSR=true
-Passes=1
-LocalTone=0
-LocalStructure=1
-SkinStructure=1
+LocalStructure=1.5
+SkinStructure=1.5
 ApplyAfterRR=false
 
 [Log]
@@ -125,18 +137,8 @@ LogLevel=2
 
 [UpscaleRatio]
 UpscaleRatioOverrideEnabled=true
-UpscaleRatioOverrideValue=3.0
-
-[FrameGen]
-Enabled=true
-FGInput=nvngxfg
-FGNvngxReplacement=combo
-
-[DLSSG]
-InterpolationCount=2
+UpscaleRatioOverrideValue=1.7
 ```
-
-If `dlss-enabler-headless.dll` is absent from the package directory, `FGNvngxReplacement` falls back to `ffx`.
 
 ## In-game overlay
 
@@ -188,7 +190,7 @@ Restoring a game installation removes only files created by the manager that sti
 - **HIP runtime requirement**: Requires `amdhip64_7.dll` (HIP 7 runtime included with current AMD drivers). HIP 6 alone is insufficient.
 - **Render buffer constraints**: Refuses non-zero colour subrect origins and display-resolution motion vectors.
 - **Anti-cheat**: Games with active anti-cheat solutions are blocked by the manager.
-- **Frame generation requirements**: The performance preset requires the target game to support and call DLSS-G / Streamline frame generation.
+- **Frame generation**: no preset enables frame generation. It can be switched on in OptiScaler's own overlay, and that path requires the target game to support and call DLSS-G / Streamline frame generation.
 - **No runtime INI hot reload**: Hot reloading of `OptiScaler.ini` is unproven. The in-game `Del` menu is the authoritative control surface while the game is running.
 - **Lossless Scaling incompatibility**: OptiScaler cannot be run inside Lossless Scaling. Lossless Scaling presents captured frames using Direct3D 11, whereas OptiScaler pre-SR requires a DirectX 12 super-resolution call.
 - **Crimson Desert**: the pre-SR v1.2 proxy (SHA-256 `07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa`) is blocked for Crimson Desert because it causes startup access-violation faults, and the manager migrates such installs back to the post-FSR route. This is hash-specific so a future fixed AMD pre-SR build can be tested without changing the game blacklist.
@@ -203,7 +205,7 @@ The Python direct-game helper supports the pre-SR route. Pass `--passes N` (1 to
 py .\direct-game\amd_dlss5.py --game "D:\Games\Example\Game.exe" --check
 ```
 
-### Install Quality preset
+### Install Balanced preset
 
 ```powershell
 py .\direct-game\amd_dlss5.py `
@@ -212,10 +214,10 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset quality
+  --preset balanced
 ```
 
-### Install Performance preset with explicit proxy
+### Install Max preset with an explicit scaling tier and proxy
 
 ```powershell
 py .\direct-game\amd_dlss5.py `
@@ -224,7 +226,8 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset performance `
+  --preset max `
+  --scaling ultraperformance `
   --proxy-name dxgi.dll
 ```
 
@@ -237,7 +240,7 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset quality
+  --preset balanced
 ```
 
 ### Diagnose runtime status

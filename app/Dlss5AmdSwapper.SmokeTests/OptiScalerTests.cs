@@ -243,35 +243,49 @@ internal static class OptiScalerTests
         await run("Preset INI writer patches a package INI in place and writes a minimal INI otherwise", () =>
         {
             var baseIni = "; comment stays\n[Upscalers]\nDx12Upscaler=auto\n\n[DlssNr]\nEnabled=auto\nPasses=auto\n\n[Log]\nLogToFile=auto\n";
-            var quality = IniDocument.FromText(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Quality, enablerAvailable: false));
-            Check(quality.Get("Upscalers", "Dx12Upscaler") == "ffx", "Dx12Upscaler");
-            Check(quality.Get("DlssNr", "Enabled") == "true" && quality.Get("DlssNr", "RunBeforeSR") == "true" && quality.Get("DlssNr", "Passes") == "1", "DlssNr core keys");
-            Check(quality.Get("DlssNr", "LocalTone") == "0" && quality.Get("DlssNr", "LocalStructure") == "1" && quality.Get("DlssNr", "SkinStructure") == "1" && quality.Get("DlssNr", "ApplyAfterRR") == "false", "DlssNr layer keys");
-            Check(quality.Get("Log", "LogToFile") == "true" && quality.Get("Log", "LogLevel") == "2", "Log keys");
-            Check(quality.Get("FrameGen", "Enabled") is null && quality.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") is null, "Quality must not touch FG or ratio");
-            Check(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Quality, false).StartsWith("; comment stays", StringComparison.Ordinal), "comments preserved");
+            var balanced = IniDocument.FromText(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Balanced, enablerAvailable: false));
+            Check(balanced.Get("Upscalers", "Dx12Upscaler") == "ffx", "Dx12Upscaler");
+            Check(balanced.Get("DlssNr", "Enabled") == "true" && balanced.Get("DlssNr", "RunBeforeSR") == "true" && balanced.Get("DlssNr", "Passes") == "1", "DlssNr core keys");
+            Check(balanced.Get("DlssNr", "LocalTone") == "0" && balanced.Get("DlssNr", "LocalStructure") == "1.5" && balanced.Get("DlssNr", "SkinStructure") == "1.5" && balanced.Get("DlssNr", "ApplyAfterRR") == "false", "DlssNr layer keys");
+            Check(balanced.Get("Log", "LogToFile") == "true" && balanced.Get("Log", "LogLevel") == "2", "Log keys");
+            Check(balanced.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "1.7", "Balanced seeds its scaling tier");
+            Check(OptiScalerIniWriter.Build(baseIni, OptiScalerPreset.Balanced, false).StartsWith("; comment stays", StringComparison.Ordinal), "comments preserved");
 
-            var perf = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Performance, enablerAvailable: true));
-            Check(perf.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") == "true" && perf.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "ratio override");
-            Check(perf.Get("FrameGen", "Enabled") == "true" && perf.Get("FrameGen", "FGInput") == "nvngxfg" && perf.Get("FrameGen", "FGNvngxReplacement") == "combo", "FG combo");
-            Check(perf.Get("DLSSG", "InterpolationCount") == "2", "3x interpolation");
-            var perfNoEnabler = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Performance, enablerAvailable: false));
-            Check(perfNoEnabler.Get("FrameGen", "FGNvngxReplacement") == "ffx", "ffx without enabler");
-            Check(perfNoEnabler.Get("DlssNr", "RunBeforeSR") == "true", "minimal INI still carries DlssNr");
+            // A preset must never switch frame generation on by itself: that previously paired a
+            // 3.0 ratio with 2x interpolation nobody asked for.
+            foreach (var preset in new[] { OptiScalerPreset.Light, OptiScalerPreset.Balanced, OptiScalerPreset.Detail, OptiScalerPreset.Max })
+            {
+                var ini = IniDocument.FromText(OptiScalerIniWriter.Build(null, preset, enablerAvailable: true));
+                Check(ini.Get("FrameGen", "Enabled") is null && ini.Get("DLSSG", "InterpolationCount") is null, $"{preset} must not enable frame generation");
+            }
 
-            var crimson = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Quality, false, "CrimsonDesert.exe"));
+            var light = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Light, false));
+            Check(light.Get("DlssNr", "Passes") == "1" && light.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "1.5", "Light preset values");
+            var max = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Max, false));
+            Check(max.Get("DlssNr", "Passes") == "3" && max.Get("DlssNr", "LocalTone") == "0.5" && max.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "Max preset values");
+            Check(max.Get("DlssNr", "RunBeforeSR") == "true", "minimal INI still carries DlssNr");
+
+            // Scaling is selectable independently, and "game controlled" must stop the manager
+            // from silently overriding the upscaler quality chosen inside the game.
+            var gameControlled = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Detail, false, null, false, OptiScalerScaling.GameControlled));
+            Check(gameControlled.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") == "false" && gameControlled.Get("UpscaleRatio", "UpscaleRatioOverrideValue") is null, "game controlled scaling writes no forced ratio");
+            var dlaa = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Light, false, null, false, OptiScalerScaling.Dlaa));
+            Check(dlaa.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "1.0", "explicit scaling overrides the preset tier");
+            Check(OptiScalerPresets.Parse("performance") == OptiScalerPreset.Max && OptiScalerPresets.Parse("quality") == OptiScalerPreset.Balanced, "legacy preset names still load");
+
+            var crimson = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Balanced, false, "CrimsonDesert.exe"));
             Check(crimson.Get("Spoofing", "Dxgi") == "false", "Crimson Desert must disable DXGI spoofing even when the package INI enables it");
 
-            var otherGame = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Quality, false, "OtherGame.exe"));
+            var otherGame = IniDocument.FromText(OptiScalerIniWriter.Build("[Spoofing]\nDxgi=true\n", OptiScalerPreset.Balanced, false, "OtherGame.exe"));
             Check(otherGame.Get("Spoofing", "Dxgi") == "true", "Other games must preserve their package DXGI spoofing setting");
 
-            Check(quality.Get("Menu", "OverlayMenu") == "true" && quality.Get("Menu", "ShortcutKey") == "0x2E", "in-game overlay enabled on Del");
-            Check(quality.Get("Menu", "FpsOverlayType") == "2" && quality.Get("Menu", "FpsShortcutKey") == "0x21", "live status overlay configured");
-            var rebound = IniDocument.FromText(OptiScalerIniWriter.Build("[Menu]\nShortcutKey=0x08\n", OptiScalerPreset.Quality, false));
+            Check(balanced.Get("Menu", "OverlayMenu") == "true" && balanced.Get("Menu", "ShortcutKey") == "0x2E", "in-game overlay enabled on Del");
+            Check(balanced.Get("Menu", "FpsOverlayType") == "2" && balanced.Get("Menu", "FpsShortcutKey") == "0x21", "live status overlay configured");
+            var rebound = IniDocument.FromText(OptiScalerIniWriter.Build("[Menu]\nShortcutKey=0x08\n", OptiScalerPreset.Balanced, false));
             Check(rebound.Get("Menu", "ShortcutKey") == "0x08", "a key the player rebound in the overlay must survive an update");
-            var rally = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Quality, false, "acr.exe"));
+            var rally = IniDocument.FromText(OptiScalerIniWriter.Build(null, OptiScalerPreset.Balanced, false, "acr.exe"));
             Check(rally.Get("Hotfix", "ManualInputPolling") == "true", "Rally loses the WndProc subclass, so input must be polled for the overlay");
-            Check(quality.Get("Hotfix", "ManualInputPolling") is null, "other games keep upstream input hooking");
+            Check(balanced.Get("Hotfix", "ManualInputPolling") is null, "other games keep upstream input hooking");
             return Task.CompletedTask;
         });
 
@@ -279,22 +293,22 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync(preexistingLibxess: true);
             using var _ = f.Temp;
-            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, update: false);
             Check(result.Success && result.ProxyName == "dxgi.dll", "install result");
             foreach (var name in new[] { "dxgi.dll", "OptiScaler.ini", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin", "OptiScaler\\amd_fidelityfx_upscaler_dx12.dll" })
                 Check(File.Exists(Path.Combine(f.GameDir, name)), $"missing {name}");
             Check(IniDocument.Load(Path.Combine(f.GameDir, "OptiScaler.ini")).Get("DlssNr", "RunBeforeSR") == "true", "INI patched");
             Check(ManagedManifest.ReadRoute(f.Game) == InstallRoute.OptiScalerPreSr, "manifest route");
             var manifestText = await File.ReadAllTextAsync(f.Game.ManifestPath);
-            Check(manifestText.Contains("\"schema_version\": 3") && manifestText.Contains("\"preset\": \"quality\""), "manifest content");
+            Check(manifestText.Contains("\"schema_version\": 3") && manifestText.Contains("\"preset\": \"balanced\""), "manifest content");
             Check(manifestText.Contains("OptiScaler\\\\libxess.dll") && manifestText.Contains("\"preexisting_dependencies\""), "preexisting dependency recorded");
             Check(f.Game.Status == "Installed" && !f.Game.Busy, "status");
 
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, update: false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("Update"), "second install must ask for Update"); }
 
-            var updated = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true);
-            Check(updated.Preset == OptiScalerPreset.Performance, "update preset");
+            var updated = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Max, update: true);
+            Check(updated.Preset == OptiScalerPreset.Max, "update preset");
             Check(IniDocument.Load(Path.Combine(f.GameDir, "OptiScaler.ini")).Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "3.0", "update rewrote INI");
 
             using var updatedDoc = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(f.Game.ManifestPath));
@@ -308,17 +322,17 @@ internal static class OptiScalerTests
             var f = await MakeInstallFixtureAsync();
             using var _ = f.Temp;
             await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "winmm.dll"), [1]);
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("winmm.dll"), "unmanaged proxy must be named"); }
             File.Delete(Path.Combine(f.GameDir, "winmm.dll"));
 
             await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "EasyAntiCheat.dll"), [1]);
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("Anti-cheat"), "anti-cheat must block"); }
             File.Delete(Path.Combine(f.GameDir, "EasyAntiCheat.dll"));
 
             f.Game.Running = true;
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("Close the game"), "running game must block"); }
             Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(f.Game.ManifestPath), "refusals must leave the folder untouched");
         });
@@ -329,7 +343,7 @@ internal static class OptiScalerTests
             using var _ = f.Temp;
             // A directory at the INI path makes the INI write fail after the binaries were copied.
             Directory.CreateDirectory(Path.Combine(f.GameDir, "OptiScaler.ini"));
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new InvalidOperationException("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new InvalidOperationException("accepted"); }
             catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
             catch (Exception) { }
             Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_amd_pass1.dll")) && !File.Exists(Path.Combine(f.GameDir, "dlssnr_on_amd_weights.bin")), "copied files must be rolled back");
@@ -342,7 +356,7 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync();
             using var _ = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, update: false);
             var manifestBytes = await File.ReadAllBytesAsync(f.Game.ManifestPath);
             var proxyPath = Path.Combine(f.GameDir, "dxgi.dll");
             var proxyHash = await DirectGameInstallerService.Sha256Async(proxyPath);
@@ -351,7 +365,7 @@ internal static class OptiScalerTests
             var iniPath = Path.Combine(f.GameDir, "OptiScaler.ini");
             File.Delete(iniPath);
             Directory.CreateDirectory(iniPath);
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true); throw new InvalidOperationException("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Max, update: true); throw new InvalidOperationException("accepted"); }
             catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
             catch (Exception) { }
             Directory.Delete(iniPath);
@@ -367,7 +381,7 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync();
             using var _ = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, update: false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, update: false);
             var manifestBytes = await File.ReadAllBytesAsync(f.Game.ManifestPath);
 
             // Point the backup root under a path whose parent is a FILE, so Directory.CreateDirectory
@@ -377,7 +391,7 @@ internal static class OptiScalerTests
             OptiScalerInstallerService.BackupRootOverride = () => Path.Combine(blocker, Guid.NewGuid().ToString("N"));
             try
             {
-                try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Performance, update: true); throw new InvalidOperationException("accepted"); }
+                try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Max, update: true); throw new InvalidOperationException("accepted"); }
                 catch (InvalidOperationException error) when (error.Message == "accepted") { throw; }
                 catch (Exception) { }
             }
@@ -408,7 +422,7 @@ internal static class OptiScalerTests
                 },
                 installed_proxy_names = new[] { "winmm.dll" }
             }));
-            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             Check(result.PreviousRouteRemoval is not null && result.PreviousRouteRemoval.Removed.Contains("winmm.dll"), "old proxy removed");
             Check(!File.Exists(oldProxy) && !File.Exists(oldIni) && File.Exists(Path.Combine(f.GameDir, "dxgi.dll")), "old route gone, new route present");
             Check((await File.ReadAllTextAsync(f.Game.ManifestPath)).Contains("\"previous_route\""), "previous route recorded");
@@ -421,7 +435,7 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync(preexistingLibxess: true);
             using var _ = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             Check(f.Installer.HasManagedInstall(f.Game), "managed after install");
             await File.AppendAllTextAsync(Path.Combine(f.GameDir, "OptiScaler.ini"), "\n; user edit\n");
 
@@ -441,7 +455,7 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync();
             using var _ = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             var iniPath = Path.Combine(f.GameDir, "OptiScaler.ini");
             await File.AppendAllTextAsync(iniPath, "\n; keep my edit\n");
 
@@ -470,7 +484,7 @@ internal static class OptiScalerTests
         {
             var f = await MakeInstallFixtureAsync();
             using var _ = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             Directory.CreateDirectory(Path.Combine(f.GameDir, "OptiScaler", "empty-sub"));
 
             var result = await f.Installer.RemoveAsync(f.Game);

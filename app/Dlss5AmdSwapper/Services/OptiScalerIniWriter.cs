@@ -13,9 +13,12 @@ public static class OptiScalerIniWriter
     public const string FpsShortcutKey = "0x21";       // Page Up
     public const string FpsCycleShortcutKey = "0x22";  // Page Down
 
-    public static bool RequiresEnabler(OptiScalerPreset preset) => preset == OptiScalerPreset.Performance;
+    // Frame generation is no longer bundled into a preset: picking a faster preset must not
+    // silently switch FG on, which is what previously paired a 3.0 ratio with 2x interpolation.
+    // ponytail: kept so callers compile; give FG its own explicit option if it returns.
+    public static bool RequiresEnabler(OptiScalerPreset preset) => false;
 
-    public static string Build(string? baseIniText, OptiScalerPreset preset, bool enablerAvailable, string? gameExe = null, bool preserveControls = false)
+    public static string Build(string? baseIniText, OptiScalerPreset preset, bool enablerAvailable, string? gameExe = null, bool preserveControls = false, OptiScalerScaling? scaling = null)
     {
         var ini = IniDocument.FromText(string.IsNullOrWhiteSpace(baseIniText) ? MinimalHeader : baseIniText);
         ini.Set("Upscalers", "Dx12Upscaler", "ffx");
@@ -24,12 +27,13 @@ public static class OptiScalerIniWriter
             var current = ini.Get("DlssNr", key);
             if (!preserveControls || string.IsNullOrWhiteSpace(current) || current.Equals("auto", StringComparison.OrdinalIgnoreCase)) ini.Set("DlssNr", key, value);
         }
+        var values = OptiScalerPresets.Values(preset);
         SetControl("Enabled", "true");
         ini.Set("DlssNr", "RunBeforeSR", "true");
-        SetControl("Passes", "1");
-        SetControl("LocalTone", "0");
-        SetControl("LocalStructure", "1");
-        SetControl("SkinStructure", "1");
+        SetControl("Passes", values.Passes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        SetControl("LocalTone", values.Tone);
+        SetControl("LocalStructure", values.Structure);
+        SetControl("SkinStructure", values.Skin);
         ini.Set("DlssNr", "ApplyAfterRR", "false");
         ini.Set("Log", "LogToFile", "true");
         ini.Set("Log", "LogLevel", "2");
@@ -61,14 +65,18 @@ public static class OptiScalerIniWriter
         if (string.Equals(gameExe, "CrimsonDesert.exe", StringComparison.OrdinalIgnoreCase))
             ini.Set("Spoofing", "Dxgi", "false");
 
-        if (preset == OptiScalerPreset.Performance && !preserveControls)
+        // Scaling is the largest image-quality lever on this route, so it is explicit. A forced
+        // ratio overrides whatever upscaler quality the game itself offers; GameControlled writes
+        // the override off so the game's own setting wins instead of being silently replaced.
+        if (!preserveControls)
         {
-            ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true");
-            ini.Set("UpscaleRatio", "UpscaleRatioOverrideValue", "3.0");
-            ini.Set("FrameGen", "Enabled", "true");
-            ini.Set("FrameGen", "FGInput", "nvngxfg");
-            ini.Set("FrameGen", "FGNvngxReplacement", enablerAvailable ? "combo" : "ffx");
-            ini.Set("DLSSG", "InterpolationCount", "2");
+            var ratio = OptiScalerScalings.Ratio(scaling ?? values.Scaling);
+            if (ratio is null) ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "false");
+            else
+            {
+                ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true");
+                ini.Set("UpscaleRatio", "UpscaleRatioOverrideValue", ratio);
+            }
         }
         return ini.ToText();
     }

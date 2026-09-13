@@ -60,7 +60,7 @@ internal static class OptiScalerRegressionTests
             using var temp = f.Temp;
             await File.WriteAllTextAsync(f.Game.PreSrLogPath, "Completed AMD pre-SR passes=1\n");
             File.SetLastWriteTimeUtc(f.Game.PreSrLogPath, DateTime.UtcNow.AddDays(-1));
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             var diag = await new OptiScalerDiagnosticsService().InspectAsync(f.Game);
             Check(!diag.PreSrActive && diag.HistoricalEvidence && !diag.HasLogEvidence, "previous install log excluded");
             Check(diag.PreSrLogBytes > 0 && diag.PreSrLogSha256?.Length == 64, "stale evidence remains hash referenced");
@@ -82,7 +82,7 @@ internal static class OptiScalerRegressionTests
         {
             var f = await MakeInstallFixtureAsync();
             using var temp = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             File.Delete(Path.Combine(f.GameDir, "dlssnr_amd_pass3.dll"));
             Check(OptiScalerInstallerService.GetMissingRequiredFiles(f.Game).Count == 0, "unused pass 3 does not block a one-pass launch");
             await new OptiScalerControlService().SetPassesAsync(f.Game, 3);
@@ -149,12 +149,12 @@ internal static class OptiScalerRegressionTests
         {
             var f = await MakeInstallFixtureAsync();
             using var temp = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             var ini = IniDocument.Load(f.Game.OptiScalerIniPath);
             ini.Set("DlssNr", "Enabled", "false"); ini.Set("DlssNr", "Passes", "2"); ini.Set("DlssNr", "LocalTone", "1.7");
             ini.Set("Menu", "ShortcutKey", "0x24"); ini.Set("Inputs", "EnableFsr3Inputs", "false");
             ini.SaveAtomic(f.Game.OptiScalerIniPath);
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, true);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, true);
             ini = IniDocument.Load(f.Game.OptiScalerIniPath);
             Check(ini.Get("DlssNr", "Enabled") == "false" && ini.Get("DlssNr", "Passes") == "2" && ini.Get("DlssNr", "LocalTone") == "1.7", "update retains neural controls");
             Check(ini.Get("Menu", "ShortcutKey") == "0x24" && ini.Get("Inputs", "EnableFsr3Inputs") == "false", "update retains runtime hotkey and input preferences");
@@ -164,10 +164,10 @@ internal static class OptiScalerRegressionTests
         {
             var f = await MakeInstallFixtureAsync();
             using var temp = f.Temp;
-            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false);
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
             var before = await File.ReadAllBytesAsync(f.Game.ManifestPath);
             await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "version.dll"), [5, 6, 7]);
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, true); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, true); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("additional unmanaged proxy"), "clear proxy conflict reason"); }
             Check(before.SequenceEqual(await File.ReadAllBytesAsync(f.Game.ManifestPath)), "conflict does not modify previous manifest");
         });
@@ -178,7 +178,7 @@ internal static class OptiScalerRegressionTests
             using var temp = f.Temp;
             var path = Path.Combine(f.GameDir, "OptiScaler", "libxess.dll");
             await File.WriteAllBytesAsync(path, [8, 9, 10]);
-            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Quality, false); throw new Exception("accepted"); }
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new Exception("accepted"); }
             catch (InvalidOperationException error) { Check(error.Message.Contains("pre-existing dependency"), "clear existing library conflict reason"); }
             Check((await File.ReadAllBytesAsync(path)).SequenceEqual(new byte[] { 8, 9, 10 }), "original dependency remains untouched");
             Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(f.Game.ManifestPath), "failed preflight performs no install writes");

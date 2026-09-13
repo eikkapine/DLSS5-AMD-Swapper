@@ -114,16 +114,30 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(found["size"], f.weights.stat().st_size)
 
     def test_ini_presets(self):
-        quality = helper.build_optiscaler_ini("[DlssNr]\nEnabled=auto\n", "quality", False)
-        self.assertIn("RunBeforeSR=true", quality)
-        self.assertIn("Dx12Upscaler=ffx", quality)
-        self.assertIn("LogToFile=true", quality)
-        self.assertNotIn("FGInput", quality)
-        performance = helper.build_optiscaler_ini(None, "performance", True)
-        self.assertIn("UpscaleRatioOverrideValue=3.0", performance)
-        self.assertIn("FGNvngxReplacement=combo", performance)
-        self.assertIn("InterpolationCount=2", performance)
-        self.assertIn("FGNvngxReplacement=ffx", helper.build_optiscaler_ini(None, "performance", False))
+        light = helper.build_optiscaler_ini("[DlssNr]\nEnabled=auto\n", "light", False)
+        self.assertIn("RunBeforeSR=true", light)
+        self.assertIn("Dx12Upscaler=ffx", light)
+        self.assertIn("LogToFile=true", light)
+        self.assertIn("UpscaleRatioOverrideValue=1.5", light)
+        # A preset must never switch frame generation on by itself.
+        for name in ("light", "balanced", "detail", "max"):
+            ini = helper.build_optiscaler_ini(None, name, True)
+            self.assertNotIn("FGInput", ini)
+            self.assertNotIn("InterpolationCount", ini)
+        detail = helper.build_optiscaler_ini(None, "detail", False)
+        self.assertIn("Passes=2", detail)
+        self.assertIn("LocalStructure=2.0", detail)
+        self.assertIn("UpscaleRatioOverrideValue=2.0", detail)
+        # Legacy manifests recorded only quality/performance; performance forced a 3.0 ratio.
+        legacy = helper.build_optiscaler_ini(None, "performance", True)
+        self.assertIn("Passes=3", legacy)
+        self.assertIn("UpscaleRatioOverrideValue=3.0", legacy)
+        self.assertEqual(helper.normalize_preset("quality"), "balanced")
+        # Explicit scaling beats the preset tier; game controlled writes no forced ratio at all.
+        self.assertIn("UpscaleRatioOverrideValue=1.0", helper.build_optiscaler_ini(None, "detail", False, scaling="dlaa"))
+        game_controlled = helper.build_optiscaler_ini(None, "detail", False, scaling="gamecontrolled")
+        self.assertIn("UpscaleRatioOverrideEnabled=false", game_controlled)
+        self.assertNotIn("UpscaleRatioOverrideValue", game_controlled)
 
     def test_crimson_ini_disables_dxgi_spoofing_only_for_crimson(self):
         base = "[Spoofing]\nDxgi=true\n"

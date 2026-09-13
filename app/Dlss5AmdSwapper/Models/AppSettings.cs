@@ -21,5 +21,5 @@ public sealed class AppSettings
     public string LastPage { get; set; } = "Home";
     public string OptiScalerPackagePath { get; set; } = string.Empty;
     public string LocalWeightsPath { get; set; } = string.Empty;
-    public string OptiScalerDefaultPreset { get; set; } = "Quality";
+    public string OptiScalerDefaultPreset { get; set; } = "Balanced";
 }

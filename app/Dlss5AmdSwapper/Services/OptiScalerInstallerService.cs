@@ -103,7 +103,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
         return result with { RemainingManagedFiles = [], ManifestRetained = false };
     }
 
-    public async Task<OptiScalerInstallResult> InstallAsync(GameEntry game, OptiScalerPackage package, LocalWeights weights, OptiScalerPreset preset, bool update, string proxyName = "dxgi.dll", CancellationToken cancellationToken = default)
+    public async Task<OptiScalerInstallResult> InstallAsync(GameEntry game, OptiScalerPackage package, LocalWeights weights, OptiScalerPreset preset, bool update, string proxyName = "dxgi.dll", OptiScalerScaling? scaling = null, CancellationToken cancellationToken = default)
     {
         if (!ProxyNames.Contains(proxyName, StringComparer.OrdinalIgnoreCase)) throw new ArgumentException("Unsupported proxy name.", nameof(proxyName));
         var folder = Path.GetFullPath(game.DirectoryPath);
@@ -234,7 +234,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                 var baseIniPath = update && File.Exists(game.OptiScalerIniPath) ? game.OptiScalerIniPath : package.IniPath;
                 var baseIni = baseIniPath is null ? null : await File.ReadAllTextAsync(baseIniPath, cancellationToken);
                 var preserveControls = update && string.Equals(previousManifest?.Preset, preset.ToString(), StringComparison.OrdinalIgnoreCase);
-                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable, Path.GetFileName(game.ExePath), preserveControls), new UTF8Encoding(false), cancellationToken);
+                await File.WriteAllTextAsync(Path.Combine(folder, "OptiScaler.ini"), OptiScalerIniWriter.Build(baseIni, preset, enablerAvailable, Path.GetFileName(game.ExePath), preserveControls, scaling), new UTF8Encoding(false), cancellationToken);
                 written.Add("OptiScaler.ini");
 
                 var after = await SnapshotAsync(folder, managed, cancellationToken);
@@ -246,6 +246,8 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     GameExe = Path.GetFileName(game.ExePath),
                     ProxyName = proxyName,
                     Preset = preset.ToString().ToLowerInvariant(),
+                    // Recorded so an update cannot silently change the internal resolution.
+                    Scaling = OptiScalerScalings.Label(scaling ?? OptiScalerPresets.Values(preset).Scaling),
                     Package = new PackageState { Root = package.Root, Layout = package.Layout, ForkVersion = package.ForkVersion, Sha256SumsVerified = package.Sha256SumsVerified, Files = new Dictionary<string, FileState>(package.Files, StringComparer.OrdinalIgnoreCase) },
                     Weights = new WeightsState { Source = weights.Path, Size = weights.Size, Sha256 = weights.Sha256 },
                     Compatibility = new OptiCompatibility { X64 = compatibility.X64, FsrMarkers = compatibility.FsrMarkers.ToArray(), Dx12Evidence = compatibility.Dx12Evidence.ToArray(), AntiCheatMarkers = compatibility.AntiCheatMarkers.ToArray() },
@@ -393,7 +395,8 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
         [JsonPropertyName("route")] public string Route { get; set; } = string.Empty;
         [JsonPropertyName("game_exe")] public string GameExe { get; set; } = string.Empty;
         [JsonPropertyName("proxy_name")] public string ProxyName { get; set; } = "dxgi.dll";
-        [JsonPropertyName("preset")] public string Preset { get; set; } = "quality";
+        [JsonPropertyName("preset")] public string Preset { get; set; } = "balanced";
+        [JsonPropertyName("scaling")] public string Scaling { get; set; } = string.Empty;
         [JsonPropertyName("package")] public PackageState? Package { get; set; }
         [JsonPropertyName("weights")] public WeightsState? Weights { get; set; }
         [JsonPropertyName("compatibility")] public OptiCompatibility? Compatibility { get; set; }

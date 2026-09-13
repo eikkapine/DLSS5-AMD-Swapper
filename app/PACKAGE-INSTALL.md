@@ -32,6 +32,32 @@ Common anti-cheat targets are blocked automatically. The direct route is intende
 - Use **Refresh evidence** after rendering a scene. Read the reported module/log evidence and any configuration issues; a successful file copy is not proof that the rendering passes ran.
 - For the supported upstream route, use the in-game `End` overlay to confirm status. For OptiScaler pre-SR, use its in-game overlay (see below). Compare the same scene and settings with the effect switched on and off only after activity is confirmed.
 
+## Presets and scaling
+
+Setup offers four presets for the OptiScaler pre-SR route. Each sets the neural controls and a scaling tier together, because raising every slider to its maximum usually looks worse rather than better.
+
+| Preset | Passes | Structure | Skin | Tone | Scaling |
+| --- | --- | --- | --- | --- | --- |
+| Light | 1 | 1.0 | 1.0 | 0 | Quality (1.5x) |
+| Balanced (default) | 1 | 1.5 | 1.5 | 0 | Balanced (1.7x) |
+| Detail | 2 | 2.0 | 2.0 | 0 | Performance (2.0x) |
+| Max | 3 | 2.0 | 2.0 | 0.5 | Ultra Performance (3.0x) |
+
+Every extra neural pass costs GPU frame time, so more passes trade framerate for detail. No preset switches frame generation on; that stays an explicit choice inside the in-game overlay.
+
+**Scaling decides the internal render resolution**, and it is the largest image-quality control on this route. The neural pass runs on the internal buffer, so a more aggressive tier leaves the network fewer pixels to work with.
+
+| Tier | Ratio | 3840x2160 output | 2560x1440 output | 1920x1080 output |
+| --- | --- | --- | --- | --- |
+| DLAA | 1.0 | 3840x2160 | 2560x1440 | 1920x1080 |
+| Ultra Quality | 1.3 | 2954x1662 | 1969x1108 | 1477x831 |
+| Quality | 1.5 | 2560x1440 | 1707x960 | 1280x720 |
+| Balanced | 1.7 | 2259x1271 | 1506x847 | 1129x635 |
+| Performance | 2.0 | 1920x1080 | 1280x720 | 960x540 |
+| Ultra Performance | 3.0 | 1280x720 | 853x480 | 640x360 |
+
+A tier forces the render resolution and replaces the upscaler quality setting chosen inside the game. Choose **Game controlled** to leave that setting in charge instead. The chosen tier is recorded in the install manifest, so an update cannot change your resolution silently, and it can also be changed while playing from the overlay's **Upscale Ratio Override** section.
+
 ## In-game overlay
 
 Each route has its own in-game overlay; both are provided by the runtime itself, not by this manager.

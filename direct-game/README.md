@@ -58,7 +58,7 @@ py .\direct-game\amd_dlss5.py `
 
 Pass `--passes N` (1 to 3) to configure the neural pass count written to `OptiScaler.ini` (defaults to 1).
 
-Install (Quality preset):
+Install (Balanced preset):
 
 ```powershell
 py .\direct-game\amd_dlss5.py `
@@ -67,10 +67,10 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset quality
+  --preset balanced
 ```
 
-Install (Performance preset with explicit proxy):
+Install (Max preset with explicit proxy):
 
 ```powershell
 py .\direct-game\amd_dlss5.py `
@@ -79,7 +79,7 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset performance `
+  --preset max `
   --proxy-name dxgi.dll
 ```
 
@@ -92,7 +92,7 @@ py .\direct-game\amd_dlss5.py `
   --route optiscaler-presr `
   --package "C:\Downloads\OptiScaler-AMD-PreSR-Multipass-v1.2" `
   --weights "D:\Games\Example\dlssnr_on_amd_weights.bin" `
-  --preset quality
+  --preset balanced
 ```
 
 ### Common operations

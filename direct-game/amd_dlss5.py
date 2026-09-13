@@ -379,14 +379,40 @@ def _ini_set_default(lines: list[str], section: str, key: str, value: str) -> No
         _ini_set(lines, section, key, value)
 
 
-def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, passes: int = 1, game_exe: str | None = None) -> str:
+# Preset -> (passes, structure, skin, tone, scaling). Maxing every slider looks worse, not
+# better; tone in particular stays low. Mirrors OptiScalerPresets in the manager.
+OPTI_PRESETS = {
+    "light": (1, "1.0", "1.0", "0", "quality"),
+    "balanced": (1, "1.5", "1.5", "0", "balanced"),
+    "detail": (2, "2.0", "2.0", "0", "performance"),
+    "max": (3, "2.0", "2.0", "0.5", "ultraperformance"),
+}
+# Upscale ratios documented by OptiScaler's [QualityOverrides]; None leaves the game in charge.
+OPTI_SCALING_RATIOS = {
+    "gamecontrolled": None, "dlaa": "1.0", "ultraquality": "1.3", "quality": "1.5",
+    "balanced": "1.7", "performance": "2.0", "ultraperformance": "3.0",
+}
+
+
+def normalize_preset(preset: str | None) -> str:
+    value = (preset or "").strip().lower()
+    if value == "performance":  # legacy manifests forced a 3.0 ratio
+        return "max"
+    return value if value in OPTI_PRESETS else "balanced"
+
+
+def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, passes: int | None = None,
+                         game_exe: str | None = None, scaling: str | None = None) -> str:
+    name = normalize_preset(preset)
+    preset_passes, structure, skin, tone, preset_scaling = OPTI_PRESETS[name]
+    passes = preset_passes if passes is None else passes
     if not 1 <= passes <= 3:
         raise ValueError("passes must be between 1 and 3")
     lines = (base_text if base_text and base_text.strip() else MINIMAL_INI_HEADER).replace("\r\n", "\n").split("\n")
     for section, key, value in (
         ("Upscalers", "Dx12Upscaler", "ffx"),
         ("DlssNr", "Enabled", "true"), ("DlssNr", "RunBeforeSR", "true"), ("DlssNr", "Passes", str(passes)),
-        ("DlssNr", "LocalTone", "0"), ("DlssNr", "LocalStructure", "1"), ("DlssNr", "SkinStructure", "1"), ("DlssNr", "ApplyAfterRR", "false"),
+        ("DlssNr", "LocalTone", tone), ("DlssNr", "LocalStructure", structure), ("DlssNr", "SkinStructure", skin), ("DlssNr", "ApplyAfterRR", "false"),
         ("Log", "LogToFile", "true"), ("Log", "LogLevel", "2"),
     ):
         _ini_set(lines, section, key, value)
@@ -405,13 +431,16 @@ def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, pass
         _ini_set_default(lines, "Hotfix", "ManualInputPolling", "true")
     if game_exe and game_exe.lower() == CRIMSON_DESERT_EXE:
         _ini_set(lines, "Spoofing", "Dxgi", "false")
-    if preset == "performance":
-        for section, key, value in (
-            ("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true"), ("UpscaleRatio", "UpscaleRatioOverrideValue", "3.0"),
-            ("FrameGen", "Enabled", "true"), ("FrameGen", "FGInput", "nvngxfg"), ("FrameGen", "FGNvngxReplacement", "combo" if enabler else "ffx"),
-            ("DLSSG", "InterpolationCount", "2"),
-        ):
-            _ini_set(lines, section, key, value)
+    # Scaling is explicit. A forced ratio overrides the game's own upscaler quality setting;
+    # "game controlled" writes the override off instead of silently replacing it. Frame
+    # generation is deliberately not bundled into a preset any more.
+    requested = (scaling or preset_scaling).strip().lower().replace(" ", "")
+    ratio = OPTI_SCALING_RATIOS.get(requested, OPTI_SCALING_RATIOS[preset_scaling])
+    if ratio is None:
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideEnabled", "false")
+    else:
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideEnabled", "true")
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideValue", ratio)
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -973,10 +1002,13 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                     continue
                 copy_verified(source, relative)
             enabler_available = package["enabler"] is not None
-            if args.preset == "performance" and enabler_available:
-                copy_verified(Path(package["enabler"]), enabler_relative)
+            # No preset enables frame generation any more, so the enabler is not copied by default.
             base_text = Path(package["ini"]).read_text(encoding="utf-8", errors="replace") if package["ini"] else None
-            (folder / "OptiScaler.ini").write_text(build_optiscaler_ini(base_text, args.preset, enabler_available, passes=args.passes or 1, game_exe=game.name), encoding="utf-8")
+            # passes stays None unless asked for, so the preset's own pass count survives.
+            (folder / "OptiScaler.ini").write_text(
+                build_optiscaler_ini(base_text, args.preset, enabler_available, passes=args.passes,
+                                     game_exe=game.name, scaling=args.scaling),
+                encoding="utf-8")
             written.append("OptiScaler.ini")
 
             after = snapshot()
@@ -986,7 +1018,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                 "route": ROUTE_OPTISCALER,
                 "game_exe": game.name,
                 "proxy_name": proxy_name,
-                "preset": args.preset,
+                "preset": normalize_preset(args.preset),
                 "package": {
                     "root": package["root"], "layout": package["layout"], "fork_version": package["fork_version"],
                     "sha256sums_verified": package["sha256sums_verified"], "files": package["files"],
@@ -1441,7 +1473,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--nr-dll", help="User-supplied nvngx_dlssnr.dll")
     parser.add_argument("--package", help="User-supplied OptiScaler AMD pre-SR package folder")
     parser.add_argument("--weights", help="Locally generated dlssnr_on_amd_weights.bin")
-    parser.add_argument("--preset", choices=("quality", "performance"), default="quality")
+    parser.add_argument("--preset", choices=("light", "balanced", "detail", "max", "quality", "performance"), default="balanced",
+                        help="quality/performance are accepted as legacy aliases")
+    parser.add_argument("--scaling", choices=tuple(OPTI_SCALING_RATIOS), default=None,
+                        help="Upscale ratio tier; omit to use the preset's own")
     parser.add_argument("--proxy-name", default=None)
     parser.add_argument("--passes", type=int, choices=(1, 2, 3))
     parser.add_argument("--force", action="store_true", help="Override uncertain FSR/DX12 detection; anti-cheat remains blocked")

@@ -24,7 +24,8 @@ public partial class MainWindow
 
     public string OptiScalerPackagePath { get => _settings.OptiScalerPackagePath; set { _settings.OptiScalerPackagePath = value; OnPropertyChanged(); SaveSettings(); } }
     public string LocalWeightsPath { get => _settings.LocalWeightsPath; set { _settings.LocalWeightsPath = value; OnPropertyChanged(); SaveSettings(); } }
-    public string[] PresetNames { get; } = ["Quality", "Performance"];
+    public string[] PresetNames { get; } = OptiScalerPresets.Names;
+    public string[] ScalingNames { get; } = OptiScalerScalings.Names;
     public string OptiScalerDefaultPreset { get => _settings.OptiScalerDefaultPreset; set { if (value is null) return; _settings.OptiScalerDefaultPreset = value; OnPropertyChanged(); SaveSettings(); } }
     public string OptiScalerPackageStatus { get => _optiPackageStatus; private set => Set(ref _optiPackageStatus, value); }
     public int[] PassOptions { get; } = [1, 2, 3];
@@ -35,7 +36,7 @@ public partial class MainWindow
     public bool LosslessSkinFollows => _losslessLayers.SkinFollowsStructure;
     public string LosslessLayerStatus { get => _losslessLayerStatus; private set => Set(ref _losslessLayerStatus, value); }
     private string? LosslessRuntimeIni => string.IsNullOrWhiteSpace(LosslessInstallPath) ? null : Path.Combine(LosslessInstallPath, "nr-bridge", "runtime", "dlssnr_on_amd.ini");
-    private OptiScalerPreset DefaultPreset => OptiScalerDefaultPreset == "Performance" ? OptiScalerPreset.Performance : OptiScalerPreset.Quality;
+    private OptiScalerPreset DefaultPreset => OptiScalerPresets.Parse(OptiScalerDefaultPreset);
 
     private async Task<bool> ResolveOptiScalerSourcesAsync(bool showToast)
     {
@@ -111,7 +112,7 @@ public partial class MainWindow
             return;
         }
         ShowToast("Installing OptiScaler pre-SR…");
-        var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, dialog.Preset, update: false);
+        var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, dialog.Preset, update: false, scaling: dialog.Scaling);
         _runtime.Refresh(target);
         if (ReferenceEquals(SelectedGame, target)) await RefreshDiagnosticsAsync(false);
         RecordActivity("Game installed (pre-SR)", $"{target.Name} · {result.Preset} · {result.Written.Count} files");
@@ -132,7 +133,7 @@ public partial class MainWindow
 
         if (!await ResolveOptiScalerSourcesAsync(false)) throw new InvalidOperationException(OptiScalerPackageStatus);
         var proxyName = manifest?.ProxyName is { Length: > 0 } name ? name : "dxgi.dll";
-        var preset = string.Equals(manifest?.Preset, "performance", StringComparison.OrdinalIgnoreCase) ? OptiScalerPreset.Performance : OptiScalerPreset.Quality;
+        var preset = OptiScalerPresets.Parse(manifest?.Preset);
         ShowToast("Updating OptiScaler pre-SR…");
         var result = await OptiInstaller.InstallAsync(target, _optiPackage!, _localWeights!, preset, update: true, proxyName);
         _runtime.Refresh(target);

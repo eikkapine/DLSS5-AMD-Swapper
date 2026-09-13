@@ -40,6 +40,8 @@ Each additional neural pass costs roughly a proportional share of GPU frame time
 
 The direct-game page saves settings but does not claim that a running game applied them. Each route's own in-game overlay is the authoritative live surface: press `Del` for the OptiScaler pre-SR menu (arrow keys and Enter, including live neural passes, tone, structure and skin structure), `Page Up` for its compact status readout, or `End` for the official AMD runtime. Setup configures these keys; see `INSTALL.md`.
 
+Setup offers **Light**, **Balanced**, **Detail** and **Max** presets. Each one also picks a scaling tier, which sets the internal render resolution and is the largest image-quality control on the OptiScaler pre-SR route. No preset enables frame generation. `INSTALL.md` has the full preset and scaling tables.
+
 See `INSTALL.md` for setup and `THIRD-PARTY.md` for the runtime/licensing boundary.
 
 This ZIP contains only the DLSS5 AMD Swapper manager and project-owned bridge/wrapper/scripts. It does not include paid Lossless Scaling files, DLSS-NR-on-AMD, NVIDIA DLSS-NR files, generated weights or third-party AMD proxy/runtime binaries.
