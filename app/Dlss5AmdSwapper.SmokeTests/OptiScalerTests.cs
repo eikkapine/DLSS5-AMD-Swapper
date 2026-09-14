@@ -240,6 +240,25 @@ internal static class OptiScalerTests
             return Task.CompletedTask;
         });
 
+        await run("Weights are found in the folders a person would actually drop them in", async () =>
+        {
+            using var temp = new OptiTemp();
+            var drop = Path.Combine(temp.Path, "Downloads");
+            Directory.CreateDirectory(drop);
+            var real = Path.Combine(drop, OptiScalerPackageService.WeightsName);
+            await File.WriteAllBytesAsync(real, new byte[1024 * 1024 + 8]);
+            var found = OptiScalerPackageService.FindLocalWeights(null, [], null, null, [drop]);
+            Check(found is not null && found.Path.Equals(real, StringComparison.OrdinalIgnoreCase), "a real weights file in a user folder must be found");
+
+            // A Git LFS pointer stub is a few hundred bytes and is not weights; reporting it as
+            // found would install a placeholder and fail later inside the game.
+            var stubFolder = Path.Combine(temp.Path, "Stub");
+            Directory.CreateDirectory(stubFolder);
+            await File.WriteAllTextAsync(Path.Combine(stubFolder, OptiScalerPackageService.WeightsName),
+                "version https://git-lfs.github.com/spec/v1\noid sha256:" + new string('a', 64) + "\n");
+            Check(OptiScalerPackageService.FindLocalWeights(null, [], null, null, [stubFolder]) is null, "an LFS pointer stub must not be accepted as weights");
+        });
+
         await run("Preset INI writer patches a package INI in place and writes a minimal INI otherwise", () =>
         {
             var baseIni = "; comment stays\n[Upscalers]\nDx12Upscaler=auto\n\n[DlssNr]\nEnabled=auto\nPasses=auto\n\n[Log]\nLogToFile=auto\n";

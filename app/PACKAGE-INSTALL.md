@@ -32,6 +32,18 @@ Common anti-cheat targets are blocked automatically. The direct route is intende
 - Use **Refresh evidence** after rendering a scene. Read the reported module/log evidence and any configuration issues; a successful file copy is not proof that the rendering passes ran.
 - For the supported upstream route, use the in-game `End` overlay to confirm status. For OptiScaler pre-SR, use its in-game overlay (see below). Compare the same scene and settings with the effect switched on and off only after activity is confirmed.
 
+## Supplying the files this app does not include
+
+Three files are never downloaded or bundled: the OptiScaler AMD pre-SR package, the generated weights, and `nvngx_dlssnr.dll`. Setup looks for them automatically. When that fails, put the file in one of the folders below and use the refresh or **Find in Downloads** action, or select it directly in Settings.
+
+| File | Searched automatically in |
+| --- | --- |
+| OptiScaler AMD pre-SR package (folder or `.zip`) | `Downloads`, `Desktop` and `Documents`, two folder levels deep |
+| `dlssnr_on_amd_weights.bin` | the path set in Settings, the Lossless Scaling `nr-bridge\runtime` folder, any managed game folder, the package folder, then `Downloads`, `Desktop` and `Documents` |
+| `nvngx_dlssnr.dll` | the selected game's folder and its neighbours, then `Downloads`, `Desktop` and `Documents` |
+
+The real weights file is roughly 141 MB. A Git LFS pointer stub of a few hundred bytes is rejected and reported as missing, so check the file size if a copy you placed is not picked up. Weights are produced by running the official AMD runtime setup once; this project does not distribute them.
+
 ## Presets and scaling
 
 Setup offers four presets for the OptiScaler pre-SR route. Each sets the neural controls and a scaling tier together, because raising every slider to its maximum usually looks worse rather than better.

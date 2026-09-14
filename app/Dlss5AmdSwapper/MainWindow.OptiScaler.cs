@@ -69,7 +69,7 @@ public partial class MainWindow
             if (_localWeights is not null && !string.Equals(LocalWeightsPath, _localWeights.Path, StringComparison.OrdinalIgnoreCase)) LocalWeightsPath = _localWeights.Path;
             OptiScalerPackageStatus = _optiPackage is null
                 ? "OptiScaler package: " + (failure ?? "none found. Put the OptiScaler-AMD-PreSR-Multipass folder or zip in Downloads, or choose it below.")
-                : $"OptiScaler package: {_optiPackage.Summary}" + (_localWeights is null ? " · weights: none found (run the official AMD runtime setup once to generate them)" : " · weights ready");
+                : $"OptiScaler package: {_optiPackage.Summary}" + (_localWeights is null ? " · weights: none found. Generate them by running the official AMD runtime setup once, or put dlssnr_on_amd_weights.bin in Downloads, on the Desktop, in Documents, or beside the package. A Git LFS pointer stub is rejected; the real file is about 141 MB." : " · weights ready");
             if (showToast) ShowToast(OptiScalerPackageStatus, _optiPackage is not null && _localWeights is not null);
             return _optiPackage is not null && _localWeights is not null;
         }
@@ -103,7 +103,7 @@ public partial class MainWindow
         if (preSrBlock is not null) preSrReady = false;
         var dialog = new SetupDialog(target.Name,
             preSrBlock ?? _optiPackage?.Summary ?? OptiScalerPackageStatus,
-            _localWeights is null ? "Weights: none found" : $"Weights: {Path.GetFileName(Path.GetDirectoryName(_localWeights.Path))} copy, {_localWeights.Size / (1024 * 1024)} MB",
+            _localWeights is null ? "Weights: none found - put dlssnr_on_amd_weights.bin in Downloads, or choose it in Settings" :$"Weights: {Path.GetFileName(Path.GetDirectoryName(_localWeights.Path))} copy, {_localWeights.Size / (1024 * 1024)} MB",
             preSrReady, DefaultPreset, OptiScalerInstallerService.GetActivationGuidance(target)) { Owner = this };
         if (dialog.ShowDialog() != true) return;
         if (dialog.Route == InstallRoute.PostFsrRuntime)

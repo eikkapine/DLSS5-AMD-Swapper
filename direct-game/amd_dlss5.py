@@ -314,7 +314,14 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
     }
 
 
-def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless: Path | None) -> dict[str, Any] | None:
+def default_user_folders() -> list[Path]:
+    """Where a person would actually drop the file; mirrors the package search roots."""
+    home = Path.home()
+    return [home / "Downloads", home / "Desktop", home / "Documents"]
+
+
+def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless: Path | None,
+                       user_folders: list[Path] | None = None) -> dict[str, Any] | None:
     candidates: list[Path] = []
     if configured:
         candidates.append(configured)
@@ -322,6 +329,9 @@ def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless:
         candidates.append(lossless / "nr-bridge" / "runtime" / OPTI_WEIGHTS)
         candidates.append(lossless / OPTI_WEIGHTS)
     candidates.extend(directory / OPTI_WEIGHTS for directory in game_dirs)
+    # A real copy sitting in Downloads previously reported "none found".
+    candidates.extend(folder / OPTI_WEIGHTS for folder in
+                      (default_user_folders() if user_folders is None else user_folders))
     chosen: dict[str, Any] | None = None
     seen: set[str] = set()
     for candidate in candidates:

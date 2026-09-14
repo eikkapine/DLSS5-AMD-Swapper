@@ -363,6 +363,20 @@ class InstallTests(unittest.TestCase):
         self.assertAlmostEqual(summary["mean_total_ms"], 12.0)
         self.assertEqual(len(summary["presr_log_sha256"]), 64)
 
+    def test_weights_found_in_user_folders_and_lfs_stub_rejected(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            drop = root / "Downloads"
+            drop.mkdir()
+            (drop / helper.OPTI_WEIGHTS).write_bytes(b"\x00" * (1024 * 1024 + 8))
+            self.assertIsNotNone(helper.find_local_weights(None, [], None, user_folders=[drop]))
+            # A Git LFS pointer stub is a few hundred bytes and is not weights.
+            stub = root / "Stub"
+            stub.mkdir()
+            (stub / helper.OPTI_WEIGHTS).write_bytes(
+                b"version https://git-lfs.github.com/spec/v1\noid sha256:" + b"a" * 64)
+            self.assertIsNone(helper.find_local_weights(None, [], None, user_folders=[stub]))
+
     def test_overlay_keys_written_and_player_rebind_preserved(self):
         text = helper.build_optiscaler_ini(None, "quality", False)
         self.assertIn("OverlayMenu=true", text)
