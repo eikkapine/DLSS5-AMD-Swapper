@@ -57,8 +57,8 @@ internal static class Program
                 RenderPopups(theme);
                 foreach (var available in new[] { true, false })
                 {
-                    var dialog = new SetupDialog("Assetto Corsa Rally · theme fixture", "Local OptiScaler package verified", "Local generated weights verified", available, OptiScalerPreset.Quality,
-                        "Enable the game's DLSS upscaling option, then open the OptiScaler Insert overlay. Refresh evidence after driving to verify completed Neural Rendering frames.");
+                    var dialog = new SetupDialog("Assetto Corsa Rally · theme fixture", "Local OptiScaler package verified", "Local generated weights verified", available, OptiScalerPreset.Balanced,
+                        "Enable the game's DLSS upscaling option, then open the OptiScaler Del overlay. Refresh evidence after driving to verify completed Neural Rendering frames.");
                     var content = (FrameworkElement)dialog.Content;
                     content.Measure(new Size(560, double.PositiveInfinity));
                     Render(content, 560, Math.Ceiling(content.DesiredSize.Height), $"{theme}-setup-{(available ? "available" : "unavailable")}");

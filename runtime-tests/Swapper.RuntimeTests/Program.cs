@@ -193,7 +193,7 @@ else
         {
             var before = await SnapshotAsync(d3d11.DirectoryPath);
             string? rejection = null;
-            try { await installer.InstallAsync(d3d11, package, weights, OptiScalerPreset.Quality, false); }
+            try { await installer.InstallAsync(d3d11, package, weights, OptiScalerPreset.Balanced, false); }
             catch (InvalidOperationException error) { rejection = error.Message; }
             Require(rejection is not null && (rejection.Contains("FSR") || rejection.Contains("DirectX 12")), "Expected a runtime compatibility rejection.");
             var after = await SnapshotAsync(d3d11.DirectoryPath);
@@ -217,14 +217,14 @@ else
         await CheckAsync("Install using the application's OptiScalerInstallerService", async () =>
         {
             await probe.ProbeAsync(managed);
-            var result = await installer.InstallAsync(managed, package, weights, OptiScalerPreset.Quality, false);
+            var result = await installer.InstallAsync(managed, package, weights, OptiScalerPreset.Balanced, false);
             installed = result.Success;
             Require(installed && File.Exists(managed.ManifestPath), "Managed install manifest was not created.");
             return result;
         });
         if (installed)
         {
-            await CheckAsync("Update the managed installation", async () => await installer.InstallAsync(managed, package, weights, OptiScalerPreset.Quality, true));
+            await CheckAsync("Update the managed installation", async () => await installer.InstallAsync(managed, package, weights, OptiScalerPreset.Balanced, true));
             await CheckAsync("Installed OptiScaler proxy renders real FFX input", async () =>
             {
                 var result = await RunAsync(managed, "render", FfxArguments());
