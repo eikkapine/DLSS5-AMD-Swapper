@@ -20,5 +20,6 @@
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
     <Resource Include="Assets\Dlss5AmdSwapper.ico" />
+    <None Update="SpecialK.deny.Dlss5AmdSwapper" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -11,7 +11,23 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - run: dotnet run --project app/Dlss5AmdSwapper.SmokeTests -c Release
+      - name: App shutdown and tray lifecycle
+        run: dotnet run --project app/Dlss5AmdSwapper.DesktopTests -c Release
+      - name: Light and dark theme rendering and contrast
+        run: dotnet run --project app/Dlss5AmdSwapper.ThemeTests -c Release -- artifacts/theme-verification
+      - name: Save theme verification images and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-verification
+          path: artifacts/theme-verification
+          if-no-files-found: ignore
+      - name: Installer integrity and rollback regression tests
+        shell: powershell
+        run: ./app/Test-Packaging.ps1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Direct-game installer regression tests
+        run: python -m unittest discover -s direct-game/tests -v
       - run: python tools/Check-Publication.py

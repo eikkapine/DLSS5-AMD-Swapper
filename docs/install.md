@@ -13,9 +13,11 @@ The ZIP contains the manager and project-owned Lossless Scaling payload only. It
 
 ## Direct-game setup
 
-Use this route for supported single-player/offline x64 DX12/FSR games. Two backends are supported: the official post-FSR runtime and the OptiScaler pre-SR route.
+Use this route for supported single-player/offline x64 DX12/FSR games. Two backends are supported: the official AMD runtime and the OptiScaler pre-SR route.
 
-### Official post-FSR runtime
+### Official AMD runtime
+
+The official [v0.3.0 release](https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.3.0) defaults to pre-upscale evaluation. Earlier versions used the post-FSR path. The manager keeps the installed version's supported mode and validates the appropriate configuration keys; existing manifests remain compatible.
 
 1. Open **Game library** and press **Scan PC** to check Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass and common standalone game folders, or add the game executable manually.
 2. Review the scan summary and select a compatible game. The scanner does not select a target for you.
@@ -41,8 +43,10 @@ Use this alternative direct-game backend when you want to evaluate neural render
 4. In the route selection dialog, choose **OptiScaler pre-SR**.
 5. Select **Quality** (pre-SR neural pass, the game's own FSR ratio, no frame generation) or **Performance** (pre-SR with a 3.0x ratio override and 3x frame generation through OptiScaler).
 6. Click **Set up**. The manager validates PE x64 binaries, verifies the `amd-presr` version string and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
-7. Launch the game with FSR enabled. Press `Insert` to open the in-game OptiScaler menu.
+7. Follow the game's input guidance, then press `Del` to open the in-game OptiScaler menu. **Assetto Corsa Rally:** select DLSS or XeSS in game settings; this fork disables its FSR inputs. OptiScaler can translate that input to the AMD `ffx` output selected by the preset. **Cyberpunk 2077:** DLSS, FSR and XeSS inputs are supported upstream; with path tracing, prefer XeSS or FSR as described in the [upstream guide](https://github.com/OptiScaler/OptiScaler/wiki/Cyberpunk-2077).
 8. Use **Refresh evidence** in the manager to verify active passes, render and target dimensions, and execution times.
+
+Installing files or seeing the OptiScaler menu proves only part of the setup. A successful neural pass or model timing in the current launch is required to confirm Neural Rendering. See [checking a setup that has no visible effect](optiscaler-presr.md#when-installation-makes-no-visible-difference).
 
 OptiScaler cannot be used inside Lossless Scaling because Lossless Scaling uses Direct3D 11 presentation whereas OptiScaler pre-SR requires a DirectX 12 super-resolution call to hook.
 
@@ -87,14 +91,22 @@ Sources below the cap are not enlarged for the neural pass.
 
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl+Alt+F6` | Toggle saved direct-game on/off state |
-| `Ctrl+Alt+F7` | Decrease strength |
-| `Ctrl+Alt+F8` | Increase strength |
+| `Ctrl+Alt+F6` | Save the direct-game on/off state for the next launch |
+| `Ctrl+Alt+F7` | Save decreased strength for the next launch |
+| `Ctrl+Alt+F8` | Save increased strength for the next launch |
 | `Ctrl+Alt+F9` | Cycle selected layer (Structure, Skin, Tone) |
 | `Ctrl+Alt+F10` | Decrease selected layer strength (-0.1) |
 | `Ctrl+Alt+F11` | Increase selected layer strength (+0.1) |
 
-Lossless Scaling owns `Ctrl+Alt+F6/F7/F8` while its bridge is active, and accepts `Ctrl+Alt+F9/F10/F11` to adjust layer settings in the bridge runtime INI while `LosslessScaling.exe` runs. The manager registers `Ctrl+Alt+F6/F7/F8` for a running managed direct-game target. For the official post-FSR runtime, F6 saves the configured state; use the upstream `End` overlay for the authoritative live toggle.
+Lossless Scaling owns `Ctrl+Alt+F6/F7/F8` while its bridge is active, and accepts `Ctrl+Alt+F9/F10/F11` to adjust layer settings in the bridge runtime INI while `LosslessScaling.exe` runs. The manager registers `Ctrl+Alt+F6/F7/F8` for a running managed direct-game target. These keys only write to the configuration file for the next launch; they never change a running game.
+
+Live in-game control belongs to the runtime's own overlay, which differs by route:
+
+| Key | Route | Action |
+| --- | --- | --- |
+| `Del` | OptiScaler pre-SR | Overlay: neural on/off, passes, tone, structure, skin structure |
+| `Page Up` / `Page Down` | OptiScaler pre-SR | Status readout, and cycle its detail |
+| `End` | Official AMD runtime | Upstream status and live toggle |
 
 ## Restore / uninstall
 
@@ -120,6 +132,8 @@ For individual native builds:
 .\auto-scale\build.ps1
 .\bridge\build.ps1
 ```
+
+The [runtime test apps](../runtime-tests/README.md) exercise hidden DirectX 11/12 rendering, actual installer services, neural ON/OFF output, pass counts and restore using your local runtime files. [Theme verification](theme-verification.md) renders the WPF pages and checks effective text contrast in both themes. These checks use isolated directories and do not require mouse automation.
 
 ## Advanced CLI
 

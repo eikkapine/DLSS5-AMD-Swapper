@@ -10,8 +10,10 @@ reversible install, and records a local manifest for diagnostics/removal.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -84,6 +86,7 @@ OPTI_FORK_MARKER = "amd-presr"
 OPTI_PASS_MARKER = b"dlssnr_amd"
 CRIMSON_DESERT_EXE = "crimsondesert.exe"
 CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa"
+ASSETTO_RALLY_GUIDE = "https://github.com/OptiScaler/OptiScaler/wiki/Assetto-Corsa-Rally"
 
 
 def sha256(path: Path) -> str:
@@ -156,13 +159,13 @@ def contains_marker(path: Path, marker: bytes) -> bool:
             carry = data[-(len(marker) - 1):] if len(marker) > 1 else b""
 
 
-def pe_product_version(path: Path) -> tuple[str | None, str | None]:
-    """Read ProductName/ProductVersion from the VS_VERSIONINFO string table without Win32 APIs."""
+def pe_version_strings(path: Path, *keys: str) -> tuple[str | None, ...]:
+    """Read VS_VERSIONINFO string table values without Win32 APIs."""
     data = path.read_bytes()
     marker = "VS_VERSION_INFO".encode("utf-16le")
     start = data.find(marker)
     if start < 0:
-        return None, None
+        return tuple(None for _ in keys)
     block = data[start:start + 8192]
 
     def read_value(key: str) -> str | None:
@@ -182,7 +185,31 @@ def pe_product_version(path: Path) -> tuple[str | None, str | None]:
                 return None
         return block[cursor:end].decode("utf-16le", errors="replace").strip("\x00") or None
 
-    return read_value("ProductName"), read_value("ProductVersion")
+    return tuple(read_value(key) for key in keys)
+
+
+def pe_product_version(path: Path) -> tuple[str | None, str | None]:
+    product, version = pe_version_strings(path, "ProductName", "ProductVersion")
+    return product, version
+
+
+# Games legitimately ship Microsoft's own dbghelp.dll for crash reporting: Cyberpunk 2077
+# ships it in bin\x64 beside dbgcore.dll, and every Unreal title ships one too. Only a
+# non-Microsoft DLL under a proxy name is really a competing loader.
+def is_microsoft_system_dll(path: Path) -> bool:
+    try:
+        company = pe_version_strings(path, "CompanyName")[0]
+    except OSError:
+        return False
+    return bool(company and "microsoft corporation" in company.lower())
+
+
+def conflicting_proxy_names(folder: Path, present, managed=(), names=KNOWN_PROXY_NAMES) -> list[str]:
+    managed_lower = {str(name).lower() for name in managed}
+    return [
+        name for name in names
+        if name in present and name.lower() not in managed_lower and not is_microsoft_system_dll(folder / name)
+    ]
 
 
 def parse_sha256sums(path: Path) -> list[tuple[str, str]]:
@@ -287,7 +314,14 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
     }
 
 
-def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless: Path | None) -> dict[str, Any] | None:
+def default_user_folders() -> list[Path]:
+    """Where a person would actually drop the file; mirrors the package search roots."""
+    home = Path.home()
+    return [home / "Downloads", home / "Desktop", home / "Documents"]
+
+
+def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless: Path | None,
+                       user_folders: list[Path] | None = None) -> dict[str, Any] | None:
     candidates: list[Path] = []
     if configured:
         candidates.append(configured)
@@ -295,6 +329,9 @@ def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless:
         candidates.append(lossless / "nr-bridge" / "runtime" / OPTI_WEIGHTS)
         candidates.append(lossless / OPTI_WEIGHTS)
     candidates.extend(directory / OPTI_WEIGHTS for directory in game_dirs)
+    # A real copy sitting in Downloads previously reported "none found".
+    candidates.extend(folder / OPTI_WEIGHTS for folder in
+                      (default_user_folders() if user_folders is None else user_folders))
     chosen: dict[str, Any] | None = None
     seen: set[str] = set()
     for candidate in candidates:
@@ -310,7 +347,7 @@ def find_local_weights(configured: Path | None, game_dirs: list[Path], lossless:
     return chosen
 
 
-MINIMAL_INI_HEADER = "; Written by DLSS5 AMD Swapper. Unlisted OptiScaler keys keep their defaults.\n; Open the in-game OptiScaler menu (Insert) to change anything else.\n"
+MINIMAL_INI_HEADER = "; Written by DLSS5 AMD Swapper. Unlisted OptiScaler keys keep their defaults.\n; Open the in-game OptiScaler menu (Del) to change anything else.\n"
 
 
 def _ini_set(lines: list[str], section: str, key: str, value: str) -> None:
@@ -332,24 +369,88 @@ def _ini_set(lines: list[str], section: str, key: str, value: str) -> None:
     lines.insert(end, f"{key}={value}")
 
 
-def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, passes: int = 1) -> str:
+def _ini_value(lines: list[str], section: str, key: str) -> str | None:
+    section_index = next((i for i, line in enumerate(lines) if line.strip().lower() == f"[{section.lower()}]"), -1)
+    if section_index < 0:
+        return None
+    for i in range(section_index + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            return None
+        if "=" in lines[i] and lines[i].split("=", 1)[0].strip().lower() == key.lower():
+            return lines[i].split("=", 1)[1].strip()
+    return None
+
+
+def _ini_set_default(lines: list[str], section: str, key: str, value: str) -> None:
+    """Write only when unset or 'auto' so a player's overlay-saved choice is preserved."""
+    current = _ini_value(lines, section, key)
+    if not current or current.lower() == "auto":
+        _ini_set(lines, section, key, value)
+
+
+# Preset -> (passes, structure, skin, tone, scaling). Maxing every slider looks worse, not
+# better; tone in particular stays low. Mirrors OptiScalerPresets in the manager.
+OPTI_PRESETS = {
+    "light": (1, "1.0", "1.0", "0", "quality"),
+    "balanced": (1, "1.5", "1.5", "0", "balanced"),
+    "detail": (2, "2.0", "2.0", "0", "performance"),
+    "max": (3, "2.0", "2.0", "0.5", "ultraperformance"),
+}
+# Upscale ratios documented by OptiScaler's [QualityOverrides]; None leaves the game in charge.
+OPTI_SCALING_RATIOS = {
+    "gamecontrolled": None, "dlaa": "1.0", "ultraquality": "1.3", "quality": "1.5",
+    "balanced": "1.7", "performance": "2.0", "ultraperformance": "3.0",
+}
+
+
+def normalize_preset(preset: str | None) -> str:
+    value = (preset or "").strip().lower()
+    if value == "performance":  # legacy manifests forced a 3.0 ratio
+        return "max"
+    return value if value in OPTI_PRESETS else "balanced"
+
+
+def build_optiscaler_ini(base_text: str | None, preset: str, enabler: bool, passes: int | None = None,
+                         game_exe: str | None = None, scaling: str | None = None) -> str:
+    name = normalize_preset(preset)
+    preset_passes, structure, skin, tone, preset_scaling = OPTI_PRESETS[name]
+    passes = preset_passes if passes is None else passes
     if not 1 <= passes <= 3:
         raise ValueError("passes must be between 1 and 3")
     lines = (base_text if base_text and base_text.strip() else MINIMAL_INI_HEADER).replace("\r\n", "\n").split("\n")
     for section, key, value in (
         ("Upscalers", "Dx12Upscaler", "ffx"),
         ("DlssNr", "Enabled", "true"), ("DlssNr", "RunBeforeSR", "true"), ("DlssNr", "Passes", str(passes)),
-        ("DlssNr", "LocalTone", "0"), ("DlssNr", "LocalStructure", "1"), ("DlssNr", "SkinStructure", "1"), ("DlssNr", "ApplyAfterRR", "false"),
+        ("DlssNr", "LocalTone", tone), ("DlssNr", "LocalStructure", structure), ("DlssNr", "SkinStructure", skin), ("DlssNr", "ApplyAfterRR", "false"),
         ("Log", "LogToFile", "true"), ("Log", "LogLevel", "2"),
     ):
         _ini_set(lines, section, key, value)
-    if preset == "performance":
-        for section, key, value in (
-            ("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true"), ("UpscaleRatio", "UpscaleRatioOverrideValue", "3.0"),
-            ("FrameGen", "Enabled", "true"), ("FrameGen", "FGInput", "nvngxfg"), ("FrameGen", "FGNvngxReplacement", "combo" if enabler else "ffx"),
-            ("DLSSG", "InterpolationCount", "2"),
-        ):
-            _ini_set(lines, section, key, value)
+    # In-game overlay (OptiScaler's own ImGui menu). Fill in defaults only: the overlay writes
+    # its settings back to this file, so a key the player rebound in-game must survive.
+    for section, key, value in (
+        ("Menu", "OverlayMenu", "true"),
+        ("Menu", "ShortcutKey", "0x2E"),        # Del
+        ("Menu", "FpsOverlayType", "2"),
+        ("Menu", "FpsShortcutKey", "0x21"),     # Page Up
+        ("Menu", "FpsCycleShortcutKey", "0x22"),  # Page Down
+    ):
+        _ini_set_default(lines, section, key, value)
+    # Rally's log shows "subclass lost to another WndProc", leaving the overlay unreachable.
+    if game_exe and game_exe.lower() in ("acr.exe", "acr-win64-shipping.exe"):
+        _ini_set_default(lines, "Hotfix", "ManualInputPolling", "true")
+    if game_exe and game_exe.lower() == CRIMSON_DESERT_EXE:
+        _ini_set(lines, "Spoofing", "Dxgi", "false")
+    # Scaling is explicit. A forced ratio overrides the game's own upscaler quality setting;
+    # "game controlled" writes the override off instead of silently replacing it. Frame
+    # generation is deliberately not bundled into a preset any more.
+    requested = (scaling or preset_scaling).strip().lower().replace(" ", "")
+    ratio = OPTI_SCALING_RATIOS.get(requested, OPTI_SCALING_RATIOS[preset_scaling])
+    if ratio is None:
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideEnabled", "false")
+    else:
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideEnabled", "true")
+        _ini_set(lines, "UpscaleRatio", "UpscaleRatioOverrideValue", ratio)
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -474,6 +575,22 @@ def validate_nr_dll(path: Path) -> dict[str, Any]:
     return {"sha256": sha256(path), "size": path.stat().st_size}
 
 
+def presr_activation_guidance(game_exe: str) -> str:
+    if game_exe.lower() in ("acr.exe", "acr-win64-shipping.exe"):
+        return (
+            "Assetto Corsa Rally: select DLSS or XeSS in the game's graphics settings, then open "
+            "the OptiScaler overlay (Del) and use FSR (ffx) as the output upscaler with DLSS-NR enabled. "
+            "OptiScaler disables FSR inputs for this game to avoid crashes; simply enabling in-game "
+            "FSR can leave the installed pre-SR route inactive. See " + ASSETTO_RALLY_GUIDE
+        )
+    return (
+        "Launch the game in DirectX 12 and enable an upscaler input supported by OptiScaler for that game "
+        "(usually DLSS or XeSS). In the overlay (Del) select FSR (ffx) output and enable DLSS-NR. "
+        "Check for completed AMD pre-SR passes or DLSS-NR timings; installed files or an overlay alone "
+        "do not confirm neural rendering."
+    )
+
+
 def check_game(exe: Path) -> dict[str, Any]:
     exe = exe.resolve()
     if not exe.is_file() or exe.suffix.lower() != ".exe":
@@ -492,6 +609,7 @@ def check_game(exe: Path) -> dict[str, Any]:
         "route": "amd-fsr-direct",
         "eligible": eligible,
         "eligible_routes": ["amd-fsr-direct", "amd-optiscaler-presr"] if eligible else [],
+        "pre_sr_activation_guidance": presr_activation_guidance(exe.name),
     }
 
 
@@ -530,7 +648,7 @@ def read_runtime_config(path: Path) -> dict[str, str]:
     return values
 
 
-def verify_rich_runtime_config(path: Path) -> dict[str, int]:
+def verify_rich_runtime_config(path: Path, upstream_tag: str | None = None) -> dict[str, int]:
     values = read_runtime_config(path)
     required = {
         "Enabled": 1,
@@ -538,8 +656,12 @@ def verify_rich_runtime_config(path: Path) -> dict[str, int]:
         "UseDepth": 1,
         "Temporal": 1,
         "Interop": 1,
-        "Inline": 1,
     }
+    version = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:\.\d+)?", upstream_tag or "", re.IGNORECASE)
+    modern = version is not None and tuple(map(int, version.groups())) >= (0, 3, 0)
+    # The verified v0.3.0 setup replaced Inline with Async and defaults to
+    # processing before upscaling. Keep the legacy contract for older/unknown tags.
+    required.update({"Async": 0, "PreUpscale": 1, "PreHistory": 0} if modern else {"Inline": 1})
     missing: list[str] = []
     verified: dict[str, int] = {}
     for key, expected in required.items():
@@ -563,24 +685,31 @@ def snapshot(folder: Path) -> dict[str, Any]:
     return {name: state for name, path in managed_paths(folder).items() if (state := file_state(path)) is not None}
 
 
-def run_setup(setup: Path, folder: Path, update: bool) -> subprocess.CompletedProcess[str]:
-    # The upstream setup is console driven. These inputs accept the selected
-    # folder and its detected/default proxy name. Existing managed installs use
-    # the documented U action. Any unexpected confirmation defaults to No/quit.
-    responses = "y\n"
-    if update:
-        responses += "u\n"
-    responses += "\n\n\n"
-    return subprocess.run(
-        [str(setup)],
-        cwd=str(folder),
-        input=responses,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        timeout=120,
-        check=False,
-    )
+def run_setup(setup: Path, folder: Path, update: bool, expected_sha256: str | None = None) -> subprocess.CompletedProcess[str]:
+    # Running beside the game's proxy can load and lock the DLL being updated.
+    # Use an isolated executable directory and pass the target as an argument.
+    expected_sha256 = expected_sha256 or sha256(setup)
+    target = folder.resolve()
+    with tempfile.TemporaryDirectory(prefix="dlss5-amd-swapper-setup-") as temp_name:
+        staging = Path(temp_name)
+        isolated_setup = staging / UPSTREAM_ASSET
+        shutil.copy2(setup, isolated_setup)
+        if sha256(isolated_setup).lower() != expected_sha256.lower():
+            raise RuntimeError("The isolated upstream setup copy failed SHA-256 verification")
+        (staging / "SpecialK.deny.dlssnr_on_amd_setup").touch()
+        # A positional target skips the folder confirmation. Updates select U;
+        # blank responses retain the runtime's detected/default proxy choice.
+        return subprocess.run(
+            [str(isolated_setup), str(target)],
+            cwd=str(staging),
+            input=("u\n" if update else "") + "\n\n\n",
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
 
 
 def install(args: argparse.Namespace) -> dict[str, Any]:
@@ -617,14 +746,14 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             prior_manifest = {}
         managed_proxies = [p.lower() for p in ((prior_manifest or {}).get("installed_proxy_names") or [])]
-        unexpected = [name for name in KNOWN_PROXY_NAMES if name in before and name.lower() not in managed_proxies]
+        unexpected = conflicting_proxy_names(folder, before, managed_proxies)
         if unexpected:
             raise RuntimeError(
                 "Additional proxy DLLs appeared after this managed install: " + ", ".join(unexpected)
                 + ". Restore or remove the other loader before updating Neural Rendering so two injection routes do not compete during game startup"
             )
     if not args.update:
-        existing_proxy = [name for name in KNOWN_PROXY_NAMES if name in before]
+        existing_proxy = conflicting_proxy_names(folder, before)
         if existing_proxy:
             raise RuntimeError(
                 "A proxy DLL already exists in the game folder and is not managed by this helper: "
@@ -652,7 +781,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
             if not local_nr.exists():
                 shutil.copy2(nr_source, local_nr)
 
-            completed = run_setup(local_setup, folder, update=args.update)
+            completed = run_setup(local_setup, folder, update=args.update, expected_sha256=release["sha256"])
             after = snapshot(folder)
             changed_proxy = [name for name in KNOWN_PROXY_NAMES if name in after and before.get(name) != after.get(name)]
             if args.update:
@@ -670,7 +799,7 @@ def install(args: argparse.Namespace) -> dict[str, Any]:
                     f"Upstream setup did not produce a verifiable install (exit {completed.returncode}).\n{tail}"
                 )
 
-            verified_config = verify_rich_runtime_config(folder / "dlssnr_on_amd.ini")
+            verified_config = verify_rich_runtime_config(folder / "dlssnr_on_amd.ini", release.get("tag"))
 
             manifest = {
                 "schema_version": 1,
@@ -842,7 +971,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
 
     before = snapshot()
     if not args.update:
-        unmanaged = [name for name in OPTI_PROXY_NAMES if name in before]
+        unmanaged = conflicting_proxy_names(folder, before, names=OPTI_PROXY_NAMES)
         if unmanaged:
             raise RuntimeError("A proxy DLL already exists in the game folder and is not managed by this helper: " + ", ".join(unmanaged))
     elif previous_manifest and proxy_name.lower() not in [p.lower() for p in (previous_manifest.get("installed_proxy_names") or [])]:
@@ -883,10 +1012,13 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                     continue
                 copy_verified(source, relative)
             enabler_available = package["enabler"] is not None
-            if args.preset == "performance" and enabler_available:
-                copy_verified(Path(package["enabler"]), enabler_relative)
+            # No preset enables frame generation any more, so the enabler is not copied by default.
             base_text = Path(package["ini"]).read_text(encoding="utf-8", errors="replace") if package["ini"] else None
-            (folder / "OptiScaler.ini").write_text(build_optiscaler_ini(base_text, args.preset, enabler_available, passes=args.passes or 1), encoding="utf-8")
+            # passes stays None unless asked for, so the preset's own pass count survives.
+            (folder / "OptiScaler.ini").write_text(
+                build_optiscaler_ini(base_text, args.preset, enabler_available, passes=args.passes,
+                                     game_exe=game.name, scaling=args.scaling),
+                encoding="utf-8")
             written.append("OptiScaler.ini")
 
             after = snapshot()
@@ -896,7 +1028,7 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                 "route": ROUTE_OPTISCALER,
                 "game_exe": game.name,
                 "proxy_name": proxy_name,
-                "preset": args.preset,
+                "preset": normalize_preset(args.preset),
                 "package": {
                     "root": package["root"], "layout": package["layout"], "fork_version": package["fork_version"],
                     "sha256sums_verified": package["sha256sums_verified"], "files": package["files"],
@@ -964,33 +1096,164 @@ def remove_optiscaler(args: argparse.Namespace) -> dict[str, Any]:
     return {"removed": sorted(removed), "preserved": sorted(set(preserved)), "manifest_retained": bool(remaining), "remaining_managed_files": remaining}
 
 
-def summarize_presr(folder: Path) -> dict[str, Any]:
+def windows_tick_reference() -> tuple[int, float] | None:
+    """Provide the current boot clock for validating observed numeric log prefixes."""
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    get_ticks = ctypes.WinDLL("kernel32", use_last_error=True).GetTickCount64
+    get_ticks.argtypes = []
+    get_ticks.restype = ctypes.c_ulonglong
+    return int(get_ticks()), time.time()
+
+
+def scope_presr_session(text: str, last_write: float, session_start: float | None, reference: tuple[int, float] | None) -> tuple[str, bool]:
+    """Correlate the observed fork clock only when file metadata agrees with it."""
+    starts = list(re.finditer(r"(?m)^(?:\d+[ \t]+)?HIP runtime:[^\r\n]*", text))
+    if starts:
+        text = text[starts[-1].start():]
+    if session_start is None or reference is None:
+        return text, False
+    uptime_ms, observed_unix = reference
+    if uptime_ms < 0:
+        return text, False
+    boot_unix = observed_unix - uptime_ms / 1000
+    if last_write < boot_unix or session_start < boot_unix:
+        return text, False
+    stamped = list(re.finditer(r"(?m)^(\d+)[ \t]+[^\r\n]*", text))
+    if not stamped or not starts or not re.match(r"^\d+[ \t]+HIP runtime:", text):
+        return text, False
+    try:
+        ticks = [int(line.group(1)) for line in stamped]
+    except ValueError:
+        return text, False
+    cutoff_ms = (session_start - boot_unix) * 1000
+    if any(tick < cutoff_ms or tick > uptime_ms for tick in ticks):
+        return text, False
+    if abs(last_write - (boot_unix + ticks[-1] / 1000)) > 10:
+        return text, False
+    # A numeric prefix alone does not establish its clock. Require a current
+    # startup marker and stamped completions in the selected loader session.
+    # Preserve unstamped errors: filtering those out could hide a later fault.
+    completions = re.findall(r"Completed AMD pre-SR passes=\d+", text)
+    stamped_completions = re.findall(r"(?m)^\d+[ \t]+[^\r\n]*Completed AMD pre-SR passes=\d+", text)
+    if len(completions) != len(stamped_completions):
+        return text, False
+    return text, True
+
+
+def summarize_presr(folder: Path, installed_unix: float | None = None, *, tick_reference: tuple[int, float] | None = None) -> dict[str, Any]:
+    stale_logs: list[str] = []
+    session_header = re.compile(r"(?m)^[^\r\n]*OptiScaler v[^\r\n]* loaded[^\r\n]*")
+    headers: dict[str, str] = {}
+    last_write: dict[str, float] = {}
+
     def read(name: str) -> tuple[str, str | None, int]:
         path = folder / name
-        if not path.is_file():
+        try:
+            stream = path.open("rb")
+        except FileNotFoundError:
             return "", None, 0
-        raw = path.read_bytes()
-        return raw[-1024 * 1024:].decode("utf-8", errors="replace"), hashlib.sha256(raw).hexdigest(), len(raw)
+        # Logs can grow for hours. Hash the full snapshot without retaining it in memory.
+        with stream:
+            stat = os.fstat(stream.fileno())
+            digest = hashlib.sha256()
+            tail = b""
+            carry = ""
+            remaining = stat.st_size
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                digest.update(chunk)
+                tail = (tail + chunk)[-1024 * 1024:]
+                text = carry + chunk.decode("utf-8", errors="replace")
+                matches = list(session_header.finditer(text))
+                if matches:
+                    headers[name] = matches[-1].group()
+                carry = text[-2048:]
+                remaining -= len(chunk)
+        last_write[name] = stat.st_mtime
+        if installed_unix and stat.st_mtime < installed_unix:
+            stale_logs.append(name)
+            headers.pop(name, None)
+            return "", digest.hexdigest(), stat.st_size - remaining
+        if stat.st_size - remaining > len(tail):
+            tail = tail.partition(b"\n")[2]
+        return tail.decode("utf-8", errors="replace"), digest.hexdigest(), stat.st_size - remaining
 
     presr, presr_hash, presr_bytes = read("amd_presr.log")
     opti, opti_hash, opti_bytes = read("OptiScaler.log")
-    completed = [int(value) for value in re.findall(r"Completed AMD pre-SR passes=(\d+)", presr)]
+    sessions = list(session_header.finditer(opti))
+    if sessions:
+        opti = opti[sessions[-1].start():]
+    has_opti_session = "OptiScaler.log" in headers
+    session_started_unix: float | None = None
+    if has_opti_session:
+        clock = re.search(r"\[(\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)\]", headers["OptiScaler.log"])
+        if clock:
+            stamp = clock.group(1)
+            try:
+                written = datetime.fromtimestamp(last_write["OptiScaler.log"])
+                started = datetime.combine(written.date(), datetime.strptime(stamp[:15], "%H:%M:%S.%f" if "." in stamp else "%H:%M:%S").time())
+                if started > written:
+                    started -= timedelta(days=1)
+                session_started_unix = started.timestamp()
+                if presr and last_write["amd_presr.log"] < started.timestamp():
+                    presr = ""
+                    stale_logs.append("amd_presr.log")
+            except ValueError:
+                pass
+
+    # Actual tested fork logs have boot-relative millisecond prefixes. Validate
+    # that observed format against startup and file metadata before trusting it.
+    reference = tick_reference if tick_reference is not None else windows_tick_reference()
+    cutoff = max(session_started_unix, installed_unix or 0) if session_started_unix is not None else None
+    presr, current_ticks_available = scope_presr_session(presr, last_write.get("amd_presr.log", 0), cutoff, reference)
+
+    fault = re.compile(r"(AMD pre-SR: (?!idle|waiting)|HIP completion timeout|Unsupported AMD pre-SR|hash mismatch|weights\.bin is required|LoadLibrary failed|initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout|DLSS-NR[^\r\n]*(?:failed|error))", re.IGNORECASE)
+
+    def fault_and_remainder(text: str) -> tuple[str | None, str]:
+        faults = [match for match in re.finditer(r"[^\r\n]+", text) if fault.search(match.group())]
+        return (faults[-1].group().strip(), text[faults[-1].end():]) if faults else (None, text)
+
+    presr_fault, presr_after_fault = fault_and_remainder(presr)
+    opti_fault, opti_after_fault = fault_and_remainder(opti)
+    completed = [int(value) for value in re.findall(r"Completed AMD pre-SR passes=(\d+)", presr_after_fault) if int(value) > 0]
+    correlated_passes = current_ticks_available and any(
+        int(value) > 0 for value in re.findall(r"(?m)^\d+\s+[^\r\n]*Completed AMD pre-SR passes=(\d+)", presr_after_fault)
+    )
     running = re.findall(r"DLSS-NR running [^:]*: target (\d+x\d+), model (\d+x\d+)", opti)
-    costs = [(float(total), float(model)) for total, model in re.findall(r"DLSS-NR cost: ([\d.]+) ms total = ([\d.]+) ms model", opti)]
-    fault = re.compile(r"(AMD pre-SR: (?!idle)|HIP completion timeout|Unsupported AMD pre-SR|hash mismatch|weights\.bin is required|LoadLibrary failed|initialization failed|Cannot load amdhip64_7\.dll|AMD stopped|AMD timeout)")
-    faults = [line.strip() for line in presr.splitlines() if fault.search(line.strip())]
-    adapter = re.search(r"HIP adapter:\s*(.+)", presr)
+    costs = [(float(total), float(model)) for total, model in re.findall(r"DLSS-NR cost: (\d+(?:\.\d+)?) ms total = (\d+(?:\.\d+)?) ms model", opti_after_fault)]
+    costs = [(total, model) for total, model in costs if math.isfinite(total) and math.isfinite(model) and total > 0 and model > 0]
+    # The two logs have independent clocks and buffering. A success in the other
+    # file cannot establish recovery from an unresolved fault in this file.
+    unresolved_fault = bool((presr_fault and not completed) or (opti_fault and not costs))
+    # An unscoped pass log may belong to an older run. Current loader-session
+    # timings or pass ticks correlated to that launch establish completed work.
+    observed_work = bool(costs) or (bool(completed) and (not has_opti_session or correlated_passes))
+    adapters = re.findall(r"HIP adapter:\s*(.+)", presr)
     return {
-        "pre_sr_active": bool(completed) or ("DLSS-NR running" in opti),
-        "hip_adapter": adapter.group(1).strip() if adapter else None,
-        "passes_initialized": len(re.findall(r"Initialized independent AMD pass \d+", presr)),
+        "pre_sr_active": observed_work and not unresolved_fault,
+        "session_scoped": has_opti_session,
+        "pass_ticks_correlated": correlated_passes,
+        "stale_logs": stale_logs,
+        "loader_observed": has_opti_session,
+        # Without an ffx upscaler context the game never asked for upscaling, so there is no
+        # SR dispatch for the neural pass to run before. That is a settings state, not a fault.
+        "upscaler_observed": bool(re.search(r"ffxCreateContext_Dx12 context created|ffxDispatch_Dx12", opti)),
+        "fsr_inputs_disabled": "Disable FSR 3.0 Inputs" in opti or "Disable FSR 2.X Inputs" in opti,
+        "input_hook_warning": "WndProc is not subclassed" in opti or "subclass lost" in opti,
+        "hip_adapter": adapters[-1].strip() if adapters else None,
+        "passes_initialized": len(set(re.findall(r"Initialized independent AMD pass \d+", presr))),
         "passes_completed": completed[-1] if completed else None,
         "target_size": running[-1][0] if running else None,
         "model_size": running[-1][1] if running else None,
         "mean_total_ms": sum(cost[0] for cost in costs) / len(costs) if costs else None,
         "mean_model_ms": sum(cost[1] for cost in costs) / len(costs) if costs else None,
         "cost_samples": len(costs),
-        "last_fault": faults[-1] if faults else None,
+        "last_fault": (presr_fault if presr_fault and not completed else None) or (opti_fault if opti_fault and not costs else None) or presr_fault or opti_fault,
         "presr_log_sha256": presr_hash, "presr_log_bytes": presr_bytes,
         "optiscaler_log_sha256": opti_hash, "optiscaler_log_bytes": opti_bytes,
     }
@@ -1136,7 +1399,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path is not None else None
     config_path = folder / "dlssnr_on_amd.ini"
     config_values = read_runtime_config(config_path)
-    safe_config_keys = ("Enabled", "UseFsrInputs", "UseDepth", "Temporal", "Interop", "Inline")
+    safe_config_keys = ("Enabled", "UseFsrInputs", "UseDepth", "Temporal", "Interop", "Inline", "Async", "PreUpscale", "PreHistory", "InlineWaitMs")
     safe_config = {key: config_values.get(key) for key in safe_config_keys if key in config_values}
     runtime_log = summarize_runtime_log(folder / "dlssnr_on_amd.log", game.name)
     rich_runtime = bool(
@@ -1146,7 +1409,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
         and runtime_log.get("fsr_inputs")
         and runtime_log.get("timed_job_samples", 0) > 0
     )
-    return {
+    result = {
         "schema_version": 1,
         "game": check_game(game),
         "managed_install": manifest is not None,
@@ -1155,6 +1418,55 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
         "rich_runtime_path_observed": rich_runtime,
         "runtime_log": runtime_log,
     }
+    route = (manifest.get("route") or ROUTE_POST_FSR) if manifest else None
+    if route == ROUTE_OPTISCALER or args.route == "optiscaler-presr" or (
+        manifest is None and any((folder / name).is_file() for name in ("OptiScaler.log", "amd_presr.log"))
+    ):
+        installed_unix = manifest.get("created_unix") if manifest and route == ROUTE_OPTISCALER else None
+        summary = summarize_presr(folder, installed_unix if isinstance(installed_unix, (int, float)) else None)
+        proxy = manifest.get("proxy_name") if manifest else None
+        if not isinstance(proxy, str) or proxy.lower() not in OPTI_PROXY_NAMES:
+            proxy = "dxgi.dll"
+        passes = 1
+        ini_path = folder / "OptiScaler.ini"
+        if ini_path.is_file():
+            ini = ini_path.read_text(encoding="utf-8", errors="replace")
+            section = re.search(r"(?ims)^\s*\[DlssNr\]\s*\n(.*?)(?=^\s*\[|\Z)", ini)
+            configured = re.search(r"(?im)^\s*Passes\s*=\s*(\d+)\s*$", section.group(1)) if section else None
+            if configured:
+                passes = min(3, max(1, int(configured.group(1))))
+        required_files = [proxy, "OptiScaler.ini", *OPTI_PASS_NAMES[:passes], OPTI_WEIGHTS]
+        missing = [name for name in required_files if not (folder / name).is_file()]
+        if not any((folder / relative).is_file() for relative in (OPTI_REQUIRED_UPSCALER, Path(OPTI_DEPENDENCY_FOLDER) / OPTI_REQUIRED_UPSCALER)):
+            missing.append(str(Path(OPTI_DEPENDENCY_FOLDER) / OPTI_REQUIRED_UPSCALER))
+        if (folder / OPTI_WEIGHTS).is_file() and not is_real_weights(folder / OPTI_WEIGHTS):
+            missing.append(OPTI_WEIGHTS + " (valid generated weights)")
+        summary["runtime_work_observed"] = summary["pre_sr_active"]
+        summary["missing_install_files"] = missing
+        summary["installation_status"] = "incomplete" if missing else "installed" if route == ROUTE_OPTISCALER else "unmanaged"
+        summary["pre_sr_active"] = summary["pre_sr_active"] and not missing
+        summary["activation_guidance"] = presr_activation_guidance(game.name)
+        if missing:
+            summary["status"] = "Installation incomplete: restore or set up the pre-SR route before checking activity."
+        elif summary["pre_sr_active"]:
+            summary["status"] = "Completed pre-SR work observed in runtime logs; this is not proof the game is still running."
+        elif summary["last_fault"]:
+            summary["status"] = "Pre-SR runtime fault: " + summary["last_fault"]
+        elif summary["stale_logs"]:
+            summary["status"] = "Older runtime evidence was excluded. No completed work is verified for the current setup/session."
+        elif summary["loader_observed"] and not summary["upscaler_observed"]:
+            # The install is fine; the game simply never asked for upscaling this session.
+            summary["status"] = (
+                "OptiScaler loaded, but no upscaler ran this session: the game is still rendering without "
+                "DLSS, FSR or XeSS, so the image cannot change. " + summary["activation_guidance"]
+            )
+        else:
+            summary["status"] = "No completed pre-SR work observed. " + summary["activation_guidance"]
+        result["route"] = ROUTE_OPTISCALER
+        result["pre_sr"] = summary
+        # The post-FSR log can remain after switching routes.
+        result["rich_runtime_path_observed"] = False
+    return result
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1171,7 +1483,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--nr-dll", help="User-supplied nvngx_dlssnr.dll")
     parser.add_argument("--package", help="User-supplied OptiScaler AMD pre-SR package folder")
     parser.add_argument("--weights", help="Locally generated dlssnr_on_amd_weights.bin")
-    parser.add_argument("--preset", choices=("quality", "performance"), default="quality")
+    parser.add_argument("--preset", choices=("light", "balanced", "detail", "max", "quality", "performance"), default="balanced",
+                        help="quality/performance are accepted as legacy aliases")
+    parser.add_argument("--scaling", choices=tuple(OPTI_SCALING_RATIOS), default=None,
+                        help="Upscale ratio tier; omit to use the preset's own")
     parser.add_argument("--proxy-name", default=None)
     parser.add_argument("--passes", type=int, choices=(1, 2, 3))
     parser.add_argument("--force", action="store_true", help="Override uncertain FSR/DX12 detection; anti-cheat remains blocked")
@@ -1196,9 +1511,6 @@ def main() -> int:
             result = remove_optiscaler(args) if route == ROUTE_OPTISCALER else remove(args)
         elif args.diagnose:
             result = diagnose(args)
-            if route == ROUTE_OPTISCALER:
-                result["route"] = ROUTE_OPTISCALER
-                result["pre_sr"] = summarize_presr(folder)
         else:
             result = check_game(Path(args.game))
         encoded = json.dumps(result, indent=2) + "\n"

@@ -20,7 +20,8 @@ public sealed class RuntimeControlService
             game.Running = runningOverride ?? IsRunning(game.ExePath);
             if (game.Route == InstallRoute.OptiScalerPreSr)
             {
-                game.Installed = File.Exists(game.OptiScalerIniPath) && HasProxy(game.DirectoryPath);
+                var missing = OptiScalerInstallerService.GetMissingRequiredFiles(game);
+                game.Installed = missing.Count == 0;
                 if (game.Installed)
                 {
                     var ini = IniDocument.Load(game.OptiScalerIniPath);
@@ -29,11 +30,17 @@ public sealed class RuntimeControlService
                     game.LocalTone = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "LocalTone", 0.0), 0.0, 2.0);
                     game.SkinStructure = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "SkinStructure", 1.0), 0.0, 2.0);
                     game.Passes = int.TryParse(ini.Get(OptiScalerControlService.Section, "Passes"), out var passes) ? Math.Clamp(passes, 1, 3) : 1;
+                    var matched = OptiScalerPresets.Match(game.Passes, game.LocalStructure, game.SkinStructure, game.LocalTone);
+                    game.PresetLabel = matched?.ToString() ?? "Custom";
+                    var tier = OptiScalerScalings.FromRatio(
+                        ini.GetBool("UpscaleRatio", "UpscaleRatioOverrideEnabled", false),
+                        ini.Get("UpscaleRatio", "UpscaleRatioOverrideValue"));
+                    game.ScalingLabel = tier is null ? "Custom" : OptiScalerScalings.Label(tier.Value);
                 }
                 else ResetControls(game);
-                if (!game.Installed) game.RuntimeStatus = "Not installed";
+                if (!game.Installed) game.RuntimeStatus = "Pre-SR install incomplete - use Repair to restore missing files";
                 else if (!game.Running) game.RuntimeStatus = "Ready for next launch";
-                else if (!wasRunning || !IsEvidenceRuntimeStatus(game.RuntimeStatus)) game.RuntimeStatus = "Game running - Insert opens the OptiScaler menu";
+                else if (!wasRunning || !IsEvidenceRuntimeStatus(game.RuntimeStatus)) game.RuntimeStatus = "Game running - Del opens the OptiScaler menu";
                 return;
             }
 
@@ -60,6 +67,9 @@ public sealed class RuntimeControlService
     private static bool IsEvidenceRuntimeStatus(string status) =>
         status.StartsWith("Neural Rendering active", StringComparison.Ordinal)
         || status.StartsWith("Pre-SR observed", StringComparison.Ordinal)
+        || status.StartsWith("Pre-SR dispatch", StringComparison.Ordinal)
+        || status.StartsWith("Pre-SR fault", StringComparison.Ordinal)
+        || status.StartsWith("OptiScaler loaded", StringComparison.Ordinal)
         || status.StartsWith("Neural engine stalled", StringComparison.Ordinal)
         || status.StartsWith("Neural engine initialized", StringComparison.Ordinal)
         || status.StartsWith("FidelityFX hooked", StringComparison.Ordinal)
@@ -89,7 +99,7 @@ public sealed class RuntimeControlService
             ini.SaveAtomic(game.ConfigPath);
             Refresh(game);
             return Task.FromResult(new RuntimeChangeResult(false, game.Running
-                ? $"Saved {(enabled ? "ON" : "OFF")}. The post-FSR runtime has no supported external live-toggle API; use End for its live controls in this session, or relaunch."
+                ? $"Saved {(enabled ? "ON" : "OFF")}. The official AMD runtime has no supported external live-toggle API; use End for its live controls in this session, or relaunch."
                 : $"Saved {(enabled ? "ON" : "OFF")} for the next launch."));
         }
     }
@@ -119,7 +129,11 @@ public sealed class RuntimeControlService
         {
             EnsureEditable(game);
             var ini = IniDocument.Load(game.ConfigPath);
-            ini.Set(Section, "Inline", inline ? "1" : "0");
+            // Current official runtimes store the inverse mode as Async. Preserve
+            // the legacy key only for configurations that still use that schema.
+            if (ini.Get(Section, "Async") is not null)
+                ini.Set(Section, "Async", inline ? "0" : "1");
+            else ini.Set(Section, "Inline", inline ? "1" : "0");
             ini.SaveAtomic(game.ConfigPath);
             Refresh(game);
         }

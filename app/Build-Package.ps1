@@ -1,4 +1,5 @@
 param(
+    [ValidateSet('Debug', 'Release', 'RelWithDebInfo', 'MinSizeRel')]
     [string]$Configuration = "Release",
     [string]$OutputDirectory
 )
@@ -14,25 +15,56 @@ $allowedRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot "artifacts")).TrimEnd
 if (!$output.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
     throw "OutputDirectory must be a child of the repository artifacts folder."
 }
-if ((Test-Path -LiteralPath $output) -and ((Get-Item -LiteralPath $output).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "OutputDirectory cannot be a link." }
+function Assert-NoLinks([string]$path) {
+    $cursor = $path
+    while ($cursor) {
+        if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "Package output paths cannot contain links: $cursor" }
+        $parent = Split-Path $cursor -Parent
+        if ($parent -eq $cursor) { break }
+        $cursor = $parent
+    }
+}
+Assert-NoLinks $output
 $payload = Join-Path $output "payload"
 $project = Join-Path $PSScriptRoot "Dlss5AmdSwapper\Dlss5AmdSwapper.csproj"
 $smokeProject = Join-Path $PSScriptRoot "Dlss5AmdSwapper.SmokeTests\Dlss5AmdSwapper.SmokeTests.csproj"
+$desktopTests = Join-Path $PSScriptRoot "Dlss5AmdSwapper.DesktopTests\Dlss5AmdSwapper.DesktopTests.csproj"
 $autoScaleBuild = Join-Path $repoRoot "auto-scale\build.ps1"
 $bridgeBuild = Join-Path $repoRoot "bridge\build.ps1"
 
+Write-Host "Testing package verification, installation and rollback in isolated temporary directories..."
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-Packaging.ps1')
+if ($LASTEXITCODE -ne 0) { throw "packaging regression tests failed with exit code $LASTEXITCODE" }
+
 Write-Host "Building project-owned Lossless Scaling wrapper..."
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $autoScaleBuild
-if ($LASTEXITCODE -ne 0) { throw "auto-scale build failed with exit code $LASTEXITCODE" }
+New-Item -ItemType Directory -Path (Join-Path $repoRoot 'artifacts') -Force | Out-Null
+$autoScaleResult = Join-Path $repoRoot ('artifacts\auto-scale-result-' + [Guid]::NewGuid().ToString('N') + '.txt')
+try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $autoScaleBuild -Configuration $Configuration -ResultFile $autoScaleResult
+    if ($LASTEXITCODE -ne 0) { throw "auto-scale build failed with exit code $LASTEXITCODE" }
+    $autoScaleDll = (Get-Content -LiteralPath $autoScaleResult -Raw).Trim()
+    $autoScaleRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'auto-scale')).TrimEnd('\') + '\'
+    if (![IO.Path]::GetFullPath($autoScaleDll).StartsWith($autoScaleRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($autoScaleDll) -ne 'Lossless.dll' -or !(Test-Path -LiteralPath $autoScaleDll -PathType Leaf)) {
+        throw 'auto-scale build returned an invalid DLL path.'
+    }
+} finally {
+    if (Test-Path -LiteralPath $autoScaleResult) { Remove-Item -LiteralPath $autoScaleResult -Force }
+}
 
 Write-Host "Building project-owned neural bridge..."
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeBuild
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeBuild -Configuration $Configuration
 if ($LASTEXITCODE -ne 0) { throw "bridge build failed with exit code $LASTEXITCODE" }
 
 Write-Host "Running app smoke tests..."
 & dotnet run --project $smokeProject -c $Configuration
 if ($LASTEXITCODE -ne 0) { throw "app smoke tests failed with exit code $LASTEXITCODE" }
 
+Write-Host 'Checking app exit and tray lifecycle without input automation...'
+& dotnet run --project $desktopTests -c $Configuration
+if ($LASTEXITCODE -ne 0) { throw "app lifecycle tests failed with exit code $LASTEXITCODE" }
+
+Assert-NoLinks $output
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $output, $payload | Out-Null
 
@@ -44,13 +76,16 @@ Write-Host "Publishing self-contained win-x64 app..."
     -p:DebugSymbols=false `
     -o $output
 if ($LASTEXITCODE -ne 0) { throw "app publish failed with exit code $LASTEXITCODE" }
+if (!(Test-Path -LiteralPath (Join-Path $output 'SpecialK.deny.Dlss5AmdSwapper') -PathType Leaf)) {
+    throw 'Published app is missing its application-specific Special K opt-out marker.'
+}
 
 $payloadSources = @{
     "Setup.ps1" = Join-Path $repoRoot "auto-scale\scripts\Setup.ps1"
     "Install-AutoScale.ps1" = Join-Path $repoRoot "auto-scale\scripts\Install-AutoScale.ps1"
     "Uninstall-AutoScale.ps1" = Join-Path $repoRoot "auto-scale\scripts\Uninstall-AutoScale.ps1"
-    "Lossless.dll" = Join-Path $repoRoot "auto-scale\build\Release\Lossless.dll"
-    "DlssNrBridge.exe" = Join-Path $repoRoot "bridge\build\Release\DlssNrBridge.exe"
+    "Lossless.dll" = $autoScaleDll
+    "DlssNrBridge.exe" = Join-Path $repoRoot "bridge\build\$Configuration\DlssNrBridge.exe"
 }
 
 foreach ($entry in $payloadSources.GetEnumerator()) {
@@ -92,7 +127,12 @@ $hashLines = foreach ($file in Get-ChildItem -LiteralPath $output -Recurse -File
 }
 $hashLines | Set-Content -LiteralPath (Join-Path $output "SHA256SUMS.txt") -Encoding ASCII
 
+Write-Host 'Verifying the final package through its own installer...'
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $output 'Install-Manager.ps1') -VerifyOnly
+if ($LASTEXITCODE -ne 0) { throw "final package verification failed with exit code $LASTEXITCODE" }
+
 $zip = "$output.zip"
+Assert-NoLinks $zip
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $output "*") -DestinationPath $zip -CompressionLevel Optimal
 

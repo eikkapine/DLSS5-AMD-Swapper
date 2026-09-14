@@ -35,6 +35,7 @@
         </Style>
 
         <Style x:Key="TopButton" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -52,7 +53,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Root" Property="Background" Value="{DynamicResource CardHoverBrush}"/>
-                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -61,6 +62,7 @@
         </Style>
 
         <Style x:Key="GameListItem" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0,0,0,9"/>
@@ -109,7 +111,7 @@
                                     <GradientStop Color="#FF8846" Offset="1"/>
                                 </LinearGradientBrush>
                             </Border.Background>
-                            <TextBlock Text="5" Foreground="White" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBlock Text="5" Foreground="#18212F" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <StackPanel VerticalAlignment="Center">
                             <TextBlock Text="DLSS5" FontWeight="Bold" FontSize="14"/>
@@ -191,7 +193,7 @@
                                             <StackPanel>
                                                 <TextBlock Text="AMD NEURAL RENDERING" Foreground="{DynamicResource AccentBrush}" FontSize="10" FontWeight="Bold"/>
                                                 <TextBlock Text="Install the rich path directly into supported games." FontSize="25" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,8,0,8"/>
-                                                <TextBlock Text="Uses real FSR colour, motion and depth inputs when the game exposes them. The app verifies compatibility, the official upstream installer and the resulting runtime state before calling it ready." Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left" TextAlignment="Left"/>
+                                                <TextBlock Text="Uses real FSR colour, motion and depth inputs when the game exposes them. Compatibility checks identify candidates. After setup, refresh evidence to confirm completed Neural Rendering work." Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left" TextAlignment="Left"/>
                                                 <StackPanel Orientation="Horizontal" Margin="0,18,0,0">
                                                     <Button Style="{StaticResource PrimaryButton}" Content="Add a game" Click="AddGame_Click"/>
                                                     <Button Style="{StaticResource GhostButton}" Content="Scan PC" Click="ScanGames_Click" IsEnabled="{Binding CanStartScan}" Margin="10,0,0,0"/>
@@ -319,8 +321,8 @@
                                             </StackPanel>
                                             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,14,0,0">
                                                 <Button Style="{StaticResource GhostButton}" Content="Re-check" Click="ProbeSelected_Click"/>
-                                                <Button Style="{StaticResource PrimaryButton}" Content="Set up" Click="InstallSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.Eligible, FallbackValue=False, TargetNullValue=False}"/>
-                                                <Button Style="{StaticResource DangerButton}" Content="Restore" Click="RestoreSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.Installed, FallbackValue=False, TargetNullValue=False}"/>
+                                                <Button Style="{StaticResource PrimaryButton}" Content="{Binding SelectedGame.SetupLabel, FallbackValue=Set up, TargetNullValue=Set up}" Click="InstallSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.Eligible, FallbackValue=False, TargetNullValue=False}"/>
+                                                <Button Style="{StaticResource DangerButton}" Content="Restore" Click="RestoreSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.HasManagedInstall, FallbackValue=False, TargetNullValue=False}"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -334,14 +336,14 @@
                                                     <StackPanel><TextBlock Text="Neural Rendering" FontWeight="SemiBold"/><TextBlock Text="Configured on/off state" Foreground="{DynamicResource MutedBrush}" FontSize="10"/></StackPanel>
                                                     <CheckBox Grid.Column="1" x:Name="DirectEnabledSwitch" Style="{StaticResource SwitchStyle}" IsChecked="{Binding SelectedGame.Enabled, Mode=OneWay}" IsEnabled="{Binding SelectedGame.Installed, FallbackValue=False, TargetNullValue=False}" Click="DirectEnabledSwitch_Click" VerticalAlignment="Center"/>
                                                 </Grid>
-                                                <TextBlock Text="Ctrl+Alt+F6 saves this setting for the active managed game. Use the End overlay to verify or change the live effect." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                                                <TextBlock Text="Ctrl+Alt+F6 saves this setting for the next launch of the active managed game; it does not change a running game. For live changes use the in-game overlay: Del for OptiScaler pre-SR, End for the official AMD runtime." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"/>
                                             </StackPanel>
                                         </Border>
                                         <Border Grid.Column="2" Style="{StaticResource CardStyle}">
                                             <StackPanel>
                                                 <TextBlock Text="Runtime" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding SelectedGame.RuntimeStatus, TargetNullValue=Not checked}" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
-                                                <TextBlock Text="Press End in-game for the upstream live overlay." Foreground="{DynamicResource Accent2Brush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                                <TextBlock Text="Live overlay in-game: Del for OptiScaler pre-SR, End for the official AMD runtime." Foreground="{DynamicResource Accent2Brush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                             </StackPanel>
                                         </Border>
                                     </Grid>
@@ -349,11 +351,21 @@
                                     <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
                                         <StackPanel>
                                             <TextBlock Text="Effect controls" FontSize="16" FontWeight="SemiBold"/>
-                                            <TextBlock Text="These save the upstream AMD runtime settings. Saving is not proof that a running game applied the change; use the End overlay for live control." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,15"/>
+                                            <TextBlock Text="These save settings for the next launch. Saving is not proof that a running game applied the change; use the in-game overlay for live control (Del for OptiScaler pre-SR, End for the official AMD runtime). Changing the upscaler quality inside the game while playing can stop the neural pass with a HIP completion timeout; restart the game after changing it." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,15"/>
                                             <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Neural passes" VerticalAlignment="Center"/>
                                                 <ComboBox Grid.Column="1" Width="90" HorizontalAlignment="Left" ItemsSource="{Binding PassOptions}" SelectedItem="{Binding SelectedGame.Passes, Mode=OneWay}" SelectionChanged="PassesCombo_SelectionChanged" Margin="8,0"/>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Preset" VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedGame.PresetLabel, Mode=OneWay}" SelectionChanged="GamePresetCombo_SelectionChanged" Margin="8,0"/>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Scaling" VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" ItemsSource="{Binding ScalingNames}" SelectedItem="{Binding SelectedGame.ScalingLabel, Mode=OneWay}" SelectionChanged="GameScalingCombo_SelectionChanged" Margin="8,0"/>
                                             </Grid>
                                             <Grid>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="55"/></Grid.ColumnDefinitions>
@@ -580,7 +592,7 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <StackPanel HorizontalAlignment="Left">
                                             <TextBlock Text="Global hotkeys" FontWeight="SemiBold" FontSize="15"/>
-                                            <TextBlock Text="The manager registers Ctrl+Alt+F6/F7/F8 while a managed direct-game target is running. F6 saves the next on/off state; use the upstream End overlay for an authoritative live toggle. Ctrl+Alt+F9/F10/F11 control Lossless Scaling layers while Lossless Scaling is running." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="690" Margin="0,4,0,0" HorizontalAlignment="Left" TextAlignment="Left"/>
+                                            <TextBlock Text="Ctrl+Alt+F6/F7/F8 are not global: the manager registers them only while a managed direct-game target is running, and Lossless Scaling owns them while its bridge is active. They save settings for the next launch and do not change a running game. Live control is the runtime's own in-game overlay - Del for OptiScaler pre-SR (neural on/off, passes, tone, structure), Page Up for its status readout, End for the official AMD runtime. Ctrl+Alt+F9/F10/F11 control Lossless Scaling layers while Lossless Scaling is running." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="690" Margin="0,4,0,0" HorizontalAlignment="Left" TextAlignment="Left"/>
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Style="{StaticResource SwitchStyle}" IsChecked="{Binding RegisterHotkeys, Mode=TwoWay}" Click="HotkeysSetting_Click" VerticalAlignment="Center" Margin="18,0,0,0"/>
                                     </Grid>

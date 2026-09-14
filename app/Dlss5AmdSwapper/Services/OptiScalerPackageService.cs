@@ -298,7 +298,16 @@ public sealed class OptiScalerPackageService
         return !files && directories.Length == 1 ? directories[0] : folder;
     }
 
-    public static LocalWeights? FindLocalWeights(string? configuredPath, IEnumerable<string> gameDirectories, string? losslessInstallPath, IEnumerable<string?>? additionalCandidates = null)
+    // Mirrors the roots DiscoverCandidates already scans, so weights are looked for where the
+    // package itself is expected to be. Injectable for the same reason searchRoots is.
+    internal static string[] DefaultUserFolders() =>
+    [
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+    ];
+
+    public static LocalWeights? FindLocalWeights(string? configuredPath, IEnumerable<string> gameDirectories, string? losslessInstallPath, IEnumerable<string?>? additionalCandidates = null, IEnumerable<string>? userFolders = null)
     {
         var candidates = new List<string>();
         if (!string.IsNullOrWhiteSpace(configuredPath)) candidates.Add(configuredPath);
@@ -308,6 +317,10 @@ public sealed class OptiScalerPackageService
             candidates.Add(Path.Combine(losslessInstallPath, WeightsName));
         }
         foreach (var directory in gameDirectories) candidates.Add(Path.Combine(directory, WeightsName));
+        // Look where a person would actually drop the file. The package and nvngx searches already
+        // scan these, and weights skipping them made a copy sitting in Downloads report "none found".
+        foreach (var folder in userFolders ?? DefaultUserFolders())
+            if (!string.IsNullOrWhiteSpace(folder)) candidates.Add(Path.Combine(folder, WeightsName));
         if (additionalCandidates is not null)
             candidates.AddRange(additionalCandidates.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => path!));
 

@@ -25,7 +25,7 @@ public sealed class OptiScalerControlService
             ini.SaveAtomic(game.OptiScalerIniPath);
             _runtime.Refresh(game);
             return Task.FromResult(new RuntimeChangeResult(false, game.Running
-                ? $"Saved {(enabled ? "ON" : "OFF")}. Use Insert for the live OptiScaler Neural Rendering control in this session."
+                ? $"Saved {(enabled ? "ON" : "OFF")}. Use Del for the live OptiScaler Neural Rendering control in this session."
                 : $"Saved {(enabled ? "ON" : "OFF")} for the next launch."));
         }
     }
@@ -39,6 +39,35 @@ public sealed class OptiScalerControlService
     public Task<RuntimeChangeResult> SetStructureAsync(GameEntry game, double value, CancellationToken cancellationToken = default) => SetScalarAsync(game, "LocalStructure", value, cancellationToken);
     public Task<RuntimeChangeResult> SetSkinAsync(GameEntry game, double value, CancellationToken cancellationToken = default) => SetScalarAsync(game, "SkinStructure", value, cancellationToken);
     public Task<RuntimeChangeResult> SetToneAsync(GameEntry game, double value, CancellationToken cancellationToken = default) => SetScalarAsync(game, "LocalTone", value, cancellationToken);
+
+    // Applying a preset rewrites every neural control plus its scaling tier, so the game page can
+    // change a completed install instead of forcing a reinstall to pick a different preset.
+    public Task<RuntimeChangeResult> SetPresetAsync(GameEntry game, OptiScalerPreset preset, CancellationToken cancellationToken = default)
+    {
+        var values = OptiScalerPresets.Values(preset);
+        return ChangeAsync(game, ini =>
+        {
+            ini.Set(Section, "Passes", values.Passes.ToString(CultureInfo.InvariantCulture));
+            ini.Set(Section, "LocalStructure", values.Structure);
+            ini.Set(Section, "SkinStructure", values.Skin);
+            ini.Set(Section, "LocalTone", values.Tone);
+            ApplyScaling(ini, values.Scaling);
+        }, cancellationToken);
+    }
+
+    public Task<RuntimeChangeResult> SetScalingAsync(GameEntry game, OptiScalerScaling scaling, CancellationToken cancellationToken = default) =>
+        ChangeAsync(game, ini => ApplyScaling(ini, scaling), cancellationToken);
+
+    private static void ApplyScaling(IniDocument ini, OptiScalerScaling scaling)
+    {
+        var ratio = OptiScalerScalings.Ratio(scaling);
+        if (ratio is null) ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "false");
+        else
+        {
+            ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true");
+            ini.Set("UpscaleRatio", "UpscaleRatioOverrideValue", ratio);
+        }
+    }
 
     private Task<RuntimeChangeResult> SetScalarAsync(GameEntry game, string key, double value, CancellationToken cancellationToken)
     {
@@ -58,7 +87,7 @@ public sealed class OptiScalerControlService
             ini.SaveAtomic(game.OptiScalerIniPath);
             _runtime.Refresh(game);
             return Task.FromResult(new RuntimeChangeResult(false, game.Running
-                ? "Saved. OptiScaler reads OptiScaler.ini at startup; use the Insert menu for live changes."
+                ? "Saved. OptiScaler reads OptiScaler.ini at startup; use the Del menu for live changes."
                 : "Saved for the next launch"));
         }
     }

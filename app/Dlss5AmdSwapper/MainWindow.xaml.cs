@@ -14,7 +14,7 @@ namespace Dlss5AmdSwapper;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
-    private readonly AppSettingsService _settingsService = new();
+    private readonly AppSettingsService _settingsService;
     private readonly GameProbeService _probe = new();
     private readonly RuntimeControlService _runtime = new();
     private readonly RuntimeDiagnosticsService _diagnostics = new();
@@ -44,23 +44,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool _losslessDeviceInitialized;
     private HashSet<string> _runningProcessNames = new(StringComparer.OrdinalIgnoreCase);
 
-    public MainWindow()
+    public MainWindow() : this(new AppSettingsService())
     {
+    }
+
+    internal MainWindow(AppSettingsService settingsService, bool initializeBackgroundServices = true, bool initializeTrayIcon = true)
+    {
+        _settingsService = settingsService;
         _discovery = new GameDiscoveryService(_probe);
         _installer = new DirectGameInstallerService(_probe);
         _settings = _settingsService.Load();
         InitializeComponent();
         DataContext = this;
         InitializeLibrary();
-        InitializeDesktop();
+        if (initializeTrayIcon) InitializeDesktop();
+        else ApplyTheme();
 
         _runtimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _runtimeTimer.Tick += RuntimeTimer_Tick;
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         _toastTimer.Tick += (_, _) => { _toastTimer.Stop(); Toast.Visibility = Visibility.Collapsed; };
 
-        Loaded += MainWindow_Loaded;
+        if (initializeBackgroundServices) Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
+        Closed += MainWindow_Closed;
     }
 
     public ObservableCollection<GameEntry> Games { get; } = [];
@@ -141,11 +148,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         _closing = true;
         _scanCancellation?.Cancel();
-        DisposeDesktop();
+        SaveSettings();
+    }
+
+    private void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        // Dispose only after a close was accepted. A cancelled close (tray or
+        // an active installation) must retain its timers, icon and hotkeys.
         _runtimeTimer.Stop();
+        _toastTimer.Stop();
         _hotkeys?.Dispose();
         _hotkeys = null;
-        SaveSettings();
+        DisposeDesktop();
     }
 
     private async Task LoadGamesAsync(CancellationToken cancellationToken)
@@ -377,6 +391,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task RefreshDiagnosticsAsync(bool toast)
     {
+        if (_closing) return;
         if (Interlocked.CompareExchange(ref _diagnosticsRefreshInFlight, 1, 0) != 0)
         {
             _diagnosticsRefreshPending = true;
@@ -427,12 +442,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         finally
         {
             Interlocked.Exchange(ref _diagnosticsRefreshInFlight, 0);
-            if (_diagnosticsRefreshPending) { _diagnosticsRefreshPending = false; _ = RefreshDiagnosticsAsync(false); }
+            if (_diagnosticsRefreshPending)
+            {
+                _diagnosticsRefreshPending = false;
+                if (!_closing) _ = RefreshDiagnosticsAsync(false);
+            }
         }
     }
 
     private void RuntimeTimer_Tick(object? sender, EventArgs e)
     {
+        if (_closing) return;
         RefreshProcessSnapshot();
         _pollCount++;
         foreach (var game in Games)
@@ -685,6 +705,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ShowToast(string message, bool success = false)
     {
+        if (_closing) return;
         ToastText.Text = message;
         Toast.BorderBrush = success ? (System.Windows.Media.Brush)FindResource("SuccessBrush") : (System.Windows.Media.Brush)FindResource("LineBrush");
         Toast.Visibility = Visibility.Visible;

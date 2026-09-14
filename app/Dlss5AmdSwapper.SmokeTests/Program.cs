@@ -6,8 +6,10 @@ using Dlss5AmdSwapper.Services;
 var failures = new List<string>();
 
 await RuntimeControlRegressionTests.RunAsync(RunAsync);
+await OfficialRuntimeConfigTests.RunAsync(RunAsync);
 await DiagnosticsRegressionTests.RunAsync();
 await OptiScalerTests.RunAsync(RunAsync);
+await DiagnosticsReportTests.RunAsync(RunAsync);
 
 await RunAsync("Crimson Desert selects the verified compatibility runtime", () =>
 {
@@ -53,13 +55,29 @@ await RunAsync("Installer refuses removal while a game is running", async () =>
     Assert(!game.Busy, "Rejected operation left the game busy.");
 });
 
-await RunAsync("Installer detects a second proxy added after install", () =>
+await RunAsync("Installer detects a second proxy added after install", async () =>
 {
-    var unexpected = DirectGameInstallerService.FindUnexpectedProxyNames(
+    using var temp = new TempDirectory();
+    foreach (var name in new[] { "VERSION.DLL", "dxgi.dll", "dlssnr_on_amd.ini" })
+        await File.WriteAllBytesAsync(Path.Combine(temp.Path, name), [1]);
+    var unexpected = DirectGameInstallerService.FindConflictingProxyNames(
+        temp.Path,
         ["VERSION.DLL", "dxgi.dll", "dlssnr_on_amd.ini"],
         ["version.dll"]);
     Assert(unexpected.SequenceEqual(["dxgi.dll"], StringComparer.OrdinalIgnoreCase), "Unexpected proxy detection did not isolate the added loader.");
-    return Task.CompletedTask;
+});
+
+await RunAsync("A game's own Microsoft dbghelp.dll is not treated as a competing loader", async () =>
+{
+    using var temp = new TempDirectory();
+    // Cyberpunk 2077 ships Microsoft's dbghelp.dll in bin\x64; copy the real system one.
+    var system = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "dbghelp.dll");
+    if (!File.Exists(system)) return;
+    File.Copy(system, Path.Combine(temp.Path, "dbghelp.dll"), true);
+    await File.WriteAllBytesAsync(Path.Combine(temp.Path, "winmm.dll"), [1]);
+    Assert(DirectGameInstallerService.IsMicrosoftSystemDll(Path.Combine(temp.Path, "dbghelp.dll")), "Microsoft's dbghelp.dll was not recognized.");
+    var conflicts = DirectGameInstallerService.FindConflictingProxyNames(temp.Path, ["dbghelp.dll", "winmm.dll"]);
+    Assert(conflicts.SequenceEqual(["winmm.dll"], StringComparer.OrdinalIgnoreCase), "Setup must ignore a game-shipped Microsoft DLL but still block a real loader.");
 });
 
 

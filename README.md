@@ -25,7 +25,7 @@ DLSS5 AMD Swapper puts the two ways I use the project into one app. **Direct Gam
 
 | | **Direct Game** | **Lossless Scaling** |
 | --- | --- | --- |
-| Best for | Supported single-player/offline games (two backends: post-FSR runtime, OptiScaler pre-SR) | Almost any capturable game, video, browser, or app |
+| Best for | Supported single-player/offline games (two backends: official AMD runtime, OptiScaler pre-SR) | Almost any capturable game, video, browser, or app |
 | Input | Game FSR colour + motion + depth when available | Finished desktop frame |
 | Output | Game keeps control of final resolution | Captured source stays at native visible resolution |
 | Setup | Scan → select game → **Set up** | Configure once → press **Scale** normally |
@@ -53,6 +53,10 @@ The scanner covers **Steam, Epic, GOG, EA, Ubisoft, Battle.net, Xbox/Game Pass, 
 
 For an installed copy with Desktop and Start menu shortcuts, run `Install.cmd` from the extracted package. Portable use remains available. See the full [installation guide](docs/install.md) for runtime requirements, restore behavior, and source builds.
 
+Developers can reproduce the [DirectX runtime and installer checks](runtime-tests/README.md) and [light/dark theme checks](docs/theme-verification.md) without controlling the desktop mouse.
+
+For OptiScaler pre-SR, follow the selected game's input guidance after installation. **Assetto Corsa Rally needs DLSS or XeSS input**, which OptiScaler translates to the configured AMD upscaler. Confirm completed neural work with **Refresh evidence**; copied files and an enabled setting alone do not prove the effect is running. See [troubleshooting a setup with no visible effect](docs/optiscaler-presr.md#when-installation-makes-no-visible-difference).
+
 ## What the manager handles
 
 - Search, status filters, sorting, store grouping, hidden games and local cover artwork.
@@ -68,19 +72,29 @@ For an installed copy with Desktop and Start menu shortcuts, run `Install.cmd` f
 - Reversible per-game setup with hash-backed manifests.
 - Runtime diagnostics for colour, motion, depth, output size, and zero-copy state.
 - Automatic Lossless Scaling bridge activation when **Scale** is pressed.
-- Global strength and toggle hotkeys.
+- Manager hotkeys that save strength and on/off state for the next launch.
 
 ## Controls
 
+Manager hotkeys. These save to the configuration file for the next launch; they do not change a running game.
+
 | Shortcut | Action |
 | --- | --- |
-| `Ctrl + Alt + F6` | Toggle the saved direct-game on/off state |
-| `Ctrl + Alt + F7` | Decrease strength |
-| `Ctrl + Alt + F8` | Increase strength |
+| `Ctrl + Alt + F6` | Save the direct-game on/off state |
+| `Ctrl + Alt + F7` | Save decreased strength |
+| `Ctrl + Alt + F8` | Save increased strength |
+
+In-game controls, provided by the runtime, are what change the image while you play:
+
+| Key | Route | Action |
+| --- | --- | --- |
+| `Del` | OptiScaler pre-SR | Overlay: neural on/off, passes, tone, structure, skin structure |
+| `Page Up` / `Page Down` | OptiScaler pre-SR | Status readout, and cycle its detail |
+| `End` | Official AMD runtime | Upstream status and live toggle |
 
 Lossless Scaling owns these keys while its bridge is active. The Swapper registers the same keys for a running managed direct-game target. The Lossless Scaling route supports effect strength up to `4.0`.
 
-Direct-game hotkeys save runtime settings. A saved value does not prove the running game applied it; press `End` for the upstream live overlay and use its live toggle for A/B testing.
+Direct-game hotkeys save runtime settings. A saved value does not prove the running game applied it, and OptiScaler reads its configuration only at startup. For A/B testing use the in-game overlay for your route: `Del` on OptiScaler pre-SR, `End` on the official AMD runtime.
 
 ## Latest compatibility research
 

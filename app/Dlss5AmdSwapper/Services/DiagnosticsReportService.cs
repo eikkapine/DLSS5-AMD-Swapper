@@ -5,6 +5,30 @@ namespace Dlss5AmdSwapper.Services;
 
 public static class DiagnosticsReportService
 {
+    public static string Create(GameEntry game, OptiScalerDiagnostics evidence) => JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        app = "DLSS5 AMD Swapper",
+        version = typeof(DiagnosticsReportService).Assembly.GetName().Version?.ToString(),
+        capturedUtc = DateTimeOffset.UtcNow,
+        route = "OptiScaler pre-SR",
+        compatibility = new { game.X64, game.HasFsr, game.HasDx12, game.HasAntiCheat },
+        state = new { game.Installed, game.Enabled, game.Running, game.LiveAcknowledged },
+        evidence = new
+        {
+            evidence.PreSrActive, evidence.PassesInitialized, evidence.PassesCompleted,
+            evidence.ModelSize, evidence.TargetSize, evidence.MeanTotalMs, evidence.MeanModelMs,
+            evidence.CostSamples,
+            evidence.LoaderObserved, evidence.UpscalerObserved, evidence.HistoricalEvidence, evidence.InstallComplete,
+            evidence.FsrInputsDisabled, evidence.InputHookWarning,
+            missingRequiredFileCount = evidence.MissingFiles.Count,
+            faultObserved = evidence.LastFault is not null,
+            evidence.PreSrLogSha256, evidence.PreSrLogBytes, evidence.OptiLogSha256, evidence.OptiLogBytes,
+            timingMeaning = "Mean of logged OptiScaler model/total costs; not game FPS or end-to-end frame time",
+            hashMeaning = "SHA-256 of the captured bytes; an active log may change during capture"
+        }
+    }, new JsonSerializerOptions { WriteIndented = true });
+
     // Allowlist structured fields. Raw log lines, game names, paths, machine identifiers,
     // environment variables, configuration files and local activity are deliberately absent.
     public static string Create(GameEntry game, RuntimeDiagnostics evidence) => JsonSerializer.Serialize(new
@@ -20,7 +44,7 @@ public static class DiagnosticsReportService
         {
             evidence.RichPathObserved, evidence.EngineInitialized, evidence.FidelityFxDispatchObserved,
             evidence.PresentQueueObserved, evidence.StartupStalled,
-            evidence.HookFailures, evidence.FailedHooks, evidence.SwapchainsCreated, evidence.HooksInstalled,
+            evidence.HookFailures, evidence.SwapchainsCreated, evidence.HooksInstalled,
             evidence.EvidenceScope, evidence.BytesHashed,
             evidence.InputResolution, evidence.OutputResolution, evidence.FullOutputResolutionInput,
             evidence.TimedJobs, evidence.MeanNetworkGpuMs, evidence.ZeroCopySamples,
