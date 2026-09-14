@@ -18,6 +18,8 @@ public sealed class GameEntry : INotifyPropertyChanged
     private bool _liveAcknowledged;
     private InstallRoute _route;
     private int _passes = 1;
+    private string _presetLabel = "Custom";
+    private string _scalingLabel = "Game controlled";
     private string? _coverArtPath;
     private BitmapImage? _coverImage;
     private bool _coverLoaded;
@@ -91,6 +93,8 @@ public sealed class GameEntry : INotifyPropertyChanged
     public bool LiveAcknowledged { get => _liveAcknowledged; set => Set(ref _liveAcknowledged, value); }
     public InstallRoute Route { get => _route; set { if (Set(ref _route, value)) { OnPropertyChanged(nameof(RouteLabel)); OnPropertyChanged(nameof(IsPreSr)); OnPropertyChanged(nameof(IsPostFsr)); OnPropertyChanged(nameof(HasManagedInstall)); OnPropertyChanged(nameof(SetupLabel)); } } }
     public int Passes { get => _passes; set => Set(ref _passes, value); }
+    public string PresetLabel { get => _presetLabel; set => Set(ref _presetLabel, value); }
+    public string ScalingLabel { get => _scalingLabel; set => Set(ref _scalingLabel, value); }
     public string RouteLabel => InstallRoutes.Label(Route);
     public bool IsPreSr => Route == InstallRoute.OptiScalerPreSr;
     public bool IsPostFsr => Route == InstallRoute.PostFsrRuntime;

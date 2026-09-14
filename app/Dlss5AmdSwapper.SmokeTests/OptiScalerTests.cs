@@ -668,6 +668,33 @@ internal static class OptiScalerTests
             Check(structureResult.Message == "Saved for the next launch" && toneResult.Message == "Saved for the next launch", "next-launch message");
         });
 
+        await run("Pre-SR preset and scaling can be changed after installation", async () =>
+        {
+            using var temp = new OptiTemp();
+            var game = new GameEntry { ExePath = Path.Combine(temp.Path, "Game.exe") };
+            await File.WriteAllTextAsync(game.ManifestPath, "{\"route\":\"amd-optiscaler-presr\",\"installed_proxy_names\":[\"dxgi.dll\"]}");
+            await File.WriteAllBytesAsync(Path.Combine(temp.Path, "dxgi.dll"), [1]);
+            await File.WriteAllTextAsync(game.OptiScalerIniPath, "[DlssNr]\nEnabled=true\n");
+            var control = new OptiScalerControlService();
+
+            await control.SetPresetAsync(game, OptiScalerPreset.Detail);
+            var ini = IniDocument.Load(game.OptiScalerIniPath);
+            Check(ini.Get("DlssNr", "Passes") == "2" && ini.Get("DlssNr", "LocalStructure") == "2.0"
+                && ini.Get("DlssNr", "SkinStructure") == "2.0" && ini.Get("DlssNr", "LocalTone") == "0", "preset rewrites every neural control");
+            Check(ini.Get("UpscaleRatio", "UpscaleRatioOverrideValue") == "2.0", "preset also applies its scaling tier");
+
+            await control.SetScalingAsync(game, OptiScalerScaling.GameControlled);
+            ini = IniDocument.Load(game.OptiScalerIniPath);
+            Check(ini.Get("UpscaleRatio", "UpscaleRatioOverrideEnabled") == "false", "game controlled scaling stops forcing a ratio");
+            Check(ini.Get("DlssNr", "Passes") == "2", "changing scaling must not disturb the neural controls");
+
+            Check(OptiScalerPresets.Match(2, 2.0, 2.0, 0.0) == OptiScalerPreset.Detail, "installed values identify their preset");
+            Check(OptiScalerPresets.Match(2, 1.1, 2.0, 0.0) is null, "off-preset values report as custom");
+            Check(OptiScalerScalings.FromRatio(true, "2.0") == OptiScalerScaling.Performance, "a known ratio maps to its tier");
+            Check(OptiScalerScalings.FromRatio(true, "2.4") is null, "a hand-edited ratio is custom, not mislabelled as a tier");
+            Check(OptiScalerScalings.FromRatio(false, null) == OptiScalerScaling.GameControlled, "no override means the game is in charge");
+        });
+
         await run("Hotkey sets map to distinct virtual keys", () =>
         {
             var direct = HotkeyService.Bindings(HotkeySet.DirectGame);

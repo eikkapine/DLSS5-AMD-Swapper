@@ -70,6 +70,10 @@ Every extra neural pass costs GPU frame time, so more passes trade framerate for
 
 A tier forces the render resolution and replaces the upscaler quality setting chosen inside the game. Choose **Game controlled** to leave that setting in charge instead. The chosen tier is recorded in the install manifest, so an update cannot change your resolution silently, and it can also be changed while playing from the overlay's **Upscale Ratio Override** section.
 
+Both the preset and the scaling tier can be changed **after** setup: select the game in **Game library** and use the **Preset** and **Scaling** controls under *Effect controls*. They are written to `OptiScaler.ini` and apply the next time the game starts. A configuration that does not match any preset is shown as *Custom*.
+
+**Changing the game's own upscaler quality while it is running can stop neural rendering.** The AMD backend re-initialises at the new render resolution and can then fail with `HIP completion timeout` in `amd_presr.log`, after which the neural pass no longer runs even though it still reports as enabled. Re-selecting the previous quality does not recover it; restart the game. Picking a fixed scaling tier here instead of **Game controlled** avoids the mid-session resolution change that triggers this.
+
 ## In-game overlay
 
 Each route has its own in-game overlay; both are provided by the runtime itself, not by this manager.

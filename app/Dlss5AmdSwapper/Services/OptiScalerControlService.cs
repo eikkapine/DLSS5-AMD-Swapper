@@ -40,6 +40,35 @@ public sealed class OptiScalerControlService
     public Task<RuntimeChangeResult> SetSkinAsync(GameEntry game, double value, CancellationToken cancellationToken = default) => SetScalarAsync(game, "SkinStructure", value, cancellationToken);
     public Task<RuntimeChangeResult> SetToneAsync(GameEntry game, double value, CancellationToken cancellationToken = default) => SetScalarAsync(game, "LocalTone", value, cancellationToken);
 
+    // Applying a preset rewrites every neural control plus its scaling tier, so the game page can
+    // change a completed install instead of forcing a reinstall to pick a different preset.
+    public Task<RuntimeChangeResult> SetPresetAsync(GameEntry game, OptiScalerPreset preset, CancellationToken cancellationToken = default)
+    {
+        var values = OptiScalerPresets.Values(preset);
+        return ChangeAsync(game, ini =>
+        {
+            ini.Set(Section, "Passes", values.Passes.ToString(CultureInfo.InvariantCulture));
+            ini.Set(Section, "LocalStructure", values.Structure);
+            ini.Set(Section, "SkinStructure", values.Skin);
+            ini.Set(Section, "LocalTone", values.Tone);
+            ApplyScaling(ini, values.Scaling);
+        }, cancellationToken);
+    }
+
+    public Task<RuntimeChangeResult> SetScalingAsync(GameEntry game, OptiScalerScaling scaling, CancellationToken cancellationToken = default) =>
+        ChangeAsync(game, ini => ApplyScaling(ini, scaling), cancellationToken);
+
+    private static void ApplyScaling(IniDocument ini, OptiScalerScaling scaling)
+    {
+        var ratio = OptiScalerScalings.Ratio(scaling);
+        if (ratio is null) ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "false");
+        else
+        {
+            ini.Set("UpscaleRatio", "UpscaleRatioOverrideEnabled", "true");
+            ini.Set("UpscaleRatio", "UpscaleRatioOverrideValue", ratio);
+        }
+    }
+
     private Task<RuntimeChangeResult> SetScalarAsync(GameEntry game, string key, double value, CancellationToken cancellationToken)
     {
         if (!double.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value));

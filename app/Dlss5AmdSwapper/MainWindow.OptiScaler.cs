@@ -142,6 +142,22 @@ public partial class MainWindow
         ShowToast($"Files updated for {target.Name}. " + OptiScalerInstallerService.GetActivationGuidance(target), true);
     }
 
+    private async void GamePresetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SelectedGame is not { IsPreSr: true } game || sender is not ComboBox combo || combo.SelectedItem is not string name) return;
+        if (string.Equals(name, game.PresetLabel, StringComparison.Ordinal)) return;
+        try { ShowToast((await _optiControl.SetPresetAsync(game, OptiScalerPresets.Parse(name))).Message); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void GameScalingCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SelectedGame is not { IsPreSr: true } game || sender is not ComboBox combo || combo.SelectedItem is not string name) return;
+        if (string.Equals(name, game.ScalingLabel, StringComparison.Ordinal)) return;
+        try { ShowToast((await _optiControl.SetScalingAsync(game, OptiScalerScalings.Parse(name))).Message); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
     private async void PassesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (SelectedGame is not { IsPreSr: true } game || sender is not ComboBox combo || combo.SelectedItem is not int passes || passes == game.Passes) return;

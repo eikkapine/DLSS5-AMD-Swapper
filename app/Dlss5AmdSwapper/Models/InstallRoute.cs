@@ -31,6 +31,22 @@ public static class OptiScalerPresets
         _ => (1, "1.5", "1.5", "0", OptiScalerScaling.Balanced)
     };
 
+    // Null when the installed values match no preset, which the UI reports as Custom rather than
+    // pretending a preset is selected.
+    public static OptiScalerPreset? Match(int passes, double structure, double skin, double tone)
+    {
+        foreach (var preset in new[] { OptiScalerPreset.Light, OptiScalerPreset.Balanced, OptiScalerPreset.Detail, OptiScalerPreset.Max })
+        {
+            var v = Values(preset);
+            if (v.Passes == passes
+                && Math.Abs(double.Parse(v.Structure, System.Globalization.CultureInfo.InvariantCulture) - structure) < 0.05
+                && Math.Abs(double.Parse(v.Skin, System.Globalization.CultureInfo.InvariantCulture) - skin) < 0.05
+                && Math.Abs(double.Parse(v.Tone, System.Globalization.CultureInfo.InvariantCulture) - tone) < 0.05)
+                return preset;
+        }
+        return null;
+    }
+
     public static string Describe(OptiScalerPreset preset)
     {
         var v = Values(preset);
@@ -54,6 +70,20 @@ public static class OptiScalerScalings
     };
 
     public static string Label(OptiScalerScaling scaling) => Names[(int)scaling];
+
+    // Null for a forced ratio that is not one of the documented tiers, so a hand-edited value is
+    // shown as Custom instead of being mislabelled "Game controlled".
+    public static OptiScalerScaling? FromRatio(bool overrideEnabled, string? ratio) =>
+        !overrideEnabled ? OptiScalerScaling.GameControlled : ratio?.Trim() switch
+        {
+            "1.0" => OptiScalerScaling.Dlaa,
+            "1.3" => OptiScalerScaling.UltraQuality,
+            "1.5" => OptiScalerScaling.Quality,
+            "1.7" => OptiScalerScaling.Balanced,
+            "2.0" => OptiScalerScaling.Performance,
+            "3.0" => OptiScalerScaling.UltraPerformance,
+            _ => null
+        };
 
     public static OptiScalerScaling Parse(string? value) => value?.Trim().ToLowerInvariant().Replace(" ", string.Empty) switch
     {

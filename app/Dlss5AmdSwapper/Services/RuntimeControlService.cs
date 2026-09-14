@@ -30,6 +30,12 @@ public sealed class RuntimeControlService
                     game.LocalTone = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "LocalTone", 0.0), 0.0, 2.0);
                     game.SkinStructure = Math.Clamp(ini.GetDouble(OptiScalerControlService.Section, "SkinStructure", 1.0), 0.0, 2.0);
                     game.Passes = int.TryParse(ini.Get(OptiScalerControlService.Section, "Passes"), out var passes) ? Math.Clamp(passes, 1, 3) : 1;
+                    var matched = OptiScalerPresets.Match(game.Passes, game.LocalStructure, game.SkinStructure, game.LocalTone);
+                    game.PresetLabel = matched?.ToString() ?? "Custom";
+                    var tier = OptiScalerScalings.FromRatio(
+                        ini.GetBool("UpscaleRatio", "UpscaleRatioOverrideEnabled", false),
+                        ini.Get("UpscaleRatio", "UpscaleRatioOverrideValue"));
+                    game.ScalingLabel = tier is null ? "Custom" : OptiScalerScalings.Label(tier.Value);
                 }
                 else ResetControls(game);
                 if (!game.Installed) game.RuntimeStatus = "Pre-SR install incomplete - use Repair to restore missing files";

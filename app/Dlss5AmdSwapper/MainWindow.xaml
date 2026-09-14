@@ -343,7 +343,7 @@
                                             <StackPanel>
                                                 <TextBlock Text="Runtime" FontWeight="SemiBold"/>
                                                 <TextBlock Text="{Binding SelectedGame.RuntimeStatus, TargetNullValue=Not checked}" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
-                                                <TextBlock Text="Press End in-game for the upstream live overlay." Foreground="{DynamicResource Accent2Brush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                                <TextBlock Text="Live overlay in-game: Del for OptiScaler pre-SR, End for the official AMD runtime." Foreground="{DynamicResource Accent2Brush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
                                             </StackPanel>
                                         </Border>
                                     </Grid>
@@ -351,11 +351,21 @@
                                     <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
                                         <StackPanel>
                                             <TextBlock Text="Effect controls" FontSize="16" FontWeight="SemiBold"/>
-                                            <TextBlock Text="These save the upstream AMD runtime settings. Saving is not proof that a running game applied the change; use the End overlay for live control." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,15"/>
+                                            <TextBlock Text="These save settings for the next launch. Saving is not proof that a running game applied the change; use the in-game overlay for live control (Del for OptiScaler pre-SR, End for the official AMD runtime). Changing the upscaler quality inside the game while playing can stop the neural pass with a HIP completion timeout; restart the game after changing it." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,15"/>
                                             <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                                 <TextBlock Text="Neural passes" VerticalAlignment="Center"/>
                                                 <ComboBox Grid.Column="1" Width="90" HorizontalAlignment="Left" ItemsSource="{Binding PassOptions}" SelectedItem="{Binding SelectedGame.Passes, Mode=OneWay}" SelectionChanged="PassesCombo_SelectionChanged" Margin="8,0"/>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Preset" VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" ItemsSource="{Binding PresetNames}" SelectedItem="{Binding SelectedGame.PresetLabel, Mode=OneWay}" SelectionChanged="GamePresetCombo_SelectionChanged" Margin="8,0"/>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,12" Visibility="{Binding SelectedGame.IsPreSr, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Scaling" VerticalAlignment="Center"/>
+                                                <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" ItemsSource="{Binding ScalingNames}" SelectedItem="{Binding SelectedGame.ScalingLabel, Mode=OneWay}" SelectionChanged="GameScalingCombo_SelectionChanged" Margin="8,0"/>
                                             </Grid>
                                             <Grid>
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="55"/></Grid.ColumnDefinitions>
