@@ -528,19 +528,25 @@ def fetch_release(tag: str | None = None) -> dict[str, Any]:
     for asset in data.get("assets", []):
         if asset.get("name") == UPSTREAM_ASSET:
             digest = asset.get("digest")
-            if not isinstance(digest, str) or not digest.startswith("sha256:"):
+            size = int(asset["size"])
+            if size <= 0:
+                raise RuntimeError("The official setup metadata contains an invalid size")
+            if digest is None or (isinstance(digest, str) and not digest.strip()):
                 known = {
+                    ("v0.3.1", 7_598_347): "cf7ada1486b499700a84846b342ca2b1defdb4db622843f812151f255f2ad63c",
                     ("v0.2.18", 7_570_162): "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3",
                     ("v0.2.17", 7_538_418): "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc",
                 }
-                fallback = known.get((data.get("tag_name"), int(asset["size"])))
+                fallback = known.get((data.get("tag_name"), size))
                 if fallback is None:
                     raise RuntimeError("GitHub did not provide a SHA-256 digest for the official setup asset")
                 digest = "sha256:" + fallback
+            if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest, re.IGNORECASE) is None:
+                raise RuntimeError("The official setup metadata contains an invalid SHA-256 digest")
             return {
                 "tag": data.get("tag_name"),
                 "asset": asset["name"],
-                "size": int(asset["size"]),
+                "size": size,
                 "sha256": digest[7:].lower(),
                 "release_page": UPSTREAM_RELEASES,
             }
@@ -659,8 +665,9 @@ def verify_rich_runtime_config(path: Path, upstream_tag: str | None = None) -> d
     }
     version = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:\.\d+)?", upstream_tag or "", re.IGNORECASE)
     modern = version is not None and tuple(map(int, version.groups())) >= (0, 3, 0)
-    # The verified v0.3.0 setup replaced Inline with Async and defaults to
+    # The verified v0.3.0/v0.3.1 setup replaced Inline with Async and defaults to
     # processing before upscaling. Keep the legacy contract for older/unknown tags.
+    # Temporal stays 1 in the installer; PreHistory=0 disables pre-upscale history.
     required.update({"Async": 0, "PreUpscale": 1, "PreHistory": 0} if modern else {"Inline": 1})
     missing: list[str] = []
     verified: dict[str, int] = {}
@@ -1285,7 +1292,15 @@ def summarize_runtime_log(path: Path, game_exe: str | None = None) -> dict[str, 
             flags=re.IGNORECASE,
         )
     ]
-    jobs = [wall for _, wall, _, _, _, _ in job_rows]
+    # v0.3.1 can complete work without GPU profiling; keep those completions
+    # distinct from measured GPU samples instead of reporting NR as inactive.
+    unprofiled_rows = [
+        (int(wall), history.lower() == "on", zero_copy.lower() == "zero-copy")
+        for wall, history, zero_copy in re.findall(
+            r"(?im)^network job \d+ done in (\d+) ms \(history (on|off), (zero-copy|copied)\)\s*$", text,
+        )
+    ]
+    jobs = [wall for _, wall, _, _, _, _ in job_rows] + [wall for wall, _, _ in unprofiled_rows]
     gpu_jobs = [gpu for _, _, gpu, _, _, _ in job_rows]
     wait_jobs = [wait for _, _, _, wait, _, _ in job_rows]
     staging = re.search(
@@ -1323,7 +1338,10 @@ def summarize_runtime_log(path: Path, game_exe: str | None = None) -> dict[str, 
         "fidelityfx_upscaler_hooks": len(re.findall(r"(?im)^hooked amd_fidelityfx_.*!ffxDispatch", text)),
         "fault_lines": len(re.findall(r"(?im)^FAULT:", text)),
         "gpu_error_lines": len(re.findall(r"(?im)^job \d+ GPU errors:", text)),
-        "timed_job_samples": len(jobs),
+        "completed_job_samples": len(jobs),
+        "timed_job_samples": len(job_rows),
+        "history_enabled_samples": sum(1 for _, _, _, _, history, _ in job_rows if history) + sum(1 for _, history, _ in unprofiled_rows if history),
+        "zero_copy_samples": sum(1 for _, _, _, _, _, zero_copy in job_rows if zero_copy) + sum(1 for _, _, zero_copy in unprofiled_rows if zero_copy),
         "hook_failures": hook_failures,
         "failed_hooks": failed_hooks,
         "swapchains_created": swapchains_created,
@@ -1387,8 +1405,6 @@ def summarize_runtime_log(path: Path, game_exe: str | None = None) -> dict[str, 
             "minimum": min(wait_jobs),
             "maximum": max(wait_jobs),
         }
-        result["history_enabled_samples"] = sum(1 for _, _, _, _, history, _ in job_rows if history)
-        result["zero_copy_samples"] = sum(1 for _, _, _, _, _, zero_copy in job_rows if zero_copy)
     return result
 
 
@@ -1407,7 +1423,7 @@ def diagnose(args: argparse.Namespace) -> dict[str, Any]:
         and runtime_log.get("session_scoped")
         and runtime_log.get("fidelityfx_dispatch_detected")
         and runtime_log.get("fsr_inputs")
-        and runtime_log.get("timed_job_samples", 0) > 0
+        and runtime_log.get("completed_job_samples", 0) > 0
     )
     result = {
         "schema_version": 1,

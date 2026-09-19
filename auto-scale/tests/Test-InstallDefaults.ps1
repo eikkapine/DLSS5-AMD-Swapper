@@ -45,6 +45,12 @@ foreach ($case in $cases) {
             throw "$($case.Name) missing expected configuration: $expected"
         }
     }
+    $runtimeIni = Get-Content -LiteralPath (Join-Path $lsPath 'nr-bridge\runtime\dlssnr_on_amd.ini') -Raw
+    foreach ($expected in @('Enabled=1', 'UseFsrInputs=0', 'Inline=0', 'Async=1', 'PreUpscale=0')) {
+        if ($runtimeIni -notmatch ('(?m)^' + [regex]::Escape($expected) + '\r?$')) {
+            throw "$($case.Name) did not retain asynchronous color-only capture: $expected"
+        }
+    }
     if ((Get-FileHash (Join-Path $lsPath 'Lossless_original.dll')).Hash -ne (Get-FileHash $original).Hash) {
         throw "$($case.Name) did not preserve the original DLL"
     }

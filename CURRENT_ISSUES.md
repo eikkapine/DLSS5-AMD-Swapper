@@ -1,5 +1,11 @@
 # Current Issues / Claude Handoff
 
+## Current checkpoint — 19 September 2026
+
+v0.3.0-pre.3 refreshes official v0.3.1 installer verification, modern asynchronous bridge configuration, startup HIP diagnostics, and runtime release checking. See [upstream refresh](docs/upstream-refresh-20260919.md) and [release validation](docs/releases/v0.3.0-pre.3.md). Issue #3 remains open for affected-machine confirmation; its original legacy runtime stall is not proven resolved. Preserve the Crimson Desert compatibility pin and require fresh completed neural work before claiming a successful runtime session.
+
+The notes below record the earlier v0.3.0-pre.2 checkpoint.
+
 Branch: optiscaler-presr
 
 1. Crimson Desert current build: the latest runtime session loads but does not reach verified Neural Rendering activity. Fresh evidence is missing engine initialization, FidelityFX dispatch, and neural network-job lines. Older sessions did reach those stages. Investigate compatibility with the current Steam build and only report success from a new launch session.

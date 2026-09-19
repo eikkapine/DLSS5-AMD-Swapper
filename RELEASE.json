@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "version": "0.3.0-pre.2",
-  "tag": "v0.3.0-pre.2",
+  "version": "0.3.0-pre.3",
+  "tag": "v0.3.0-pre.3",
   "status": "experimental-preview",
-  "date": "2026-09-12",
+  "date": "2026-09-19",
   "published": true,
-  "previous_published_version": "0.3.0-pre.1",
+  "previous_published_version": "0.3.0-pre.2",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "18d6435d5fbafbaa6512fd04c4a4ea4f44270e905ee2b30b768e6e1f81f221ca",
-      "bytes": 291840,
+      "sha256": "2702e2128ca4c14ed81e23f9f103e835a529e561149b23a4a5d35e7d78b0b643",
+      "bytes": 297984,
       "matches_verified_build": true
     },
     {
@@ -25,7 +25,7 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "308776adbe9f1cf6d244425b2433ffaecdc8e8f0ae5b068f2ebd6d4e803c94be",
+      "bridge/src/main.cpp": "d18a03fc94aa71e1cc6d6d282eded4764cf204554afc960fe83d5e4cf5b3954a",
       "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
       "bridge/shaders/gpu_transport.hlsl": "7f5778bc4f7de59770e1d73b7741c505461721dfc3683d48d3643fa1b4ec0a34",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
@@ -34,40 +34,27 @@
       "auto-scale/src/auto_scale_proxy.cpp": "49ba93c9570cf87c88eaefb56216bf70de613d75903fa4fe57362641cf222177",
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "99accf04e5aba5d1bd131e210ffbf05e183b03f2f5531358270cba81dda8535e",
-      "auto-scale/scripts/Install-AutoScale.ps1": "272127e2847e1b64525e022d351af399d2a70ce545fa0bbe2943f66b47221c30",
-      "VERSION": "6bfdc85ae8af300ef6849f3d6f6045519273fd74bd47d3a91c422293fdd2e94d"
+      "auto-scale/scripts/Install-AutoScale.ps1": "c7d621fb90db859187ae2269166837a062b75951cac2a58b730a93795d606253",
+      "VERSION": "634f34f48fb5c40a4c7e9423e3889a94d51e1a45b906c1f32139a30f95374013"
     }
   },
   "verification": {
     "production_bridge_build_passed": true,
     "production_proxy_build_passed": true,
-    "bridge_pixel_tests_passed": true,
+    "bridge_cpu_tests_passed": true,
     "auto_scale_harness_passed": true,
-    "bridge_version_stamp_verified": true,
+    "auto_scale_install_configurations_passed": 4,
+    "manager_smoke_tests_passed": true,
+    "direct_game_python_tests_passed": 52,
+    "packaging_rollback_tests_passed": 15,
+    "desktop_lifecycle_scenarios_passed": 5,
+    "theme_contrast_checks_passed": 1899,
+    "manager_settings_light_dark_renders_inspected": true,
+    "package_checksum_file_count": 13,
     "publication_provenance_gate_passed": true,
-    "automatic_scale_workflow_retained": true,
-    "lossless_scaling_dev14_compositor_retained": true,
-    "native_visible_output_path_retained": true,
-    "neural_height_cap": 480,
-    "direct_game_v0217_runtime_smoke_verified": true,
-    "direct_game_rich_fsr_inputs_verified": true,
-    "direct_game_presentmon_smoke_capture_logged": true,
-    "controlled_direct_game_ab_benchmark_recorded": false,
-    "new_screenshots_added": false,
-    "manager_ui_build_passed": true,
-    "manager_ui_minimum_size_verified": true,
-    "in_app_scan_summary_verified": true,
-    "universal_game_scan_verified": true,
-    "portable_manager_package_verified": true,
-    "optiscaler_presr_route_smoke_tests_passed": true,
-    "optiscaler_presr_python_tests_passed": true,
-    "optiscaler_presr_live_install_verified": true,
-    "optiscaler_presr_capture_recorded": false,
-    "optiscaler_presr_package_validated_real_files": true,
-    "session_scoped_diagnostics_verified": true,
-    "hook_failure_detection_verified": true,
-    "diagnostics_refresh_single_flight": true,
-    "crimson_desert_neural_rendering_active_on_current_build": false
+    "affected_rx9060xt_runtime_retest_performed": false,
+    "gpu_performance_benchmark_performed": false,
+    "issue_3_original_stall_confirmed_resolved": false
   },
   "working_resolution": {
     "lossless_scaling_mode": "native visible output + capped neural branch",
@@ -94,28 +81,37 @@
   ],
   "external_runtime": {
     "project": "danielblnc/DLSS-NR-on-AMD",
-    "tested_version": "v0.2.18",
-    "latest_checked_version": "v0.2.18",
+    "latest_checked_version": "v0.3.1",
+    "installer_metadata_and_embedded_config_verified": true,
+    "runtime_gameplay_verified_for_latest": false,
     "redistributed": false,
-    "official_setup_bytes": 7570162,
-    "official_setup_sha256": "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3",
+    "official_setup_bytes": 7598347,
+    "official_setup_sha256": "cf7ada1486b499700a84846b342ca2b1defdb4db622843f812151f255f2ad63c",
     "direct_game_required_config": {
       "Enabled": 1,
       "UseFsrInputs": 1,
       "UseDepth": 1,
       "Temporal": 1,
       "Interop": 1,
-      "Inline": 1
+      "Async": 0,
+      "PreUpscale": 1,
+      "PreHistory": 0
     },
-    "lossless_scaling_guide_buffer_note": "The color-only Lossless Scaling path does not receive engine motion/depth guide buffers.",
+    "lossless_scaling_required_mode": {
+      "Enabled": 1,
+      "UseFsrInputs": 0,
+      "Inline": 0,
+      "Async": 1,
+      "PreUpscale": 0
+    },
     "crimson_desert_pinned_version": "v0.2.17"
   },
   "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available.",
   "manager_release": {
-    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.2-win-x64.zip",
+    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.3-win-x64.zip",
     "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
-    "sha256": "1bd3eb3116e33ddfe6736ae13fd3809e5e77f469e8952fbb10341e599575b104",
-    "bytes": 66001372,
+    "sha256": "2230d91ed67ea8f9e44c41f9b6f4804f1988e32101e985d802133eca3ccead76",
+    "bytes": 66043328,
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
@@ -124,7 +120,9 @@
     "expected_fork_marker": "amd-presr",
     "redistributed": false,
     "downloaded": false,
-    "source": "user-supplied"
+    "source": "user-supplied",
+    "latest_official_stable_checked": "v0.9.4",
+    "stock_release_replaces_custom_fork": false
   },
   "direct_game_live_20260912": {
     "game": "Crimson Desert (Steam build 25246367, updated 2026-09-11)",

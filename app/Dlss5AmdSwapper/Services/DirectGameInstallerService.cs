@@ -294,14 +294,7 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             if (!asset.GetProperty("name").GetString()!.Equals(UpstreamAsset, StringComparison.Ordinal)) continue;
             var size = asset.GetProperty("size").GetInt64();
             var digest = asset.TryGetProperty("digest", out var digestProp) ? digestProp.GetString() : null;
-            if (digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
-                return new ReleaseAsset(tag, UpstreamAsset, size, digest[7..].ToLowerInvariant(), UpstreamReleasePage);
-
-            if (string.Equals(tag, "v0.2.18", StringComparison.OrdinalIgnoreCase) && size == 7_570_162)
-                return new ReleaseAsset(tag, UpstreamAsset, size, "dad67cc649ad91ba28e83c30049fc899900ae532daf818803bd1123e6e2315c3", UpstreamReleasePage);
-            if (string.Equals(tag, "v0.2.17", StringComparison.OrdinalIgnoreCase) && size == V0217Size)
-                return new ReleaseAsset(tag, UpstreamAsset, size, V0217Sha256, UpstreamReleasePage);
-            throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current setup asset.");
+            return new ReleaseAsset(tag, UpstreamAsset, size, UpstreamReleases.ResolveSha256(tag, size, digest), UpstreamReleasePage);
         }
         throw new InvalidOperationException("The latest official DLSS-NR-on-AMD release has no setup asset.");
     }
@@ -317,10 +310,10 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             ["Temporal"] = 1,
             ["Interop"] = 1
         };
-        // The verified v0.3.0 setup replaced Inline with inverse Async and ships
+        // The verified v0.3.0/v0.3.1 setup replaced Inline with inverse Async and ships
         // pre-upscale neural processing. Require its complete synchronous default;
         // accepting a missing legacy Inline alone would also accept broken configs.
-        // https://github.com/danielblnc/DLSS-NR-on-AMD/releases/tag/v0.3.0
+        // v0.3.1 still writes Temporal=1; PreHistory=0 disables pre-upscale history.
         if (Version.TryParse(releaseTag?.TrimStart('v', 'V'), out var version) && version >= new Version(0, 3, 0))
         {
             required["Async"] = 0;

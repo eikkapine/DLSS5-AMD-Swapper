@@ -519,6 +519,8 @@
                                         <CheckBox Content="Light theme" IsChecked="{Binding LightTheme}" Foreground="{DynamicResource TextBrush}" Margin="0,12,0,8"/>
                                         <CheckBox Content="Keep running in the tray when I close the window" IsChecked="{Binding MinimizeToTray}" Foreground="{DynamicResource TextBrush}"/>
                                         <TextBlock Text="Use Exit from the tray menu to quit and release global hotkeys." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                        <Button Content="Check runtime updates" Click="CheckRuntimeUpdates_Click" Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                                        <TextBlock Text="Check official AMD runtime and OptiScaler releases, with guidance for your install route." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource CardStyle}" Margin="0,0,0,16">

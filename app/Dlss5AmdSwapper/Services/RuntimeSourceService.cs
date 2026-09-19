@@ -146,21 +146,14 @@ public sealed class RuntimeSourceService
             var size = asset.GetProperty("size").GetInt64();
             var digest = asset.TryGetProperty("digest", out var digestValue) ? digestValue.GetString() : null;
             var url = asset.TryGetProperty("browser_download_url", out var urlValue) ? urlValue.GetString() : null;
-            if (digest is null || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
-            {
-                // GitHub omits the digest on some releases; fall back to the digests recorded from verified downloads.
-                var known = UpstreamReleases.KnownSha256(tag, size);
-                if (known is null) throw new InvalidOperationException("GitHub did not publish a SHA-256 digest for the current official setup.");
-                digest = "sha256:" + known;
-            }
+            var sha256 = UpstreamReleases.ResolveSha256(tag, size, digest);
             if (string.IsNullOrWhiteSpace(url))
                 throw new InvalidOperationException("GitHub did not publish a download URL for the current official setup.");
-            if (size <= 0 || digest.Length != 71 || !digest[7..].All(Uri.IsHexDigit)
-                || !Uri.TryCreate(url, UriKind.Absolute, out var downloadUri)
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var downloadUri)
                 || downloadUri.Scheme != Uri.UriSchemeHttps || downloadUri.Host != "github.com"
                 || !downloadUri.AbsolutePath.StartsWith("/danielblnc/DLSS-NR-on-AMD/releases/download/", StringComparison.Ordinal))
                 throw new InvalidOperationException("The official setup metadata contains an invalid digest, size, or download URL.");
-            return new SetupAsset(tag, size, digest[7..].ToLowerInvariant(), url);
+            return new SetupAsset(tag, size, sha256, url);
         }
         throw new InvalidOperationException("The latest DLSS-NR-on-AMD release has no setup asset.");
     }
