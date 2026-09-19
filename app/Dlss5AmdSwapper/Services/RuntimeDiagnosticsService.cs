@@ -71,6 +71,10 @@ public sealed class RuntimeDiagnosticsService
         var faults = Regex.Matches(text, @"(?im)^FAULT:").Count;
         var gpuErrors = Regex.Matches(text, @"(?im)^job \d+ GPU errors:").Count;
         var jobMatches = Regex.Matches(text, @"network job (\d+) done in (\d+) ms \(([\d.]+) ms network on the GPU, ([\d.]+) ms waiting for the capture; history (on|off), (zero-copy|copied)\)", RegexOptions.IgnoreCase);
+        // The official v0.3.1 binary also logs completed work without GPU timestamps.
+        // Count that evidence separately so missing profiling never implies missing NR.
+        var unprofiledJobs = Regex.Matches(text, @"(?im)^network job \d+ done in \d+ ms \(history (on|off), (zero-copy|copied)\)\s*$");
+        var completedJobs = jobMatches.Count + unprofiledJobs.Count;
         var gpuTimes = new List<double>();
         var zeroCopySamples = 0;
         foreach (Match match in jobMatches)
@@ -78,6 +82,7 @@ public sealed class RuntimeDiagnosticsService
             if (double.TryParse(match.Groups[3].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var gpu)) gpuTimes.Add(gpu);
             if (match.Groups[6].Value.Equals("zero-copy", StringComparison.OrdinalIgnoreCase)) zeroCopySamples++;
         }
+        zeroCopySamples += unprofiledJobs.Count(match => match.Groups[2].Value.Equals("zero-copy", StringComparison.OrdinalIgnoreCase));
 
         var stage = Regex.Match(text, @"staging ready: colour (\d+)x(\d+) dxgi \d+ .*?; motion (\d+)x(\d+) dxgi \d+; depth (\d+)x(\d+) dxgi \d+ \(inverted (\d+)\); exposure (yes|no); residual (on|off)", RegexOptions.IgnoreCase);
         var swap = Regex.Match(text, @"env: swapchain (\d+)x(\d+) format \d+,", RegexOptions.IgnoreCase);
@@ -104,11 +109,11 @@ public sealed class RuntimeDiagnosticsService
 
         // Without the session header in the sample the startup lines cannot be attributed to the
         // recent jobs, so no verified verdict is possible from the sample alone.
-        var rich = sessionScoped && !sessionStartOutsideSample && dispatch && stage.Success && jobMatches.Count > 0;
+        var rich = sessionScoped && !sessionStartOutsideSample && dispatch && stage.Success && completedJobs > 0;
         var startupStalled = sessionScoped && !engineInitialized && (presentQueue || gameDevice);
         var hooksFailed = sessionScoped && hookFailures > 0 && !engineInitialized;
         var summary = sessionStartOutsideSample
-            ? jobMatches.Count > 0
+            ? completedJobs > 0
                 ? "Recent neural jobs observed, but the session start is outside the sampled window; restart the game or inspect the full log for a verified verdict"
                 : "Session start is outside the sampled window; no verdict from the recent sample"
             : rich
@@ -135,6 +140,7 @@ public sealed class RuntimeDiagnosticsService
             hash)
         {
             Sampled = sampled,
+            CompletedJobs = completedJobs,
             BytesHashed = total,
             SessionScoped = sessionScoped,
             EngineInitialized = engineInitialized,
@@ -166,6 +172,7 @@ public sealed record RuntimeDiagnostics(
     string? LogSha256)
 {
     public bool Sampled { get; init; }
+    public int CompletedJobs { get; init; }
     public bool SessionScoped { get; init; }
     public bool EngineInitialized { get; init; }
     public bool FidelityFxDispatchObserved { get; init; }

@@ -8,8 +8,68 @@ static void Require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+static unsigned startupDrains = 0;
+static void CountStartupDrain() noexcept { ++startupDrains; }
+
+static void CheckStartupDiagnostics() {
+    const auto stalled = ParseRuntimeHealthLog(
+        "hooked IDXGISwapChain::Present\nengine init ok\n");
+    Require(stalled.engineInitialized && !stalled.completedJob && !stalled.fatal,
+            "Issue #3 initialization-only log was accepted as healthy");
+    Require(stalled.detail.find("engine initialized") != std::string::npos,
+            "Startup stall did not identify initialized engine");
+    const auto hooks = ParseRuntimeHealthLog("detour of Present failed (2)\n");
+    Require(hooks.renderHookFailure && !hooks.engineInitialized && !hooks.completedJob,
+            "Render hook failure phase was lost");
+    const auto completed = ParseRuntimeHealthLog("ENGINE INIT OK\nnetwork job 12 done in 22 ms\n");
+    Require(completed.completedJob && !completed.fatal, "Completed job not recognized");
+    const auto fatal = ParseRuntimeHealthLog("network job 12 done\nGPU errors\n");
+    Require(fatal.fatal, "Completed job masked a later GPU failure");
+
+    Require(BridgeRuntimeConfigurationError({1, -1, 0, 0, -1, 1}).empty(),
+            "Legacy async color-only configuration rejected");
+    Require(BridgeRuntimeConfigurationError({1, 1, 0, 0, 0, 1}).empty(),
+            "Current async color-only configuration rejected");
+    Require(!BridgeRuntimeConfigurationError({1, 0, 0, 0, 0, 1}).empty(),
+            "Legacy Inline=0 incorrectly overrode current Async=0");
+    Require(BridgeRuntimeConfigurationError({1, 1, 1, 0, 0, 1}).empty(),
+            "Current Async=1 did not supersede legacy Inline");
+    Require(!BridgeRuntimeConfigurationError({1, 1, 0, 0, 1, 1}).empty(),
+            "FSR pre-upscale setting accepted for color-only bridge");
+    Require(!BridgeRuntimeConfigurationError({1, 1, 0, 0, -1, 1}).empty(),
+            "Current runtime's default pre-upscale path accepted without explicit override");
+    Require(!BridgeRuntimeConfigurationError({1, 1, 0, 1, 0, 1}).empty(),
+            "FSR input setting accepted for color-only bridge");
+    Require(!BridgeRuntimeConfigurationError({0, 1, 0, 0, 0, 1}).empty(),
+            "Disabled runtime accepted");
+
+    std::ostringstream log;
+    startupDrains = 0;
+    {
+        StartupDiagnostics diagnostics(log, CountStartupDrain);
+        const HipWorkProgress hip{true, 1, 0};
+        Require(diagnostics.Sample(std::chrono::milliseconds(0), "warmup", 1, 1, 1,
+                    DXGI_STATUS_OCCLUDED, true, stalled, hip), "First startup sample suppressed");
+        Require(startupDrains == 1, "HIP samples were not drained before startup readiness");
+        Require(!diagnostics.Sample(std::chrono::milliseconds(10), "health_wait", 1, 2, 1,
+                    S_OK, true, stalled, hip), "Startup diagnostics were not rate limited");
+        Require(diagnostics.Sample(std::chrono::milliseconds(1000), "health_wait", 3, 3, 1,
+                    S_OK, true, stalled, hip), "Periodic startup sample suppressed");
+        Require(diagnostics.Sample(std::chrono::milliseconds(1010), "health_timeout", 3, 3, 1,
+                    S_OK, true, stalled, hip, true), "Final failed-startup sample suppressed");
+    }
+    Require(startupDrains == 4, "HIP samples were not drained on startup scope exit");
+    Require(log.str().find("feed_occluded=1 last_present_hr=0x87a0001") != std::string::npos,
+            "Occluded Present result lost from startup diagnostics");
+    Require(log.str().find("engine_initialized=1 render_hook_failure=0 completed_job=0") != std::string::npos,
+            "Issue #3 runtime phase lost from startup diagnostics");
+    Require(log.str().find("phase=health_timeout") != std::string::npos,
+            "Startup timeout not recorded");
+}
+
 int wmain() {
     try {
+        CheckStartupDiagnostics();
         uint32_t randomState = 0x83dcb159;
         auto nextByte = [&]() -> uint8_t {
             randomState = randomState * 1664525u + 1013904223u;
@@ -63,7 +123,7 @@ int wmain() {
         dark.rgba[0] = 18;
         Require(SourceMeaningfullyNonBlack(dark), "Exact-threshold frame failed guard");
         Require(!SourceMeaningfullyNonBlack(FramePixels{}), "Empty frame failed guard");
-        std::cout << "Pixel tests passed: " << comparedBytes << " blend bytes; SIMD tails, channel order, alpha, bypass, native identity, black guard.\n";
+        std::cout << "Pixel tests passed: " << comparedBytes << " blend bytes; SIMD tails, channel order, alpha, bypass, native identity, black guard; startup phases, HIP drain, async configuration.\n";
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << ex.what() << "\n";

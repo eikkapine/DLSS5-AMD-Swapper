@@ -98,6 +98,8 @@ Direct-game hotkeys save runtime settings. A saved value does not prove the runn
 
 ## Latest compatibility research
 
+The [19 September upstream refresh](docs/upstream-refresh-20260919.md) covers DLSS-NR-on-AMD **v0.3.1**, official pre-upscaling, OptiScaler **v0.9.4**, and the Lossless Scaling startup investigation for [issue #3](https://github.com/eikkapine/DLSS5-AMD-Swapper/issues/3). In **Settings → Check runtime updates**, check the latest official releases and the selected pre-SR package version. Stock OptiScaler and the custom AMD pre-SR package remain distinct.
+
 I track AMD runtime changes separately from manager features. See the [September AMD research](docs/amd-research-20260910.md) and [feature comparison](docs/swapper-parity.md) for tested boundaries, upstream changes, and features that still need an AMD-compatible consumer. Fresh testing on the updated Crimson Desert build is detailed in [Direct Game verification — 12 September 2026](docs/verification-20260912.md). Newer FSR technologies are not drop-in Neural Rendering replacements. This update does not claim a measured neural-rendering speedup.
 
 ## Before / after

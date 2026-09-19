@@ -942,6 +942,8 @@ public:
         // This private feed is hidden after warmup. Only the visible presenter
         // should pace to the monitor; a second vblank wait adds latency.
         HRESULT present = swapChain_->Present(0, 0);
+        lastPresentResult_ = present;
+        if (present == DXGI_STATUS_OCCLUDED) ++occludedCount_;
         if (FAILED(present)) {
             Check(present, "Present");
         }
@@ -980,7 +982,9 @@ public:
         // Queue ordering supplies the dependency without blocking the CPU
         // here. The caller retains its WGC frame through Compose's completed
         // consumer fence (or drains both devices before releasing on failure).
-        Check(swapChain_->Present(0, 0), "Present GPU neural feed");
+        lastPresentResult_ = swapChain_->Present(0, 0);
+        if (lastPresentResult_ == DXGI_STATUS_OCCLUDED) ++occludedCount_;
+        Check(lastPresentResult_, "Present GPU neural feed");
         uploadInitialized_ = false;
         ++presentCount_;
     }
@@ -1060,6 +1064,9 @@ public:
     uint64_t presentCount() const {
         return presentCount_;
     }
+
+    uint64_t occludedCount() const { return occludedCount_; }
+    HRESULT lastPresentResult() const { return lastPresentResult_; }
 
 private:
     void CreateDevice() {
@@ -1242,6 +1249,8 @@ private:
     UINT64 rowPitch_ = 0;
     UINT frameIndex_ = 0;
     uint64_t presentCount_ = 0;
+    uint64_t occludedCount_ = 0;
+    HRESULT lastPresentResult_ = S_OK;
 };
 
 
@@ -1308,20 +1317,50 @@ std::string LowerAscii(std::string value) {
 
 struct RuntimeHealth {
     bool logPresent = false;
+    bool engineInitialized = false;
+    bool renderHookFailure = false;
     bool completedJob = false;
     bool fatal = false;
     std::string detail;
 };
 
-bool UsesAsyncBackbufferRuntime() {
+struct BridgeRuntimeSettings {
+    int enabled = -1;
+    int async = -1;
+    int inlineMode = -1;
+    int useFsrInputs = -1;
+    int preUpscale = -1;
+    int interop = -1;
+
+    bool asynchronous() const { return async >= 0 ? async == 1 : inlineMode == 0; }
+    bool colorOnly() const {
+        // Current runtimes default PreUpscale to 1; the bridge cannot provide
+        // that path's game dispatch. An absent key is legacy-compatible only.
+        return useFsrInputs == 0 && (preUpscale == 0 || (preUpscale == -1 && async == -1));
+    }
+};
+
+BridgeRuntimeSettings ReadBridgeRuntimeSettings() {
     const auto ini = std::filesystem::absolute("dlssnr_on_amd.ini");
     auto setting = [&](const wchar_t* name) {
-        return GetPrivateProfileIntW(L"DlssNrOnAmd", name, -1, ini.c_str());
+        return static_cast<int>(GetPrivateProfileIntW(L"DlssNrOnAmd", name, -1, ini.c_str()));
     };
-    // Missing or changed settings fail closed to the original feed cadence.
-    // In particular, never defer a producer needed by inline/FSR work.
-    return setting(L"Enabled") == 1 && setting(L"Inline") == 0 &&
-           setting(L"UseFsrInputs") == 0 && setting(L"Interop") == 1;
+    return {setting(L"Enabled"), setting(L"Async"), setting(L"Inline"),
+            setting(L"UseFsrInputs"), setting(L"PreUpscale"), setting(L"Interop")};
+}
+
+std::string BridgeRuntimeConfigurationError(const BridgeRuntimeSettings& settings) {
+    if (settings.enabled != 1) return "bridge runtime requires Enabled=1";
+    if (!settings.colorOnly()) return "bridge captures color only: use UseFsrInputs=0 and PreUpscale=0 (no game FSR dispatch is available)";
+    if (!settings.asynchronous()) return "bridge requires asynchronous runtime: Async=1 for current releases and Inline=0 for legacy releases";
+    return {};
+}
+
+bool UsesAsyncBackbufferRuntime() {
+    const auto settings = ReadBridgeRuntimeSettings();
+    // Async supersedes Inline in current releases. Missing interop settings
+    // retain fixed feed cadence; no completion hint bypasses GPU fences.
+    return BridgeRuntimeConfigurationError(settings).empty() && settings.interop == 1;
 }
 
 
@@ -1346,17 +1385,12 @@ void ResetRuntimeLogForCurrentLaunch() {
     }
 }
 
-RuntimeHealth ReadRuntimeHealth() {
+RuntimeHealth ParseRuntimeHealthLog(const std::string& text) {
     RuntimeHealth health;
-    std::ifstream file("dlssnr_on_amd.log", std::ios::binary);
-    if (!file) {
-        health.detail = "dlssnr_on_amd.log is not present yet";
-        return health;
-    }
     health.logPresent = true;
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
-    const std::string lower = LowerAscii(buffer.str());
+    const std::string lower = LowerAscii(text);
+    health.engineInitialized = lower.find("engine init ok") != std::string::npos;
+    health.renderHookFailure = std::regex_search(lower, std::regex(R"(detour of[^\r\n]+failed)"));
     health.completedJob = std::regex_search(lower, std::regex(R"(network[ \t]+job[ \t]+[0-9]+[ \t]+done)"));
     health.fatal = lower.find("gpu errors") != std::string::npos ||
                    lower.find("invalid kernel file") != std::string::npos ||
@@ -1365,13 +1399,67 @@ RuntimeHealth ReadRuntimeHealth() {
                    (lower.find("100.00%") != std::string::npos && lower.find("zero") != std::string::npos);
     if (health.fatal) {
         health.detail = "runtime log contains a fatal GPU/kernel/fault/crash/zero-output marker";
+    } else if (!health.completedJob && health.engineInitialized) {
+        health.detail = "runtime engine initialized but no completed network job; see bridge-startup.log for feed/HIP progress";
+    } else if (!health.completedJob && health.renderHookFailure) {
+        health.detail = "runtime render hooks failed before engine initialization";
     } else if (!health.completedJob) {
-        health.detail = "runtime log has no completed network job yet";
+        health.detail = "runtime has not reported engine initialization or a completed network job";
     } else {
         health.detail = "runtime log has completed network jobs and no fatal markers";
     }
     return health;
 }
+
+RuntimeHealth ReadRuntimeHealth() {
+    std::ifstream file("dlssnr_on_amd.log", std::ios::binary);
+    if (!file) {
+        RuntimeHealth health;
+        health.detail = "dlssnr_on_amd.log is not present yet";
+        return health;
+    }
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    return ParseRuntimeHealthLog(buffer.str());
+}
+
+// A failed readiness check never reaches the visible-output cadence logger.
+// Drain HIP samples during startup as well, or a header-only timing file can
+// misleadingly suggest that no HIP calls occurred (issue #3).
+class StartupDiagnostics {
+public:
+    using Drain = void (*)() noexcept;
+    StartupDiagnostics(std::ostream& log, Drain drain = FlushHipHostTiming)
+        : log_(log), drain_(drain) {}
+    ~StartupDiagnostics() { drain_(); }
+
+    bool Sample(std::chrono::milliseconds elapsed, const char* phase,
+                uint64_t captured, uint64_t presented, uint64_t occluded, HRESULT presentResult,
+                bool feedVisible, const RuntimeHealth& health, const HipWorkProgress& hip,
+                bool force = false) {
+        if (!force && sampled_ && elapsed - lastSample_ < std::chrono::seconds(1)) return false;
+        drain_();
+        sampled_ = true;
+        lastSample_ = elapsed;
+        log_ << "elapsed_ms=" << elapsed.count() << " phase=" << phase
+             << " captured=" << captured << " feed_presents=" << presented
+             << " feed_occluded=" << occluded << " last_present_hr=0x" << std::hex
+             << static_cast<uint32_t>(presentResult) << std::dec
+             << " feed_visible=" << feedVisible << " runtime_log=" << health.logPresent
+             << " engine_initialized=" << health.engineInitialized
+             << " render_hook_failure=" << health.renderHookFailure
+             << " completed_job=" << health.completedJob << " fatal=" << health.fatal
+             << " hip_progress_available=" << hip.available << " hip_active_waits=" << hip.activeWaits
+             << " hip_returned_waits=" << hip.returnedWaits << '\n';
+        log_.flush();
+        return true;
+    }
+private:
+    std::ostream& log_;
+    Drain drain_;
+    std::chrono::milliseconds lastSample_{};
+    bool sampled_ = false;
+};
 
 void RequireHealthyRuntimeOrThrow(const FramePixels& nrFrame) {
     const RuntimeHealth health = ReadRuntimeHealth();
@@ -1857,15 +1945,32 @@ int wmain(int argc, wchar_t** argv) {
         };
 
         ScopedRenderScheduling scheduling(options.preciseScheduling && !options.noProxy);
+        std::ofstream startupLog("bridge-startup.log", std::ios::trunc);
+        StartupDiagnostics startupDiagnostics(startupLog);
+        const auto startupAt = std::chrono::steady_clock::now();
+        const auto runtimeSettings = ReadBridgeRuntimeSettings();
+        startupLog << "schema=1 bridge_version=" << BRIDGE_BUILD_VERSION
+                   << " pid=" << GetCurrentProcessId() << " no_proxy=" << options.noProxy << '\n'
+                   << "enabled=" << runtimeSettings.enabled << " async=" << runtimeSettings.async
+                   << " inline=" << runtimeSettings.inlineMode << " use_fsr_inputs=" << runtimeSettings.useFsrInputs
+                   << " pre_upscale=" << runtimeSettings.preUpscale << " interop=" << runtimeSettings.interop << '\n'
+                   << "note=HIP waits and Present returns are progress diagnostics, not completed neural jobs\n";
+        startupLog.flush();
         [[maybe_unused]] HMODULE proxy = nullptr;
         const char* hipTimingStatus = "no_proxy";
         if (!options.noProxy) {
+            const auto configurationError = BridgeRuntimeConfigurationError(runtimeSettings);
+            if (!configurationError.empty()) {
+                throw std::runtime_error("Incompatible DLSS-NR bridge configuration: " + configurationError);
+            }
             ResetRuntimeLogForCurrentLaunch();
             proxy = LoadLibraryW(L"version.dll");
             if (!proxy) {
                 throw std::runtime_error("LoadLibraryW(version.dll) failed");
             }
             hipTimingStatus = StartHipHostTiming(proxy, options.hipHostTiming, options.hipKernelSampling);
+            startupLog << "hip_host_timing=" << hipTimingStatus << '\n';
+            startupLog.flush();
             if (options.startupDelayMs > 0) {
                 Sleep(options.startupDelayMs);
             }
@@ -1991,8 +2096,16 @@ int wmain(int argc, wchar_t** argv) {
 
         HWND nrWindow = CreateRenderWindow(instance, L"DLSS NR Bridge NR Feed", options.width, options.height, true, false);
         D3D12Presenter nrPresenter(nrWindow, options.width, options.height);
+        auto logStartup = [&](const char* phase, const RuntimeHealth& health, bool force = false) {
+            startupDiagnostics.Sample(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startupAt), phase, capturedFrames,
+                nrPresenter.presentCount(), nrPresenter.occludedCount(), nrPresenter.lastPresentResult(),
+                IsWindowVisible(nrWindow) != FALSE, health, ReadHipWorkProgress(), force);
+        };
+        logStartup("before_first_present", ReadRuntimeHealth(), true);
 
         while (warmupFrames < options.warmupFrames) {
+            logStartup("warmup", ReadRuntimeHealth());
             if (shouldStop()) {
                 return 0;
             }
@@ -2027,6 +2140,7 @@ int wmain(int argc, wchar_t** argv) {
             std::string lastHealthDetail;
             const auto healthDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
             while (!healthy && std::chrono::steady_clock::now() < healthDeadline) {
+                logStartup("health_wait", ReadRuntimeHealth());
                 if (shouldStop()) {
                     return 0;
                 }
@@ -2053,6 +2167,7 @@ int wmain(int argc, wchar_t** argv) {
                 RuntimeHealth health = ReadRuntimeHealth();
                 lastHealthDetail = health.detail;
                 if (health.fatal) {
+                    logStartup("runtime_failure", health, true);
                     throw std::runtime_error("DLSS-NR runtime is not healthy: " + health.detail);
                 }
                 if (!sourceNonBlack.has_value()) {
@@ -2064,9 +2179,13 @@ int wmain(int argc, wchar_t** argv) {
                 }
             }
             if (!healthy) {
+                logStartup("health_timeout", ReadRuntimeHealth(), true);
                 throw std::runtime_error("DLSS-NR runtime did not become healthy before visible output: " + lastHealthDetail);
             }
         }
+
+        logStartup(options.noProxy ? "proxy_bypassed" : "health_verified",
+                   options.noProxy ? RuntimeHealth{} : ReadRuntimeHealth(), true);
 
         ShowWindow(nrWindow, SW_HIDE);
         HWND bridge = CreateRenderWindow(instance, L"DLSS NR Bridge", options.displayWidth, options.displayHeight, true, true);

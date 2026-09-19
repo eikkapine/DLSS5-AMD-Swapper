@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import shutil
@@ -153,6 +154,27 @@ class PackageTests(unittest.TestCase):
             helper.build_optiscaler_ini(None, "quality", False, passes=0)
 
 
+class ReleaseMetadataTests(unittest.TestCase):
+    digest = "cf7ada1486b499700a84846b342ca2b1defdb4db622843f812151f255f2ad63c"
+
+    def fetch(self, tag="v0.3.1", size=7_598_347, digest=None):
+        data = {"tag_name": tag, "assets": [{"name": helper.UPSTREAM_ASSET, "size": size, "digest": digest}]}
+        with patch.object(helper.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(data).encode())):
+            return helper.fetch_release()
+
+    def test_v031_verified_fallback_and_published_digest(self):
+        self.assertEqual(self.fetch()["sha256"], self.digest)
+        self.assertEqual(self.fetch(digest="SHA256:" + self.digest.upper())["sha256"], self.digest)
+        self.assertEqual(self.fetch(tag="v0.2.17", size=7_538_418)["sha256"], "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc")
+
+    def test_missing_or_invalid_digest_never_accepts_unverified_metadata(self):
+        for kwargs in ({"tag": "v0.3.2"}, {"size": 7_598_346}, {"size": 0},
+                       {"digest": "sha256:bad"}, {"digest": "sha256:" + "g" * 64},
+                       {"digest": "sha512:" + self.digest}, {"digest": 123}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(RuntimeError):
+                self.fetch(**kwargs)
+
+
 class RuntimeConfigTests(unittest.TestCase):
     common = "[DlssNrOnAmd]\nEnabled=1\nUseFsrInputs=1\nUseDepth=1\nTemporal=1\nInterop=1\n"
     modern = "Async=0\nPreUpscale=1\nPreHistory=0\nInlineWaitMs=200\n"
@@ -179,6 +201,7 @@ class RuntimeConfigTests(unittest.TestCase):
         self.assertEqual(verified["PreHistory"], 0)
         self.assertNotIn("Inline", verified)
         self.assertNotIn("InlineWaitMs", verified)
+        self.assertEqual(helper.verify_rich_runtime_config(config, "v0.3.1"), verified)
         diagnostic = helper.diagnose(helper.parse_args(["--game", str(f.exe), "--diagnose"]))
         self.assertEqual(diagnostic["runtime_config"]["Async"], "0")
         self.assertEqual(diagnostic["runtime_config"]["PreUpscale"], "1")
@@ -203,7 +226,7 @@ class RuntimeConfigTests(unittest.TestCase):
                 self.addCleanup(f.cleanup)
                 setup = write_pe(f.temp / helper.UPSTREAM_ASSET)
                 model = write_pe(f.temp / "nvngx_dlssnr.dll")
-                release = {"tag": "v0.3.0", "sha256": helper.sha256(setup), "size": setup.stat().st_size}
+                release = {"tag": "v0.3.1", "sha256": helper.sha256(setup), "size": setup.stat().st_size}
 
                 def run_setup(local_setup, folder, update, expected_sha256):
                     self.assertFalse(update)
@@ -751,6 +774,33 @@ class InstallTests(unittest.TestCase):
         self.assertFalse(summary["engine_initialized"])
         self.assertFalse(summary["fidelityfx_dispatch_detected"])
         self.assertEqual(summary["timed_job_samples"], 0)
+
+    def test_v031_jobs_without_gpu_profiling_are_completed_without_inventing_timings(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        log = f.game_dir / "dlssnr_on_amd.log"
+        header = f"dlssnr_amd v0.3.1 (build test) loaded into {f.exe.name} as winmm.dll\n"
+        startup = "first ffxDispatch type TEST\nstaging ready: colour 640x480 dxgi 28 test; motion 640x480 dxgi 16; depth 640x480 dxgi 40 (inverted 1); exposure yes; residual on\n"
+        unprofiled = "network job 2 done in 9 ms (history off, zero-copy)\n"
+        profiled = "network job 1 done in 8 ms (6.25 ms network on the GPU, 0.50 ms waiting for the capture; history on, zero-copy)\n"
+        args = helper.parse_args(["--game", str(f.exe), "--diagnose"])
+        log.write_text(header + startup + unprofiled, encoding="utf-8")
+        result = helper.diagnose(args)
+        self.assertTrue(result["rich_runtime_path_observed"])
+        summary = result["runtime_log"]
+        self.assertEqual(summary["completed_job_samples"], 1)
+        self.assertEqual(summary["timed_job_samples"], 0)
+        self.assertEqual(summary["zero_copy_samples"], 1)
+        self.assertNotIn("network_gpu_ms", summary)
+        log.write_text(header + startup + profiled + unprofiled, encoding="utf-8")
+        summary = helper.summarize_runtime_log(log, f.exe.name)
+        self.assertEqual(summary["completed_job_samples"], 2)
+        self.assertEqual(summary["timed_job_samples"], 1)
+        self.assertEqual(summary["network_gpu_ms"]["mean"], 6.25)
+        log.write_text(header + startup + unprofiled + header, encoding="utf-8")
+        result = helper.diagnose(args)
+        self.assertFalse(result["rich_runtime_path_observed"])
+        self.assertEqual(result["runtime_log"]["completed_job_samples"], 0)
 
     def test_summarize_runtime_log_reports_hook_failures(self):
         f = Fixture()

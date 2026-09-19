@@ -38,6 +38,18 @@ internal static class DiagnosticsRegressionTests
             Require(!noHeaderResult.SessionScoped, "Log without a session header must not be session scoped.");
             Require(!noHeaderResult.RichPathObserved, "Log without a session header claimed a rich verdict.");
             Require(noHeaderResult.Summary.Contains("No runtime session for this executable was found in the log", StringComparison.Ordinal), "Summary did not report missing runtime session header.");
+            var modernHeader = "dlssnr_amd v0.3.1 (build test) loaded into SecretGame.exe as winmm.dll\n";
+            var unprofiled = "network job 2 done in 9 ms (history off, zero-copy)\n";
+            await File.WriteAllTextAsync(game.LogPath, modernHeader + startup + unprofiled);
+            var withoutProfiling = await new RuntimeDiagnosticsService().InspectAsync(game);
+            Require(withoutProfiling.RichPathObserved && withoutProfiling.CompletedJobs == 1, "Completed v0.3.1 job without GPU timestamps was ignored.");
+            Require(withoutProfiling.TimedJobs == 0 && withoutProfiling.MeanNetworkGpuMs is null && withoutProfiling.ZeroCopySamples == 1, "Unprofiled completion manufactured GPU timing.");
+            await File.WriteAllTextAsync(game.LogPath, modernHeader + startup + job + unprofiled);
+            var mixed = await new RuntimeDiagnosticsService().InspectAsync(game);
+            Require(mixed.CompletedJobs == 2 && mixed.TimedJobs == 1 && mixed.MeanNetworkGpuMs == 6.25, "Mixed job formats duplicated samples or changed the GPU mean.");
+            await File.WriteAllTextAsync(game.LogPath, modernHeader + startup + unprofiled + modernHeader);
+            var restarted = await new RuntimeDiagnosticsService().InspectAsync(game);
+            Require(!restarted.RichPathObserved && restarted.CompletedJobs == 0, "Unprofiled completion leaked into a new session.");
             var oldSession = string.Join('\n',
                 "dlssnr_amd v0.2.17 (build old) loaded into SecretGame.exe as winmm.dll",
                 "engine init ok",

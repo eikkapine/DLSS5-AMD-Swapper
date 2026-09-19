@@ -47,7 +47,7 @@ public static class DiagnosticsReportService
             evidence.HookFailures, evidence.SwapchainsCreated, evidence.HooksInstalled,
             evidence.EvidenceScope, evidence.BytesHashed,
             evidence.InputResolution, evidence.OutputResolution, evidence.FullOutputResolutionInput,
-            evidence.TimedJobs, evidence.MeanNetworkGpuMs, evidence.ZeroCopySamples,
+            evidence.CompletedJobs, evidence.TimedJobs, evidence.MeanNetworkGpuMs, evidence.ZeroCopySamples,
             evidence.FaultLines, evidence.GpuErrorLines, evidence.LogSha256,
             timingMeaning = "Mean GPU time of logged neural network jobs; not game FPS or end-to-end frame time",
             hashMeaning = "SHA-256 of bytes read from the captured log length; an active log may change during capture"

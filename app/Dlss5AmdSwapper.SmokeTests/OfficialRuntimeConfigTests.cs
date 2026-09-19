@@ -9,9 +9,30 @@ internal static class OfficialRuntimeConfigTests
         await run("Official 0.3 setup configuration validates its actual synchronous pre-upscale schema", () =>
         {
             using var fixture = new Fixture(Common + "Async=0\nPreUpscale=1\nPreHistory=0\nInlineWaitMs=200\n");
-            var verified = DirectGameInstallerService.VerifyRichConfig(fixture.Game.ConfigPath, "v0.3.0");
-            Check(verified.Count == 8 && verified["Async"] == 0 && verified["PreUpscale"] == 1 && verified["PreHistory"] == 0, "Modern mode settings were not verified.");
-            Check(!verified.ContainsKey("Inline"), "Obsolete Inline was manufactured.");
+            foreach (var tag in new[] { "v0.3.0", "v0.3.1" })
+            {
+                var verified = DirectGameInstallerService.VerifyRichConfig(fixture.Game.ConfigPath, tag);
+                Check(verified.Count == 8 && verified["Async"] == 0 && verified["PreUpscale"] == 1 && verified["PreHistory"] == 0, "Modern mode settings were not verified.");
+                Check(verified["Temporal"] == 1 && !verified.ContainsKey("Inline"), "Verified upstream defaults changed.");
+            }
+            return Task.CompletedTask;
+        });
+        await run("Official v0.3.1 digest fallback requires the verified size and rejects malformed metadata", () =>
+        {
+            const string digest = "cf7ada1486b499700a84846b342ca2b1defdb4db622843f812151f255f2ad63c";
+            Check(UpstreamReleases.ResolveSha256("v0.3.1", 7_598_347, null) == digest, "Verified v0.3.1 fallback missing.");
+            Check(UpstreamReleases.ResolveSha256("v0.3.1", 7_598_347, "SHA256:" + digest.ToUpperInvariant()) == digest, "Published hash normalization failed.");
+            foreach (var item in new (string? Tag, long Size, string? Digest)[] {
+                ("v0.3.1", 7_598_346, null), ("v0.3.2", 7_598_347, null),
+                ("v0.3.1", 7_598_347, "sha256:bad"), ("v0.3.1", 7_598_347, "sha512:" + digest),
+                ("v0.3.1", 0, "sha256:" + digest) })
+            {
+                var rejected = false;
+                try { UpstreamReleases.ResolveSha256(item.Tag, item.Size, item.Digest); }
+                catch (InvalidOperationException) { rejected = true; }
+                Check(rejected, "Unverified release metadata accepted.");
+            }
+            Check(UpstreamReleases.KnownSha256("v0.2.17", 7_538_418) is not null, "Legacy compatibility digest missing.");
             return Task.CompletedTask;
         });
         await run("Official modern validation rejects missing or disabled rich inputs and asynchronous mode", () =>

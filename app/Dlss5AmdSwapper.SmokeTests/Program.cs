@@ -7,6 +7,7 @@ var failures = new List<string>();
 
 await RuntimeControlRegressionTests.RunAsync(RunAsync);
 await OfficialRuntimeConfigTests.RunAsync(RunAsync);
+await RuntimeReleaseCatalogTests.RunAsync(RunAsync);
 await DiagnosticsRegressionTests.RunAsync();
 await OptiScalerTests.RunAsync(RunAsync);
 await DiagnosticsReportTests.RunAsync(RunAsync);
