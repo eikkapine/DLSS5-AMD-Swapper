@@ -4,6 +4,8 @@
 
 v0.3.0-pre.3 refreshes official v0.3.1 installer verification, modern asynchronous bridge configuration, startup HIP diagnostics, and runtime release checking. See [upstream refresh](docs/upstream-refresh-20260919.md) and [release validation](docs/releases/v0.3.0-pre.3.md). Issue #3 remains open for affected-machine confirmation; its original legacy runtime stall is not proven resolved. Preserve the Crimson Desert compatibility pin and require fresh completed neural work before claiming a successful runtime session.
 
+Post-pre.3 correction from the issue #3 retests: the bridge aborted a healthy v0.3.1 startup because its fatal-marker check matched any occurrence of `fault`, including the informational DRED notice, and its HIP instrumentation required every named import, so v0.3.1's different wait API disabled the whole trace. Both are fixed in the bridge only; the reporter still needs a build carrying them, so a pre.4 package remains outstanding before issue #3 can be retested.
+
 The notes below record the earlier v0.3.0-pre.2 checkpoint.
 
 Branch: optiscaler-presr

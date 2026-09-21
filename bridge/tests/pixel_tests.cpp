@@ -26,6 +26,23 @@ static void CheckStartupDiagnostics() {
     const auto fatal = ParseRuntimeHealthLog("network job 12 done\nGPU errors\n");
     Require(fatal.fatal, "Completed job masked a later GPU failure");
 
+    // Informational startup text names faults without reporting one (issue #3).
+    const auto informational = ParseRuntimeHealthLog(
+        "DRED enabled (page-fault reporting; breadcrumbs off): a device removal "
+        "will name the faulting allocation\nengine init ok\n"
+        "dlssnr_amd v0.3.1 loaded into crashpad_handler.exe\n"
+        "readback: 100.00% of jobs used zero-copy inputs\n");
+    Require(!informational.fatal, "Informational DRED/crashpad text was treated as a fatal marker");
+    Require(informational.engineInitialized && !informational.completedJob,
+            "Informational text lost the startup phase");
+    const auto reported = ParseRuntimeHealthLog(
+        "DRED enabled (page-fault reporting; breadcrumbs off)\n"
+        "FAULT: exception 0xc0000005 at 00000001, last job -1\n");
+    Require(reported.fatal, "Reported FAULT: line was not fatal");
+    Require(ParseRuntimeHealthLog("job 7 GPU errors: 3\n").fatal, "Per-job GPU errors were not fatal");
+    Require(ParseRuntimeHealthLog("output check: 100.00% zero pixels\n").fatal,
+            "Zero-output line was not fatal");
+
     Require(BridgeRuntimeConfigurationError({1, -1, 0, 0, -1, 1}).empty(),
             "Legacy async color-only configuration rejected");
     Require(BridgeRuntimeConfigurationError({1, 1, 0, 0, 0, 1}).empty(),
