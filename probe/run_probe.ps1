@@ -138,7 +138,9 @@ function Invoke-ProbeValidation {
     $onFullLogText = if (Test-Path -LiteralPath $onLog) { Get-Content -LiteralPath $onLog -Raw } else { "" }
     $combinedLogText = $offFullLogText + [Environment]::NewLine + $onFullLogText
 
-    $fatalRuntimePattern = '(?is)(GPU errors|invalid kernel file|FAULT|CRASH|100\.00%.*zero)'
+    # Match the runtime's own report lines. Bare FAULT/CRASH substrings also hit
+    # v0.3.1's informational DRED notice and crashpad_handler (issue #3).
+    $fatalRuntimePattern = '(?im)^[ \t]*(FAULT:|(job[ \t]+\d+[ \t]+)?GPU errors)|invalid kernel file|100\.00%[^\r\n]*zero(?!-copy)'
     $jobPattern = '(?i)network job.*done'
     $onJobCount = ([regex]::Matches($onFullLogText, $jobPattern)).Count
     $offReadiedDiff = Get-ReportNumber -Text $offReportText -Name "max_readied_changed_pixels_vs_expected"
@@ -170,7 +172,7 @@ function Invoke-ProbeValidation {
         (New-Check -Name "on_late_captures_present" -Passed ($onLateCaptures.Count -gt 0) -Detail "late_capture_count=$($onLateCaptures.Count)"),
         (New-Check -Name "off_not_timed_out" -Passed (!(Test-Path -LiteralPath $offTimeout)) -Detail $offTimeout),
         (New-Check -Name "on_not_timed_out" -Passed (!(Test-Path -LiteralPath $onTimeout)) -Detail $onTimeout),
-        (New-Check -Name "no_runtime_error_markers" -Passed (!$hasFatalRuntimeLog) -Detail "Fails on GPU errors, invalid kernel file, FAULT, CRASH, or 100.00% zero-output logs"),
+        (New-Check -Name "no_runtime_error_markers" -Passed (!$hasFatalRuntimeLog) -Detail "Fails on GPU errors, invalid kernel file, FAULT: lines, or 100.00% zero-output logs"),
         (New-Check -Name "on_jobs_completed" -Passed ($onJobCount -gt 0) -Detail "network_job_done_count=$onJobCount"),
         (New-Check -Name "off_readied_diff_zero" -Passed ($null -ne $offReadiedDiff -and $offReadiedDiff -eq 0) -Detail "off_max_readied_changed_pixels=$offReadiedDiff"),
         (New-Check -Name "off_late_captures_match_expected" -Passed $offAllLateMatchExpected -Detail "late_capture_count=$($offLateCaptures.Count)"),

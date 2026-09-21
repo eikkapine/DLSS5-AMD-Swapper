@@ -1392,13 +1392,19 @@ RuntimeHealth ParseRuntimeHealthLog(const std::string& text) {
     health.engineInitialized = lower.find("engine init ok") != std::string::npos;
     health.renderHookFailure = std::regex_search(lower, std::regex(R"(detour of[^\r\n]+failed)"));
     health.completedJob = std::regex_search(lower, std::regex(R"(network[ \t]+job[ \t]+[0-9]+[ \t]+done)"));
-    health.fatal = lower.find("gpu errors") != std::string::npos ||
-                   lower.find("invalid kernel file") != std::string::npos ||
-                   lower.find("fault") != std::string::npos ||
-                   lower.find("crash") != std::string::npos ||
-                   (lower.find("100.00%") != std::string::npos && lower.find("zero") != std::string::npos);
+    // A fatal marker is the runtime's own report line, not any line mentioning a
+    // fault. Whole-log substring matching rejected healthy startups: v0.3.1
+    // announces "DRED enabled (page-fault reporting...) ... faulting allocation"
+    // before engine initialization, and a loaded crashpad_handler carries
+    // "crash" (issue #3). Match the emitted forms line by line, as the manager's
+    // log parser already does. The zero-output pair must share one line, and
+    // "zero-copy" is an interop mode, never an empty output.
+    static const std::regex fatalMarkers(
+        R"((^|\n)[ \t]*(fault:|(job[ \t]+[0-9]+[ \t]+)?gpu errors)|invalid kernel file|100\.00%[^\n]*zero(?!-copy))",
+        std::regex::optimize);
+    health.fatal = std::regex_search(lower, fatalMarkers);
     if (health.fatal) {
-        health.detail = "runtime log contains a fatal GPU/kernel/fault/crash/zero-output marker";
+        health.detail = "runtime log contains a fatal FAULT/GPU-error/kernel/zero-output marker";
     } else if (!health.completedJob && health.engineInitialized) {
         health.detail = "runtime engine initialized but no completed network job; see bridge-startup.log for feed/HIP progress";
     } else if (!health.completedJob && health.renderHookFailure) {

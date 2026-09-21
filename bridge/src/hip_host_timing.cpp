@@ -377,29 +377,53 @@ hipError_t ObservedLaunch(const void* function, dim3 grid, dim3 block, void** ar
     SetLastError(returnedError);
     return result;
 }
-hipError_t ObservedDeviceWait() {
-    const DWORD incomingError = GetLastError();
-    const bool announce = queuedKernels && progressAvailable.load(std::memory_order_acquire) &&
-                          GetCurrentThreadId() != presentationThread;
-    queuedKernels = false;
-    if (announce) activeWorkerWaits.fetch_add(1, std::memory_order_acq_rel);
-    SetLastError(incomingError);
-    const auto result = Measure<DeviceWait>(originalDeviceWait, false);
-    const DWORD returnedError = GetLastError();
-    FinishKernelSample(result, announce);
-    if (announce) {
-        // Also wake on failure, so the bridge can use its existing error path.
-        // The runtime may not have published its ready flag yet; this is only
-        // permission to try the established output path, never to bypass it.
-        returnedWorkerWaits.fetch_add(1, std::memory_order_release);
-        activeWorkerWaits.fetch_sub(1, std::memory_order_release);
-        SetEvent(progressEvent);
+// A worker wait that follows a successful kernel launch on the same thread is
+// the scheduling hint. Only the device wait published it, so a runtime that
+// waits on its stream or on an event reported no HIP progress at all (issue
+// #3). Every wait wrapper now publishes the hint. Completion of a sampled timed
+// launch stays with the device-wide waits: those alone guarantee the sampled
+// default-stream events finished, so no other wait reads event timestamps.
+class WorkerWait {
+public:
+    WorkerWait() noexcept {
+        const DWORD incomingError = GetLastError();
+        announce_ = queuedKernels && progressAvailable.load(std::memory_order_acquire) &&
+                    GetCurrentThreadId() != presentationThread;
+        queuedKernels = false;
+        if (announce_) activeWorkerWaits.fetch_add(1, std::memory_order_acq_rel);
+        SetLastError(incomingError);
     }
-    SetLastError(returnedError);
-    return result;
+    hipError_t Finish(hipError_t result, bool deviceWide) noexcept {
+        const DWORD returnedError = GetLastError();
+        if (deviceWide) FinishKernelSample(result, announce_);
+        if (announce_) {
+            // Also wake on failure, so the bridge can use its existing error path.
+            // The runtime may not have published its ready flag yet; this is only
+            // permission to try the established output path, never to bypass it.
+            returnedWorkerWaits.fetch_add(1, std::memory_order_release);
+            activeWorkerWaits.fetch_sub(1, std::memory_order_release);
+            SetEvent(progressEvent);
+        }
+        SetLastError(returnedError);
+        return result;
+    }
+private:
+    bool announce_ = false;
+};
+
+hipError_t ObservedDeviceWait() {
+    WorkerWait wait;
+    return wait.Finish(Measure<DeviceWait>(originalDeviceWait, false), true);
 }
-hipError_t ObservedStreamWait(hipStream_t stream) { return Measure<StreamWait>(originalStreamWait, false, stream); }
-hipError_t ObservedEventWait(hipEvent_t event) { return Measure<EventWait>(originalEventWait, false, event); }
+hipError_t ObservedStreamWait(hipStream_t stream) {
+    WorkerWait wait;
+    // A null-stream wait drains the same default-stream work a device wait does.
+    return wait.Finish(Measure<StreamWait>(originalStreamWait, false, stream), stream == nullptr);
+}
+hipError_t ObservedEventWait(hipEvent_t event) {
+    WorkerWait wait;
+    return wait.Finish(Measure<EventWait>(originalEventWait, false, event), false);
+}
 hipError_t ObservedCopy(void* destination, const void* source, size_t bytes, hipMemcpyKind kind) {
     return Measure<Copy>(originalCopy, false, destination, source, bytes, kind);
 }
@@ -490,10 +514,18 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled, bool sampleKe
     neuralImageBase = reinterpret_cast<uintptr_t>(info.lpBaseOfDll);
     neuralImageSize = info.SizeOfImage;
     std::array<void*, ApiCount> originals{};
+    std::array<bool, ApiCount> observable{};
     for (size_t i = 0; i < ApiCount; ++i) {
         originals[i] = reinterpret_cast<void*>(GetProcAddress(hip, kNames[i]));
-        if (!slots[i] || !originals[i] || *slots[i] != originals[i]) return "unsupported_or_already_observed_imports";
+        observable[i] = slots[i] && originals[i] && *slots[i] == originals[i];
     }
+    // Observe whichever of the named imports this runtime actually uses.
+    // Requiring all six discarded the complete trace, including the work
+    // progress hints, whenever one wait API went unused: v0.3.1 does not import
+    // the same wait as v0.2.18 (issue #3). A launch and one wait are enough.
+    if (!observable[Launch]) return "unobservable_launch_import";
+    if (!observable[DeviceWait] && !observable[StreamWait] && !observable[EventWait])
+        return "unobservable_wait_imports";
     LARGE_INTEGER rate{};
     if (!QueryPerformanceFrequency(&rate) || rate.QuadPart <= 0) return "unavailable_clock";
     frequency = rate.QuadPart;
@@ -521,6 +553,20 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled, bool sampleKe
         "kernel_sampling=%s since_s=15 until_s=90 max_samples=512 max_workers=4 events_per_worker=2\n",
         canSample ? "bounded_timed_launch" : sampleKernels ? "unavailable_exports" : "disabled_by_option");
     if (samplingHeaderBytes > 0) WriteTrace(samplingHeader, static_cast<size_t>(samplingHeaderBytes));
+    // Name the observed imports: an absent wait API explains absent wait rows.
+    char observed[192]{};
+    int observedBytes = 0;
+    for (size_t i = 0; i < ApiCount; ++i) {
+        if (!observable[i]) continue;
+        const int written = std::snprintf(observed + observedBytes, sizeof(observed) - static_cast<size_t>(observedBytes),
+                                          "%s%s", observedBytes ? "," : "", kFields[i]);
+        if (written <= 0) break;
+        observedBytes += written;
+    }
+    char observedHeader[256]{};
+    const int observedHeaderBytes = std::snprintf(observedHeader, sizeof(observedHeader),
+        "observed_imports=%s\n", observed);
+    if (observedHeaderBytes > 0) WriteTrace(observedHeader, static_cast<size_t>(observedHeaderBytes));
     originalLaunch = reinterpret_cast<decltype(originalLaunch)>(originals[Launch]);
     originalDeviceWait = reinterpret_cast<decltype(originalDeviceWait)>(originals[DeviceWait]);
     originalStreamWait = reinterpret_cast<decltype(originalStreamWait)>(originals[StreamWait]);
@@ -535,7 +581,9 @@ const char* StartHipHostTiming(HMODULE neuralModule, bool enabled, bool sampleKe
     // An unavailable hint event leaves ordinary feed pacing in use. GPU sample
     // events are created later, on the worker, after an existing successful wait.
     progressEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    for (size_t i = 0; i < ApiCount; ++i) ReplaceSlot(slots[i], originals[i], observers[i]);
+    for (size_t i = 0; i < ApiCount; ++i) {
+        if (observable[i]) ReplaceSlot(slots[i], originals[i], observers[i]);
+    }
     recording.store(true, std::memory_order_release);
     progressAvailable.store(progressEvent != nullptr, std::memory_order_release);
     kernelSamplingAvailable.store(canSample, std::memory_order_release);
