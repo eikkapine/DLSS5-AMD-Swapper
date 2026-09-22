@@ -37,9 +37,20 @@ public sealed class GameProbeService
         game.HasAntiCheat = result.AntiCheatMarkers.Count > 0;
         game.FsrMarkers = result.FsrMarkers;
         game.AntiCheatMarkers = result.AntiCheatMarkers;
-        game.Status = game.HasAntiCheat ? "Anti-cheat detected" : game.Eligible ? "Ready for AMD Neural Rendering" : "Compatibility uncertain";
+        game.Status = game.HasAntiCheat
+            ? game.AntiCheatOverride ? "Anti-cheat ignored at your own risk" : "Anti-cheat detected"
+            : game.Eligible ? "Ready for AMD Neural Rendering" : "Compatibility uncertain";
         game.NotifyComputed();
     }
+
+    // Both install routes gate on the same probe result. Only the anti-cheat gate can be
+    // waived, per game, by a user who has accepted the ban risk for that target.
+    public static string? CompatibilityBlock(ProbeResult compatibility, bool allowAntiCheat) =>
+        !compatibility.X64 ? "Direct-game AMD support requires a 64-bit game executable."
+        : compatibility.AntiCheatMarkers.Count > 0 && !allowAntiCheat ? "Anti-cheat markers were found. Direct-game installation is blocked for this target."
+        : compatibility.FsrMarkers.Count == 0 ? "No supported FSR runtime marker was found near this game."
+        : compatibility.Dx12Evidence.Count == 0 ? "No DirectX 12 evidence was found near this game."
+        : null;
 
     public ProbeResult Probe(string exePath, CancellationToken cancellationToken = default)
     {

@@ -65,6 +65,7 @@ For OptiScaler pre-SR, follow the selected game's input guidance after installat
 - Local activity history and a previewable, sanitized diagnostics export.
 - Universal installed-game discovery and deduplication.
 - x64, DX12, FSR, and common anti-cheat compatibility checks.
+- An explicit per-game **Ignore anti-cheat** waiver for users who accept the ban risk themselves.
 - Automatic install-vs-update handling for the direct-game route.
 - OptiScaler pre-SR package verification and reversible install.
 - Official upstream installer download with size + SHA-256 verification.

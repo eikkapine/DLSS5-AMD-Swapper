@@ -195,6 +195,24 @@ await RunAsync("Game executable picker rejects launcher noise", async () =>
     Assert(string.Equals(picked, gameExe, StringComparison.OrdinalIgnoreCase), $"Expected the game executable, got {picked ?? "null"}.");
 });
 
+await RunAsync("Anti-cheat waiver is per game, visible and reversible", () =>
+{
+    var game = new GameEntry { Name = "Fixture", ExePath = @"C:\Games\Fixture\Fixture.exe", X64 = true, HasFsr = true, HasDx12 = true, HasAntiCheat = true };
+    Assert(!game.Eligible && game.CompatibilityLabel == "Blocked: anti-cheat", "Anti-cheat must block by default.");
+    game.AntiCheatOverride = true;
+    Assert(game.Eligible, "A waived target must become installable.");
+    Assert(game.HasAntiCheat && game.CompatibilityLabel.Contains("your risk", StringComparison.Ordinal),
+        "The waiver must keep the detection and name whose risk it is.");
+    game.AntiCheatOverride = false;
+    Assert(!game.Eligible && game.CompatibilityLabel == "Blocked: anti-cheat", "The waiver must be reversible.");
+
+    var clean = new GameEntry { Name = "Clean", ExePath = @"C:\Games\Clean\Clean.exe", X64 = true, HasFsr = true, HasDx12 = true };
+    clean.AntiCheatOverride = true;
+    Assert(clean.CompatibilityLabel == "Direct-game ready", "A waiver must not relabel a game without anti-cheat.");
+    return Task.CompletedTask;
+});
+
+
 await RunAsync("Xbox scan reads both library folder names", async () =>
 {
     using var temp = new TempDirectory();

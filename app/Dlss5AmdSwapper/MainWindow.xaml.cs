@@ -187,7 +187,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         var full = Path.GetFullPath(exePath);
         var existing = Games.FirstOrDefault(g => g.ExePath.Equals(full, StringComparison.OrdinalIgnoreCase));
         if (existing is not null) return;
-        var game = new GameEntry { Name = name, ExePath = full, Store = store };
+        var game = new GameEntry { Name = name, ExePath = full, Store = store, AntiCheatOverride = _antiCheatOverridePaths.Contains(full) };
         Games.Add(game);
         try { await _probe.ProbeAsync(game, cancellationToken); }
         catch (OperationCanceledException) { Games.Remove(game); throw; }

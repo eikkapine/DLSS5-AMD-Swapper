@@ -27,6 +27,8 @@ The official [v0.3.0 release](https://github.com/danielblnc/DLSS-NR-on-AMD/relea
 
 The manager verifies x64, FSR and DX12 evidence, blocks common anti-cheat markers, verifies the official upstream installer against GitHub release metadata, checks the generated rich-input configuration and records a hash-backed local manifest for safe update/remove behavior.
 
+Anti-cheat detection blocks setup by default. If you decide to go ahead anyway, select the game, choose **Ignore anti-cheat**, and confirm the warning: the block is then waived for that one game and remembered. Bans, suspensions and lost accounts that follow are your own responsibility, not the project's.
+
 New installs use `.dlss5-amd-swapper.json`. Older `.nr-auto-scale-direct.json` manifests are still recognized and are migrated on update.
 
 The generated rich path must enable FSR inputs, depth, temporal history, interop and inline gameplay mode. The manager then looks for FidelityFX dispatches and real colour/motion/depth staging in the runtime log before calling the rich path observed.

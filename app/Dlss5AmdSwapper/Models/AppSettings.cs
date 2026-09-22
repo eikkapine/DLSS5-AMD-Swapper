@@ -10,6 +10,7 @@ public sealed class AppSettings
     public string HipVisibleDevices { get; set; } = "0";
     public List<string> ManualGames { get; set; } = [];
     public List<string> HiddenGames { get; set; } = [];
+    public List<string> AntiCheatOverrides { get; set; } = [];
     public bool ShowHiddenGames { get; set; }
     public bool GroupGamesByStore { get; set; }
     public string LibrarySort { get; set; } = "Name A–Z";
