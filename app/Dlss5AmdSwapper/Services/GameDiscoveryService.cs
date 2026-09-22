@@ -24,6 +24,10 @@ public sealed class GameDiscoveryService
 
     private static readonly string[] UtilityPrefixes = ["nitrox_", "darkbot", "trainer", "savescummer"];
 
+    // The Xbox app installs into <drive>\XboxGames, and into <drive>\Xbox on libraries
+    // created by current app builds (Forza Horizon 6 lands there).
+    private static readonly string[] XboxLibraryNames = ["XboxGames", "Xbox"];
+
     public async Task<IReadOnlyList<DiscoveredGame>> DiscoverAsync(
         bool includeHeuristics = true,
         IProgress<string>? progress = null,
@@ -230,17 +234,23 @@ public sealed class GameDiscoveryService
     {
         var games = new List<DiscoveredGame>();
         foreach (var drive in FixedDrives())
+            foreach (var library in XboxLibraryNames)
+                games.AddRange(ScanXboxLibrary(Path.Combine(drive, library), cancellationToken));
+        return games;
+    }
+
+    // One Xbox library: <root>\<Title>\Content\<title>.exe beside the GDK launch shim.
+    public static IReadOnlyList<DiscoveredGame> ScanXboxLibrary(string libraryRoot, CancellationToken cancellationToken = default)
+    {
+        var games = new List<DiscoveredGame>();
+        foreach (var directory in SafeDirectories(libraryRoot))
         {
-            var xboxRoot = Path.Combine(drive, "XboxGames");
-            foreach (var directory in SafeDirectories(xboxRoot))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var name = Path.GetFileName(directory);
-                var content = Path.Combine(directory, "Content");
-                var searchRoot = Directory.Exists(content) ? content : directory;
-                var exe = FindBestExecutable(searchRoot, name, lenient: true, cancellationToken);
-                if (exe is not null) games.Add(new DiscoveredGame(name, exe, "Xbox / Game Pass", directory));
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            var name = Path.GetFileName(directory);
+            var content = Path.Combine(directory, "Content");
+            var searchRoot = Directory.Exists(content) ? content : directory;
+            var exe = FindBestExecutable(searchRoot, name, lenient: true, cancellationToken);
+            if (exe is not null) games.Add(new DiscoveredGame(name, exe, "Xbox / Game Pass", directory));
         }
         return games;
     }

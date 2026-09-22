@@ -163,7 +163,8 @@ public sealed class RuntimeSourceService
         name.Equals("steamapps", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("SteamLibrary", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("Epic Games", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("XboxGames", StringComparison.OrdinalIgnoreCase);
+        name.Equals("XboxGames", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Xbox", StringComparison.OrdinalIgnoreCase);
 
     private static HttpClient CreateHttpClient()
     {
