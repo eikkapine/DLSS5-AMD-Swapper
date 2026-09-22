@@ -18,6 +18,7 @@ public partial class MainWindow
     private ICollectionView? _libraryView;
     private readonly HashSet<GameEntry> _libraryObserved = [];
     private readonly HashSet<string> _hiddenGamePaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _antiCheatOverridePaths = new(StringComparer.OrdinalIgnoreCase);
     private DispatcherTimer? _libraryRefreshTimer;
     private string _librarySearch = string.Empty;
     private string _libraryFilter = "All games";
@@ -34,6 +35,7 @@ public partial class MainWindow
     private void InitializeLibrary()
     {
         _hiddenGamePaths.UnionWith(_settings.HiddenGames ?? []);
+        _antiCheatOverridePaths.UnionWith(_settings.AntiCheatOverrides ?? []);
         if (!LibrarySorts.Contains(_settings.LibrarySort)) _settings.LibrarySort = LibrarySorts[0];
         _libraryView = CollectionViewSource.GetDefaultView(Games);
         _libraryView.Filter = IsLibraryGameVisible;
@@ -159,6 +161,38 @@ public partial class MainWindow
         if (LibraryMenuGame(sender) is not { } game) return;
         if (!_hiddenGamePaths.Remove(game.ExePath)) _hiddenGamePaths.Add(game.ExePath);
         _settings.HiddenGames = _hiddenGamePaths.Order(StringComparer.OrdinalIgnoreCase).ToList();
+        SaveSettings();
+        RefreshLibraryView();
+    }
+
+    private void IgnoreAntiCheat_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedGame is not { } game || !game.HasAntiCheat) return;
+        if (game.AntiCheatOverride)
+        {
+            SetAntiCheatOverride(game, false);
+            ShowToast($"Anti-cheat block restored for {game.Name}.");
+            return;
+        }
+
+        var markers = game.AntiCheatMarkers.Count == 0 ? "anti-cheat files" : string.Join(", ", game.AntiCheatMarkers.Take(4));
+        var answer = MessageBox.Show(this,
+            $"{game.Name} ships {markers}.\n\n" +
+            "Loading the Neural Rendering proxy into a protected game can get your account banned or your progress wiped, and such bans are usually permanent.\n\n" +
+            "If you continue, that choice and its consequences are yours alone. The DLSS5 AMD Swapper developers, and the authors of the runtimes it installs, are not responsible for any ban, suspension or lost account.\n\n" +
+            $"Ignore the anti-cheat block for {game.Name}?",
+            "Ignore anti-cheat detection", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (answer != MessageBoxResult.Yes) return;
+
+        SetAntiCheatOverride(game, true);
+        ShowToast($"Anti-cheat ignored for {game.Name}. Any ban is on you.");
+    }
+
+    private void SetAntiCheatOverride(GameEntry game, bool ignore)
+    {
+        game.AntiCheatOverride = ignore;
+        if (ignore) _antiCheatOverridePaths.Add(game.ExePath); else _antiCheatOverridePaths.Remove(game.ExePath);
+        _settings.AntiCheatOverrides = _antiCheatOverridePaths.Order(StringComparer.OrdinalIgnoreCase).ToList();
         SaveSettings();
         RefreshLibraryView();
     }

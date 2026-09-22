@@ -317,12 +317,13 @@
                                                 <TextBlock Text="DIRECT-GAME STATUS" Foreground="{DynamicResource MutedBrush}" FontSize="10" FontWeight="Bold"/>
                                                 <TextBlock Text="{Binding SelectedGame.Status, TargetNullValue=Waiting for a game}" FontSize="17" FontWeight="SemiBold" Margin="0,7,0,0"/>
                                                 <TextBlock Text="{Binding SelectedGame.RouteLabel, TargetNullValue=No route}" Foreground="{DynamicResource Accent2Brush}" FontSize="11" Margin="0,4,0,0"/>
-                                                <TextBlock Text="x64 + FSR + DX12 are required. Common anti-cheat targets are blocked automatically." Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                                <TextBlock Text="x64 + FSR + DX12 are required. Common anti-cheat targets are blocked automatically; you can ignore that block per game and carry the ban risk yourself." Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
                                             </StackPanel>
                                             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,14,0,0">
                                                 <Button Style="{StaticResource GhostButton}" Content="Re-check" Click="ProbeSelected_Click"/>
                                                 <Button Style="{StaticResource PrimaryButton}" Content="{Binding SelectedGame.SetupLabel, FallbackValue=Set up, TargetNullValue=Set up}" Click="InstallSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.Eligible, FallbackValue=False, TargetNullValue=False}"/>
                                                 <Button Style="{StaticResource DangerButton}" Content="Restore" Click="RestoreSelected_Click" Margin="9,0,0,0" IsEnabled="{Binding SelectedGame.HasManagedInstall, FallbackValue=False, TargetNullValue=False}"/>
+                                                <Button Style="{StaticResource GhostButton}" Content="{Binding SelectedGame.AntiCheatButtonLabel, FallbackValue=Ignore anti-cheat}" Click="IgnoreAntiCheat_Click" Margin="9,0,0,0" Visibility="{Binding SelectedGame.HasAntiCheat, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>

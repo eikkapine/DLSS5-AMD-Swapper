@@ -18,13 +18,14 @@ That script builds the native Lossless Scaling wrapper, builds the bridge, runs 
 
 ## App smoke tests
 
-The 44 C# smoke tests cover the parts most likely to make the manager unsafe or misleading:
+The C# smoke tests cover the parts most likely to make the manager unsafe or misleading:
 
 - INI edits preserve unrelated sections
 - runtime controls save atomically
 - runtime diagnostics require real rich-path log evidence
 - x64 PE probing works
 - anti-cheat evidence overrides otherwise compatible targets
+- the per-game anti-cheat waiver unblocks install without touching the other gates
 - SHA-256 helpers are deterministic
 - an installed Lossless Scaling bridge can be recognized when a real install path is supplied
 - OptiScaler package discovery, cached zip extraction, and layout verification
@@ -57,7 +58,7 @@ py -m unittest discover -s direct-game/tests
 I keep the direct installer reversible and conservative:
 
 - require x64 plus FSR/DX12 evidence unless an advanced force flag is used
-- never allow force to bypass anti-cheat blocking
+- never let the CLI force flag bypass anti-cheat blocking; only the manager's per-game waiver can, after an explicit confirmation that names the ban risk
 - verify the official upstream setup before install/update
 - validate the generated rich-input configuration
 - snapshot managed files before changing them

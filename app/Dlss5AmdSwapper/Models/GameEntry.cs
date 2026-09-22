@@ -16,6 +16,7 @@ public sealed class GameEntry : INotifyPropertyChanged
     private double _localTone = 1.0;
     private double _skinStructure = 1.0;
     private bool _liveAcknowledged;
+    private bool _antiCheatOverride;
     private InstallRoute _route;
     private int _passes = 1;
     private string _presetLabel = "Custom";
@@ -79,7 +80,9 @@ public sealed class GameEntry : INotifyPropertyChanged
     public string OptiScalerIniPath => Path.Combine(DirectoryPath, "OptiScaler.ini");
     public string PreSrLogPath => Path.Combine(DirectoryPath, "amd_presr.log");
     public string OptiScalerLogPath => Path.Combine(DirectoryPath, "OptiScaler.log");
-    public bool Eligible => X64 && HasFsr && HasDx12 && !HasAntiCheat;
+    // The user can waive the anti-cheat block for one game; the detection itself is kept.
+    public bool AntiCheatOverride { get => _antiCheatOverride; set { if (Set(ref _antiCheatOverride, value)) NotifyComputed(); } }
+    public bool Eligible => X64 && HasFsr && HasDx12 && (!HasAntiCheat || AntiCheatOverride);
 
     public bool Installed { get => _installed; set => Set(ref _installed, value); }
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
@@ -101,7 +104,10 @@ public sealed class GameEntry : INotifyPropertyChanged
     public bool HasManagedInstall => Route != InstallRoute.None;
     public string SetupLabel => HasManagedInstall ? IsPreSr && !Installed ? "Repair" : "Update" : "Set up";
 
-    public string CompatibilityLabel => HasAntiCheat ? "Blocked: anti-cheat" : Eligible ? "Direct-game ready" : "Needs review";
+    public string CompatibilityLabel => HasAntiCheat
+        ? AntiCheatOverride ? "Anti-cheat ignored — your risk" : "Blocked: anti-cheat"
+        : Eligible ? "Direct-game ready" : "Needs review";
+    public string AntiCheatButtonLabel => AntiCheatOverride ? "Restore anti-cheat block" : "Ignore anti-cheat…";
     public string InstallLabel => Installed ? "Installed" : "Not installed";
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -109,6 +115,8 @@ public sealed class GameEntry : INotifyPropertyChanged
     public void NotifyComputed()
     {
         OnPropertyChanged(nameof(Eligible));
+        OnPropertyChanged(nameof(HasAntiCheat));
+        OnPropertyChanged(nameof(AntiCheatButtonLabel));
         OnPropertyChanged(nameof(CompatibilityLabel));
         OnPropertyChanged(nameof(InstallLabel));
     }

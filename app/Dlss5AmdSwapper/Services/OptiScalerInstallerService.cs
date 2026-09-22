@@ -114,10 +114,8 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
         {
             if (game.Running) throw new InvalidOperationException("Close the game before installing or updating Neural Rendering.");
             var compatibility = await Task.Run(() => probe.Probe(game.ExePath, cancellationToken), cancellationToken);
-            if (!compatibility.X64) throw new InvalidOperationException("Direct-game AMD support requires a 64-bit game executable.");
-            if (compatibility.AntiCheatMarkers.Count > 0) throw new InvalidOperationException("Anti-cheat markers were found. Direct-game installation is blocked for this target.");
-            if (compatibility.FsrMarkers.Count == 0) throw new InvalidOperationException("No supported FSR runtime marker was found near this game.");
-            if (compatibility.Dx12Evidence.Count == 0) throw new InvalidOperationException("No DirectX 12 evidence was found near this game.");
+            if (GameProbeService.CompatibilityBlock(compatibility, game.AntiCheatOverride) is { } incompatible)
+                throw new InvalidOperationException(incompatible);
             if (!OptiScalerPackageService.IsRealWeightsFile(weights.Path)) throw new InvalidOperationException("The selected weights file is not a generated dlssnr_on_amd_weights.bin.");
             var compatibilityBlock = GetCompatibilityBlock(game, package);
             if (compatibilityBlock is not null) throw new InvalidOperationException(compatibilityBlock);

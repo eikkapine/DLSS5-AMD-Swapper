@@ -356,6 +356,24 @@ internal static class OptiScalerTests
             Check(!File.Exists(Path.Combine(f.GameDir, "dxgi.dll")) && !File.Exists(f.Game.ManifestPath), "refusals must leave the folder untouched");
         });
 
+        await run("Pre-SR install proceeds once the user waives the anti-cheat block", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await File.WriteAllBytesAsync(Path.Combine(f.GameDir, "EasyAntiCheat.dll"), [1]);
+            try { await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("Anti-cheat"), "anti-cheat must block until it is waived"); }
+
+            f.Game.AntiCheatOverride = true;
+            var result = await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
+            Check(result.Success && File.Exists(Path.Combine(f.GameDir, "dxgi.dll")), "a waived target must install");
+
+            // The waiver covers anti-cheat only; the other compatibility gates still hold.
+            var noFsr = new ProbeResult(true, [], ["EasyAntiCheat.dll"], ["d3d12.dll"]);
+            Check(GameProbeService.CompatibilityBlock(noFsr, true)?.Contains("FSR") == true, "the waiver must not skip the FSR gate");
+            Check(GameProbeService.CompatibilityBlock(noFsr, false)?.Contains("Anti-cheat") == true, "without a waiver anti-cheat is still reported first");
+        });
+
         await run("Pre-SR install rolls back exactly when a write fails", async () =>
         {
             var f = await MakeInstallFixtureAsync();
