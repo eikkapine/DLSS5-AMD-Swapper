@@ -195,6 +195,28 @@ await RunAsync("Game executable picker rejects launcher noise", async () =>
     Assert(string.Equals(picked, gameExe, StringComparison.OrdinalIgnoreCase), $"Expected the game executable, got {picked ?? "null"}.");
 });
 
+await RunAsync("Xbox scan reads both library folder names", async () =>
+{
+    using var temp = new TempDirectory();
+    var sourceExe = Environment.ProcessPath ?? throw new InvalidOperationException("No process path.");
+    foreach (var library in new[] { "XboxGames", "Xbox" })
+    {
+        var content = Path.Combine(temp.Path, library, "Forza Horizon 6", "Content");
+        Directory.CreateDirectory(content);
+        File.Copy(sourceExe, Path.Combine(content, "forzahorizon6.exe"));
+        File.Copy(sourceExe, Path.Combine(content, "gamelaunchhelper.exe"));
+        await File.WriteAllTextAsync(Path.Combine(content, "MicrosoftGame.config"), "<Game />");
+
+        var found = GameDiscoveryService.ScanXboxLibrary(Path.Combine(temp.Path, library));
+        Assert(found.Count == 1, $"Expected one title under {library}, got {found.Count}.");
+        Assert(found[0].Name == "Forza Horizon 6", $"Title name lost: {found[0].Name}.");
+        Assert(string.Equals(found[0].ExePath, Path.Combine(content, "forzahorizon6.exe"), StringComparison.OrdinalIgnoreCase),
+            $"Expected the game executable, got {found[0].ExePath}.");
+        Assert(found[0].Store == "Xbox / Game Pass", "Xbox store attribution lost.");
+    }
+});
+
+
 if (args.Any(arg => arg.Equals("--scan-games", StringComparison.OrdinalIgnoreCase)))
 {
     await RunAsync("Universal installed-game scan", async () =>
