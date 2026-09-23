@@ -2,7 +2,7 @@
 
 ## Current checkpoint — 24 September 2026
 
-v0.3.0-pre.4 (branch `feat/amd-ecosystem-refresh`, unreleased) adds AMD-NR pre-SR packages (build-string identification, passes under `Runtime\`, `Runtime/` checksums enforced, optional lmxxf runtime), deletes rewritten runtime logs on Restore so the manifest no longer survives a clean restore, and adds AMD-NR to the runtime release check. See [ecosystem refresh](docs/amd-ecosystem-20260924.md). It also carries the post-pre.3 issue #3 bridge fixes below, so it is the build issue #3 needs for a retest. AMD-NR has not been launched in a game; do not claim gameplay compatibility until a fresh session shows completed passes.
+v0.3.0-pre.4 adds AMD-NR pre-SR packages (build-string identification, passes under `Runtime\`, `Runtime/` checksums enforced, optional lmxxf runtime), deletes rewritten runtime logs on Restore so the manifest no longer survives a clean restore, and adds AMD-NR to the runtime release check. See [ecosystem refresh](docs/amd-ecosystem-20260924.md) and [release validation](docs/releases/v0.3.0-pre.4.md). It also carries the post-pre.3 issue #3 bridge fixes below, so it is the build issue #3 needs for a retest. AMD-NR has not been launched in a game; do not claim gameplay compatibility until a fresh session shows completed passes.
 
 ## Checkpoint — 19 September 2026
 
