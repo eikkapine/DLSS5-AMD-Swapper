@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.3.0-pre.3</Version>
+    <Version>0.3.0-pre.4</Version>
     <AssemblyName>Dlss5AmdSwapper</AssemblyName>
     <RootNamespace>Dlss5AmdSwapper</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>

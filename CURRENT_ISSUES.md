@@ -1,6 +1,10 @@
 # Current Issues / Claude Handoff
 
-## Current checkpoint — 19 September 2026
+## Current checkpoint — 24 September 2026
+
+v0.3.0-pre.4 (branch `feat/amd-ecosystem-refresh`, unreleased) adds AMD-NR pre-SR packages (build-string identification, passes under `Runtime\`, `Runtime/` checksums enforced, optional lmxxf runtime), deletes rewritten runtime logs on Restore so the manifest no longer survives a clean restore, and adds AMD-NR to the runtime release check. See [ecosystem refresh](docs/amd-ecosystem-20260924.md). It also carries the post-pre.3 issue #3 bridge fixes below, so it is the build issue #3 needs for a retest. AMD-NR has not been launched in a game; do not claim gameplay compatibility until a fresh session shows completed passes.
+
+## Checkpoint — 19 September 2026
 
 v0.3.0-pre.3 refreshes official v0.3.1 installer verification, modern asynchronous bridge configuration, startup HIP diagnostics, and runtime release checking. See [upstream refresh](docs/upstream-refresh-20260919.md) and [release validation](docs/releases/v0.3.0-pre.3.md). Issue #3 remains open for affected-machine confirmation; its original legacy runtime stall is not proven resolved. Preserve the Crimson Desert compatibility pin and require fresh completed neural work before claiming a successful runtime session.
 

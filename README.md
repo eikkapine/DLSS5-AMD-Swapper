@@ -67,7 +67,7 @@ For OptiScaler pre-SR, follow the selected game's input guidance after installat
 - x64, DX12, FSR, and common anti-cheat compatibility checks.
 - An explicit per-game **Ignore anti-cheat** waiver for users who accept the ban risk themselves.
 - Automatic install-vs-update handling for the direct-game route.
-- OptiScaler pre-SR package verification and reversible install.
+- OptiScaler pre-SR package verification and reversible install, including AMD-NR packages.
 - Official upstream installer download with size + SHA-256 verification.
 - Local discovery of a legitimate `nvngx_dlssnr.dll`; it is never bundled or downloaded by this project.
 - Reversible per-game setup with hash-backed manifests.
@@ -90,6 +90,7 @@ In-game controls, provided by the runtime, are what change the image while you p
 | Key | Route | Action |
 | --- | --- | --- |
 | `Del` | OptiScaler pre-SR | Overlay: neural on/off, passes, tone, structure, skin structure |
+| `Home` | AMD-NR pre-SR | Neural rendering on/off with the overlay closed |
 | `Page Up` / `Page Down` | OptiScaler pre-SR | Status readout, and cycle its detail |
 | `End` | Official AMD runtime | Upstream status and live toggle |
 
@@ -100,6 +101,8 @@ Direct-game hotkeys save runtime settings. A saved value does not prove the runn
 ## Latest compatibility research
 
 The [19 September upstream refresh](docs/upstream-refresh-20260919.md) covers DLSS-NR-on-AMD **v0.3.1**, official pre-upscaling, OptiScaler **v0.9.4**, and the Lossless Scaling startup investigation for [issue #3](https://github.com/eikkapine/DLSS5-AMD-Swapper/issues/3). In **Settings → Check runtime updates**, check the latest official releases and the selected pre-SR package version. Stock OptiScaler and the custom AMD pre-SR package remain distinct.
+
+The [24 September ecosystem refresh](docs/amd-ecosystem-20260924.md) adds support for 3zwr1's [AMD-NR](docs/optiscaler-presr.md#amd-nr-packages-3zwr1) pre-SR packages, including its matching Runtime zip and the optional lmxxf runtime. It also fixes a Restore bug where runtime logs kept a game marked as managed, and reviews the other AMD neural-rendering projects.
 
 I track AMD runtime changes separately from manager features. See the [September AMD research](docs/amd-research-20260910.md) and [feature comparison](docs/swapper-parity.md) for tested boundaries, upstream changes, and features that still need an AMD-compatible consumer. Fresh testing on the updated Crimson Desert build is detailed in [Direct Game verification — 12 September 2026](docs/verification-20260912.md). Newer FSR technologies are not drop-in Neural Rendering replacements. This update does not claim a measured neural-rendering speedup.
 
@@ -171,6 +174,7 @@ The release contains my manager plus project-built bridge/wrapper files and scri
 | [Performance](docs/performance.md) | Measurement policy and analyzer output |
 | [Verification](docs/verification.md) | Runtime evidence and publication checks |
 | [12 September verification](docs/verification-20260912.md) | Direct-game Crimson Desert re-test, hook-failure evidence, and session diagnostics |
+| [24 September ecosystem refresh](docs/amd-ecosystem-20260924.md) | AMD-NR support, the Restore log fix, and the state of other AMD neural-rendering projects |
 | [Development](docs/development.md) | Building and working on the project |
 | [Licensing](docs/licensing.md) | Third-party boundary and redistribution rules |
 
@@ -186,6 +190,7 @@ This project builds on public research and compatibility work from:
 - [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR)
 - [cdozdil/OptiScaler](https://github.com/cdozdil/OptiScaler) — upscaler and frame-generation host
 - [Vodkaman23/DLSS-NR-UE5-Opti-DLL](https://github.com/Vodkaman23/DLSS-NR-UE5-Opti-DLL) — public reference for the pre-SR fork and pass proxy layout
+- [3zwr1/AMD-NR---OptiScaler](https://github.com/3zwr1/AMD-NR---OptiScaler) — GPL-3.0 pre-SR fork supported as a user-supplied package
 - [gamegpu.com report](https://en.gamegpu.com/news/igry/dlss-5-teper-rabotaet-na-radeon-rx-9070-xt-i-rx-9060-xt-s-bolee-chem-60-fps-v-4k) — configuration report publicising pre-SR with frame generation
 - [jlrouzies-fr/DLSS5-Feeder](https://github.com/jlrouzies-fr/DLSS5-Feeder)
 - [FrankBarretta/LSP-ReShade](https://github.com/FrankBarretta/LSP-ReShade)

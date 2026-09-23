@@ -27,7 +27,8 @@ FPS_NUMBER = re.compile(r"(?i)(?:~|about\s+|roughly\s+)?\d+(?:\.\d+)?\s*fps\b")
 FORBIDDEN_FILENAMES = re.compile(
     r"(?i)^(dxgi\.dll|optiscaler.*\.dll|dlssnr_amd_pass\d\.dll|libxess.*\.dll|libxell\.dll|amd_fidelityfx_.*\.dll|d3d12core\.dll|"
     r"dlss-enabler.*\.dll|dlssnr_on_amd_weights\.bin|nvngx_dlssnr\.dll|nvngx\.dll_dlssnr\.dll|dlssnr_on_amd_setup\.exe|"
-    r"lossless_original\.dll|instalar_amd\.ps1|diagnostico_amd\.ps1|amd_presr\.log|optiscaler\.log|dlssnr_on_amd\.log)$"
+    r"lossless_original\.dll|instalar_amd\.ps1|diagnostico_amd\.ps1|amd_presr\.log|optiscaler\.log|dlssnr_on_amd\.log|"
+    r"lmxxfnrruntime\.(dll|pak)|lmxxf_backend\.log)$"
 )
 SKIP_DIRS = {".git", ".vs", "runs", "build", "bin", "obj", "runtime", "artifacts", "optiscaler-packages", ".superpowers"}
 

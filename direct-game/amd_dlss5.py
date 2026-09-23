@@ -42,6 +42,9 @@ KNOWN_RUNTIME_FILES = (
     "dlssnr_on_amd_weights.bin",
     "dlssnr_on_amd.log",
 )
+# Rewritten by the runtimes on every game launch, so they can never match the install snapshot.
+# Restore deletes them unless they existed before the install; keeping them used to retain the manifest.
+RUNTIME_LOG_NAMES = ("dlssnr_on_amd.log", "OptiScaler.log", "amd_presr.log", "lmxxf_backend.log")
 FSR_MARKERS = {
     "ffx_fsr3upscaler_x64.dll",
     "ffx_fsr3_x64.dll",
@@ -77,13 +80,18 @@ ROUTE_POST_FSR = "amd-fsr-direct"
 ROUTE_OPTISCALER = "amd-optiscaler-presr"
 OPTI_PROXY_NAMES = ("dxgi.dll", "version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll")
 OPTI_PASS_NAMES = ("dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll")
-OPTI_ROOT_MANAGED = ("OptiScaler.ini", "OptiScaler.log", "amd_presr.log", *OPTI_PASS_NAMES, "dlssnr_on_amd_weights.bin")
+# 3zwr1's AMD-NR fork: same [DlssNr] keys, pass DLLs and amd_presr.log, but upstream's version
+# resource. Its danielblnc runtime ships as a separate zip that SHA256SUMS lists under Runtime\.
+OPTI_LMXXF_NAMES = ("LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak")
+OPTI_ROOT_MANAGED = ("OptiScaler.ini", *RUNTIME_LOG_NAMES, *OPTI_PASS_NAMES, "dlssnr_on_amd_weights.bin", *OPTI_LMXXF_NAMES)
 OPTI_WEIGHTS = "dlssnr_on_amd_weights.bin"
 OPTI_ENABLER = "dlss-enabler-headless.dll"
 OPTI_DEPENDENCY_FOLDER = "OptiScaler"
 OPTI_REQUIRED_UPSCALER = "amd_fidelityfx_upscaler_dx12.dll"
 OPTI_FORK_MARKER = "amd-presr"
 OPTI_PASS_MARKER = b"dlssnr_amd"
+OPTI_AMD_NR_MARKER = b"AMD-NR v"
+OPTI_RUNTIME_FOLDER = "Runtime"
 CRIMSON_DESERT_EXE = "crimsondesert.exe"
 CRIMSON_DESERT_INCOMPATIBLE_PROXY_SHA256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa"
 ASSETTO_RALLY_GUIDE = "https://github.com/OptiScaler/OptiScaler/wiki/Assetto-Corsa-Rally"
@@ -157,6 +165,12 @@ def contains_marker(path: Path, marker: bytes) -> bool:
             if marker in data:
                 return True
             carry = data[-(len(marker) - 1):] if len(marker) > 1 else b""
+
+
+def read_ascii_run(path: Path, marker: bytes) -> str | None:
+    """The printable ASCII run starting at marker, e.g. "AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)"."""
+    match = re.search(re.escape(marker) + rb"[\x20-\x7e]{0,112}", path.read_bytes())
+    return match.group().decode("ascii") if match else None
 
 
 def pe_version_strings(path: Path, *keys: str) -> tuple[str | None, ...]:
@@ -239,14 +253,19 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
     if (product or "").lower() != "optiscaler":
         raise RuntimeError(f"{fork.name} does not identify itself as OptiScaler")
     if not version or OPTI_FORK_MARKER not in version.lower():
-        raise RuntimeError("This OptiScaler build is not the AMD pre-SR fork; the pre-SR route needs a build whose version contains amd-presr")
+        version = read_ascii_run(fork, OPTI_AMD_NR_MARKER)
+        if version is None:
+            raise RuntimeError("This OptiScaler build is not an AMD pre-SR fork; the pre-SR route needs a build whose version contains amd-presr, or 3zwr1's AMD-NR build")
 
+    runtime = root / OPTI_RUNTIME_FOLDER
     passes: list[Path] = []
     for name in OPTI_PASS_NAMES:
         candidate = root / name
         if not candidate.is_file():
+            candidate = runtime / name
+        if not candidate.is_file():
             if not passes:
-                raise RuntimeError("dlssnr_amd_pass1.dll was not found in the package folder")
+                raise RuntimeError("dlssnr_amd_pass1.dll was not found in the package folder. AMD-NR ships it in a separate Runtime zip: extract that beside OptiScaler.dll or into a Runtime folder there")
             continue
         if pe_machine(candidate) != 0x8664:
             raise RuntimeError(f"{name} is not a 64-bit Windows PE file")
@@ -262,6 +281,9 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
     record(fork)
     for item in passes:
         record(item)
+    for name in OPTI_LMXXF_NAMES:
+        if (root / name).is_file():
+            record(root / name)
     ini = root / "OptiScaler.ini"
     enabler = root / OPTI_ENABLER
     deps = root / OPTI_DEPENDENCY_FOLDER
@@ -277,7 +299,12 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
     sums_verified = False
     sums_warnings: list[str] = []
     if sums.is_file():
-        for relative, expected in parse_sha256sums(sums):
+        for listed, expected in parse_sha256sums(sums):
+            # AMD-NR lists its Runtime zip under Runtime\; extracted beside OptiScaler.dll, the same entries
+            # still have to match, which is what catches pass DLLs from a different runtime release.
+            relative = listed
+            if listed.lower().startswith(OPTI_RUNTIME_FOLDER.lower() + "\\") and not (root / listed).is_file():
+                relative = listed[len(OPTI_RUNTIME_FOLDER) + 1:]
             full = (root / relative).resolve()
             if root not in full.parents:
                 raise RuntimeError(f"SHA256SUMS.txt lists a path outside the package: {relative}")
@@ -293,11 +320,13 @@ def validate_package(root: Path, version_reader=None) -> dict[str, Any]:
             if actual == expected:
                 continue
             # Only files the helper installs must match exactly; a stale checksum on a readme or script is a warning.
-            if relative_key in files or relative_key.lower() == OPTI_WEIGHTS:
-                raise RuntimeError(f"SHA256SUMS.txt does not match {relative}. Re-download the package before installing")
+            if relative_key in files or Path(relative_key).name.lower() == OPTI_WEIGHTS:
+                raise RuntimeError(f"SHA256SUMS.txt does not match {relative}. Re-download the package (for AMD-NR, with the Runtime zip from the same release) before installing")
             sums_warnings.append(relative)
         sums_verified = True
     weights = root / OPTI_WEIGHTS
+    if not is_real_weights(weights):
+        weights = runtime / OPTI_WEIGHTS
     return {
         "root": str(root),
         "layout": layout,
@@ -867,8 +896,7 @@ def remove(args: argparse.Namespace) -> dict[str, Any]:
             continue
         if not path.exists():
             continue
-        current = file_state(path)
-        if expected is not None and current == expected:
+        if name in RUNTIME_LOG_NAMES or (expected is not None and file_state(path) == expected):
             path.unlink()
             removed.append(name)
         else:
@@ -1011,6 +1039,10 @@ def install_optiscaler(args: argparse.Namespace, version_reader=None) -> dict[st
                 source = match if match is not None else package["pass_dlls"][0]
                 copy_verified(Path(source), name)
             copy_verified(weights, OPTI_WEIGHTS)
+            # AMD-NR's optional lmxxf runtime (RX 9000); the fork asks in-game which runtime to use.
+            for name in OPTI_LMXXF_NAMES:
+                if name in package["files"]:
+                    copy_verified(Path(package["root"]) / name, name)
             for relative in dependency_relatives:
                 source = Path(package["root"]) / relative
                 if relative in before and before[relative]["sha256"] == sha256(source):
@@ -1082,14 +1114,14 @@ def remove_optiscaler(args: argparse.Namespace) -> dict[str, Any]:
     preexisting = set(manifest.get("preexisting_dependencies") or [])
     removed: list[str] = []
     preserved: list[str] = []
-    for name in dict.fromkeys([*after.keys(), *(manifest.get("installed_proxy_names") or [])]):
+    for name in dict.fromkeys([*after.keys(), *(manifest.get("installed_proxy_names") or []), *RUNTIME_LOG_NAMES]):
         path = folder / name
         if name in before or name in preexisting:
             preserved.append(name)
             continue
         if not path.is_file():
             continue
-        if after.get(name) == file_state(path):
+        if name in RUNTIME_LOG_NAMES or after.get(name) == file_state(path):
             path.unlink()
             removed.append(name)
         else:

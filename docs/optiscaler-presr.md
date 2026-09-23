@@ -33,6 +33,23 @@ The reference package `OptiScaler-AMD-PreSR-Multipass-v1.2` (and the bare folder
 | Scripts & Readme | `INSTALAR_AMD.ps1`, `DIAGNOSTICO_AMD.ps1`, `LEIA-ME-AMD.md`, and `SHA256SUMS.txt`. |
 | `dlss-enabler-headless.dll` | Optional OptiScaler v0.9.5-pre3 build shipping beside the package for frame generation support. |
 
+### AMD-NR packages (3zwr1)
+
+[3zwr1/AMD-NR---OptiScaler](https://github.com/3zwr1/AMD-NR---OptiScaler) is a GPL-3.0 OptiScaler fork with published source that uses the same `[DlssNr]` settings, pass DLL names and `amd_presr.log`. The manager accepts it as a pre-SR package. Each release ships as two zips, and both must come from the same release:
+
+| Zip ([Alpha0.3.1](https://github.com/3zwr1/AMD-NR---OptiScaler/releases/tag/Alpha0.3.1)) | Contents |
+| --- | --- |
+| `AMDNR-v0.3.1.zip` | `OptiScaler.dll`, `OptiScaler.ini`, the `OptiScaler\` dependencies, the optional lmxxf runtime (`LmxxfNrRuntime.dll`, `LmxxfNrRuntime.pak`), licences and `SHA256SUMS.txt`. |
+| `v0.3.1-Runtime.zip` | `dlssnr_amd_pass1/2/3.dll` (the DLSS-NR-on-AMD v0.3.1 runtime) and `dlssnr_on_amd_weights.bin`. |
+
+Extract the first zip, then extract the Runtime zip into the same folder, either beside `OptiScaler.dll` or into a `Runtime` folder there. Select that folder in Settings; an `AMDNR-*` folder in Downloads, on the Desktop or in Documents is found automatically. AMD-NR zips are not extracted for you, because the fork zip alone has no pass DLLs.
+
+- **Identification:** AMD-NR keeps upstream's ProductVersion (`11.0.0-dev …`), so the manager identifies it by the `AMD-NR v…` build string embedded in `OptiScaler.dll` and shows that string as the fork version.
+- **Matching runtime:** `SHA256SUMS.txt` lists the Runtime zip under `Runtime/`. Those entries are checked wherever the files were extracted, so pass DLLs or weights from a different runtime release are rejected before anything is installed. A v0.3.1 fork needs the v0.3.1 passes.
+- **Weights:** in the checked release, the Runtime zip's weights have the same SHA-256 as weights generated locally by the official setup, so the two copies do not conflict. If they ever differ, the manager refuses to choose between them.
+- **lmxxf runtime:** when present in the package, `LmxxfNrRuntime.dll` and its asset pack (about 382 MB) are installed with the game and removed by Restore. Upstream lists it as RX 9000 only; it logs to `lmxxf_backend.log`. Delete both files from the package folder to skip the copy; the fork then runs the DLSS-NR-on-AMD runtime.
+- **Runtime choice:** the shipped `OptiScaler.ini` leaves `NrBackend` unset, so on the first launch that finds a runtime the overlay asks once which one to use. The manager does not pin it. Upstream notes that a backend change takes effect on the next game start. Update keeps the game's current `OptiScaler.ini` as its base, so the choice survives.
+
 ### Provenance and package boundary
 
 DLSS5 AMD Swapper does not download, redistribute, or bundle this package:
@@ -41,14 +58,15 @@ DLSS5 AMD Swapper does not download, redistribute, or bundle this package:
 - **DLSS-NR-on-AMD** permits personal, non-commercial use and explicitly forbids redistribution and modification. Renamed pass proxy DLLs cannot be redistributed.
 - **Weights** derive from NVIDIA's neural model and cannot be redistributed.
 - **Vodkaman23/DLSS-NR-UE5-Opti-DLL** has no published license.
+- **AMD-NR** publishes its fork source under GPL-3.0. Its Runtime zip carries DLSS-NR-on-AMD pass DLLs and weights, which stay under the terms above, and the lmxxf runtime ships with its own licence file. The manager does not download or bundle any of them.
 
-Users must supply their own local package and weights. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package folders or zip archives (extracting zip archives safely into `%LocalAppData%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
+Users must supply their own local package and weights. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package folders (including extracted `AMDNR-*` folders) or `OptiScaler-AMD-PreSR-Multipass*.zip` archives (extracting zip archives safely into `%LocalAppData%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
 
 The manager validates:
 - Target architecture is PE x64.
-- `OptiScaler.dll` VersionInfo has ProductName `OptiScaler` and ProductVersion containing `amd-presr`.
-- Pass DLLs contain the internal marker `dlssnr_amd`.
-- File integrity matches `SHA256SUMS.txt` when present. Every file the manager installs (the fork binary, pass DLLs, `OptiScaler.ini`, the `OptiScaler\` dependencies, the enabler and the weights entry) must match exactly; a Git LFS pointer satisfies its entry when its `oid sha256:` equals the listed hash. A stale checksum on a file the manager never installs (readme, scripts, licence texts) is reported as a warning, because the reference package itself ships with such stale entries.
+- `OptiScaler.dll` VersionInfo has ProductName `OptiScaler` and ProductVersion containing `amd-presr`, or the binary carries AMD-NR's `AMD-NR v` build string.
+- Pass DLLs contain the internal marker `dlssnr_amd`. Each pass is looked up beside `OptiScaler.dll`, then in `Runtime\`.
+- File integrity matches `SHA256SUMS.txt` when present. Every file the manager installs (the fork binary, pass DLLs, `OptiScaler.ini`, the `OptiScaler\` dependencies, the enabler, the lmxxf runtime and the weights entry) must match exactly; entries listed under `Runtime/` are checked beside `OptiScaler.dll` when no `Runtime` folder holds them. A Git LFS pointer satisfies its entry when its `oid sha256:` equals the listed hash. A stale checksum on a file the manager never installs (readme, scripts, licence texts) is reported as a warning, because the reference package itself ships with such stale entries.
 - Weights are verified locally against existing generated copies (from the bridge runtime folder, Lossless Scaling folder, or managed game folders); all copies must match in SHA-256 hash. Git LFS pointer stubs and undersized files are rejected.
 
 ## Setup
@@ -154,6 +172,11 @@ later update or repair.
 
 `OverlayMenu=true` is written explicitly because the upstream default depends on the proxy name.
 
+AMD-NR adds its own `[DlssNr]` keys, which the manager leaves at their shipped values. `Home`
+(`ToggleKey=auto`) switches neural rendering on and off for either runtime while the menu is closed,
+which makes a same-scene comparison quick. `CaptureKey` is unbound by default; once bound in
+`OptiScaler.ini`, it writes eight frames to an `amd-nr-capture` folder beside the game for bug reports.
+
 Games that take over the keyboard leave the overlay unreachable; their log records `WndProc is not
 subclassed` or `subclass lost`. The remedy is `ManualInputPolling=true` under `[Hotfix]`, which setup
 applies automatically for `acr.exe`. Diagnostics report this condition as `input_hook_warning`.
@@ -179,7 +202,8 @@ The manager and CLI parse `amd_presr.log` and `OptiScaler.log` to extract:
 
 Restoring a game installation removes only files created by the manager that still match their recorded post-install hashes:
 
-- Created files (`dxgi.dll`, `OptiScaler.ini`, pass DLLs, weights, and newly created dependencies) are removed.
+- Created files (`dxgi.dll`, `OptiScaler.ini`, pass DLLs, weights, the lmxxf runtime, and newly created dependencies) are removed.
+- Runtime logs (`OptiScaler.log`, `amd_presr.log`, `dlssnr_on_amd.log`, `lmxxf_backend.log`) are deleted unless they existed before the install. Every game session rewrites them, so they never match an install-time hash; keeping them used to leave the manifest behind and block a later route change.
 - Pre-existing files in the game directory (such as files that were already present in `OptiScaler\`) are preserved.
 - If any managed file was modified outside the manager, it is retained for safety and the manifest remains in place.
 - If an installation failure occurs, all staged files roll back immediately to the pre-installation state.
@@ -230,6 +254,20 @@ py .\direct-game\amd_dlss5.py `
   --preset max `
   --scaling ultraperformance `
   --proxy-name dxgi.dll
+```
+
+### Install from an AMD-NR folder
+
+Extract `AMDNR-v0.3.1.zip`, then its matching `v0.3.1-Runtime.zip` into the same folder. The weights can come from that folder or from your own generated copy.
+
+```powershell
+py .\direct-game\amd_dlss5.py `
+  --game "D:\Games\Example\Game.exe" `
+  --install `
+  --route optiscaler-presr `
+  --package "C:\Downloads\AMDNR-v0.3.1" `
+  --weights "C:\Downloads\AMDNR-v0.3.1\dlssnr_on_amd_weights.bin" `
+  --preset balanced
 ```
 
 ### Update an existing install

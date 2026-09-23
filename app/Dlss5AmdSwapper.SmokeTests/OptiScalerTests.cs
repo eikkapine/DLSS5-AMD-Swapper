@@ -85,6 +85,39 @@ internal static class OptiScalerTests
             return Task.CompletedTask;
         });
 
+        await run("AMD-NR packages validate by build string, find Runtime passes and install the lmxxf runtime", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            var root = Path.Combine(f.Temp.Path, "AMDNR-v0.3.1");
+            Directory.CreateDirectory(Path.Combine(root, "OptiScaler"));
+            Directory.CreateDirectory(Path.Combine(root, "Runtime"));
+            WritePe(Path.Combine(root, "OptiScaler.dll"), "AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)\0");
+            var pass1 = Path.Combine(root, "dlssnr_amd_pass1.dll"); // Runtime zip extracted beside OptiScaler.dll...
+            WritePe(pass1, "dlssnr_amd");
+            for (var i = 2; i <= 3; i++) WritePe(Path.Combine(root, "Runtime", $"dlssnr_amd_pass{i}.dll"), "dlssnr_amd"); // ...or into Runtime\
+            File.WriteAllBytes(Path.Combine(root, "OptiScaler", "amd_fidelityfx_upscaler_dx12.dll"), [1, 2, 3]);
+            File.WriteAllBytes(Path.Combine(root, "LmxxfNrRuntime.dll"), [7]);
+            File.WriteAllBytes(Path.Combine(root, "LmxxfNrRuntime.pak"), [8, 9]);
+            var sums = Path.Combine(root, "SHA256SUMS.txt");
+            File.WriteAllText(sums, new string('0', 64) + " *Runtime/dlssnr_amd_pass1.dll\n");
+            var upstreamVersion = new PeVersion("OptiScaler", "11.0.0-dev (unknown) (20260923_150229)");
+            try { OptiScalerPackageService.Validate(root, _ => upstreamVersion); throw new Exception("accepted"); }
+            catch (InvalidOperationException error) { Check(error.Message.Contains("dlssnr_amd_pass1.dll"), "a pass DLL from another runtime release must fail SHA256SUMS"); }
+            File.WriteAllText(sums, await DirectGameInstallerService.Sha256Async(pass1) + " *Runtime/dlssnr_amd_pass1.dll\n");
+
+            var package = OptiScalerPackageService.Validate(root, _ => upstreamVersion);
+            Check(package.ForkVersion == "AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)", $"fork version from the build string, got {package.ForkVersion}");
+            Check(package.Sha256SumsVerified, "Runtime\\ checksums verify against passes beside OptiScaler.dll");
+            Check(package.PassDllPaths.Count == 3 && package.Files.ContainsKey(Path.Combine("Runtime", "dlssnr_amd_pass2.dll")), "passes found in both places");
+            Check(new OptiScalerPackageService().DiscoverCandidates(null, [f.Temp.Path]).Contains(root), "AMDNR folder discovered");
+
+            await f.Installer.InstallAsync(f.Game, package, f.Weights, OptiScalerPreset.Balanced, false);
+            Check(File.Exists(Path.Combine(f.GameDir, "dlssnr_amd_pass3.dll")) && File.Exists(Path.Combine(f.GameDir, "LmxxfNrRuntime.pak")), "Runtime passes and lmxxf runtime installed");
+            var result = await f.Installer.RemoveAsync(f.Game);
+            Check(!File.Exists(Path.Combine(f.GameDir, "LmxxfNrRuntime.pak")) && !result.ManifestRetained, "restore removes the lmxxf runtime");
+        });
+
         await run("Package validation rejects a SHA256SUMS mismatch and a pass DLL without marker", async () =>
         {
             using var temp = new OptiTemp();
@@ -527,6 +560,20 @@ internal static class OptiScalerTests
             var result = await f.Installer.RemoveAsync(f.Game);
             Check(!Directory.Exists(Path.Combine(f.GameDir, "OptiScaler")), "dependency folder removed despite an empty subdirectory");
             Check(!result.ManifestRetained, "manifest not retained when nothing user-owned remains");
+        });
+
+        await run("Pre-SR restore deletes runtime logs even after an update recorded them", async () =>
+        {
+            var f = await MakeInstallFixtureAsync();
+            using var _ = f.Temp;
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, false);
+            foreach (var log in DirectGameInstallerService.RuntimeLogNames) await File.WriteAllTextAsync(Path.Combine(f.GameDir, log), "first session");
+            await f.Installer.InstallAsync(f.Game, f.Package, f.Weights, OptiScalerPreset.Balanced, true);
+            foreach (var log in DirectGameInstallerService.RuntimeLogNames) await File.AppendAllTextAsync(Path.Combine(f.GameDir, log), ", second session");
+
+            var result = await f.Installer.RemoveAsync(f.Game);
+            Check(DirectGameInstallerService.RuntimeLogNames.All(log => !File.Exists(Path.Combine(f.GameDir, log))), "runtime logs removed");
+            Check(!result.ManifestRetained && !File.Exists(f.Game.ManifestPath), "runtime logs must not keep the game managed");
         });
 
         await run("Manifest file maps stay case-insensitive after reload", async () =>

@@ -38,7 +38,7 @@ Three files are never downloaded or bundled: the OptiScaler AMD pre-SR package, 
 
 | File | Searched automatically in |
 | --- | --- |
-| OptiScaler AMD pre-SR package (folder or `.zip`) | `Downloads`, `Desktop` and `Documents`, two folder levels deep |
+| OptiScaler AMD pre-SR package (folder or `.zip`, or an extracted `AMDNR-*` folder with its matching Runtime zip extracted into it) | `Downloads`, `Desktop` and `Documents`, two folder levels deep |
 | `dlssnr_on_amd_weights.bin` | the path set in Settings, the Lossless Scaling `nr-bridge\runtime` folder, any managed game folder, the package folder, then `Downloads`, `Desktop` and `Documents` |
 | `nvngx_dlssnr.dll` | the selected game's folder and its neighbours, then `Downloads`, `Desktop` and `Documents` |
 

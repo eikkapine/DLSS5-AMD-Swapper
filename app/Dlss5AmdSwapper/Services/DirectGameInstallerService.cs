@@ -18,6 +18,9 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
     private const string V0217Sha256 = "4fcd167d07bc4964eaf9162aa8f4f11e852b91bf866b28cb48d45934022440bc";
     private static readonly string[] ProxyNames = ["version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll", "dxgi.dll"];
     private static readonly string[] RuntimeNames = ["dlssnr_on_amd.ini", "dlssnr_on_amd_weights.bin", "dlssnr_on_amd.log"];
+    // Rewritten by the runtimes on every game launch, so they can never match the install snapshot.
+    // Restore deletes them unless they existed before the install; keeping them used to retain the manifest.
+    internal static readonly string[] RuntimeLogNames = ["dlssnr_on_amd.log", "OptiScaler.log", "amd_presr.log", "lmxxf_backend.log"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private readonly HttpClient _http = CreateHttpClient();
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveFolders = new(StringComparer.OrdinalIgnoreCase);
@@ -185,7 +188,8 @@ public sealed class DirectGameInstallerService(GameProbeService probe)
             var path = Path.Combine(game.DirectoryPath, name);
             if (manifest.Before.ContainsKey(name)) { preserved.Add(name); continue; }
             if (!File.Exists(path)) continue;
-            if (manifest.After.TryGetValue(name, out var expected) && expected == await GetFileStateAsync(path, cancellationToken))
+            if (RuntimeLogNames.Contains(name, StringComparer.OrdinalIgnoreCase)
+                || (manifest.After.TryGetValue(name, out var expected) && expected == await GetFileStateAsync(path, cancellationToken)))
             {
                 File.Delete(path);
                 removed.Add(name);

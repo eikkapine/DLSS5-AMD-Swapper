@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "version": "0.3.0-pre.3",
-  "tag": "v0.3.0-pre.3",
+  "version": "0.3.0-pre.4",
+  "tag": "v0.3.0-pre.4",
   "status": "experimental-preview",
-  "date": "2026-09-19",
-  "published": true,
-  "previous_published_version": "0.3.0-pre.2",
+  "date": "2026-09-24",
+  "published": false,
+  "previous_published_version": "0.3.0-pre.3",
   "artifacts": [
     {
       "name": "DlssNrBridge.exe",
       "package_path": "bin/DlssNrBridge.exe",
-      "sha256": "2702e2128ca4c14ed81e23f9f103e835a529e561149b23a4a5d35e7d78b0b643",
-      "bytes": 297984,
+      "sha256": "154fec9a81f152f629299448de36c23524c04f82465c8b893624313f7580007b",
+      "bytes": 299520,
       "matches_verified_build": true
     },
     {
@@ -25,17 +25,17 @@
   "source_fingerprints": {
     "normalization": "CRLF converted to LF before SHA256",
     "sha256": {
-      "bridge/src/main.cpp": "d18a03fc94aa71e1cc6d6d282eded4764cf204554afc960fe83d5e4cf5b3954a",
+      "bridge/src/main.cpp": "6f043457ea33f429864893d9dbeff0008f442328cf1e937891155029b542dce8",
       "bridge/src/gpu_transport.h": "7f8002238384cdca4cc35df52ee9187a076644a9910cb16ccd88968fcc544a2f",
       "bridge/shaders/gpu_transport.hlsl": "7f5778bc4f7de59770e1d73b7741c505461721dfc3683d48d3643fa1b4ec0a34",
       "bridge/CMakeLists.txt": "4499284d9506cd1a9b4b09644448ed2dccbed7b550ce1e87b3b93936ecce5911",
-      "bridge/src/hip_host_timing.cpp": "b780470db80d42ed4b1bc2bfd99cc108b7a9cbac4d9d0e07cd203db2c0e034ac",
+      "bridge/src/hip_host_timing.cpp": "b53d69302910475512bc8e31ff7b8cdfa6463b61c20eba1de2c36defab384491",
       "bridge/src/hip_host_timing.h": "8d08ba6d2833ac16342f60391dd47a4fd4b54ce6055d1a742cb8101de486e901",
       "auto-scale/src/auto_scale_proxy.cpp": "49ba93c9570cf87c88eaefb56216bf70de613d75903fa4fe57362641cf222177",
       "auto-scale/CMakeLists.txt": "b1651f102718c864bde01f00a0f4197bfc0f16b32fa374812ac85f0b4e2bcd0e",
       "auto-scale/scripts/Setup.ps1": "99accf04e5aba5d1bd131e210ffbf05e183b03f2f5531358270cba81dda8535e",
       "auto-scale/scripts/Install-AutoScale.ps1": "c7d621fb90db859187ae2269166837a062b75951cac2a58b730a93795d606253",
-      "VERSION": "634f34f48fb5c40a4c7e9423e3889a94d51e1a45b906c1f32139a30f95374013"
+      "VERSION": "de428b412c4cd7aa38fd1ce65d3b90da184a7ce9220cdcabfc5fdb8597fb937e"
     }
   },
   "verification": {
@@ -45,11 +45,11 @@
     "auto_scale_harness_passed": true,
     "auto_scale_install_configurations_passed": 4,
     "manager_smoke_tests_passed": true,
-    "direct_game_python_tests_passed": 52,
+    "direct_game_python_tests_passed": 54,
     "packaging_rollback_tests_passed": 15,
     "desktop_lifecycle_scenarios_passed": 5,
     "theme_contrast_checks_passed": 1899,
-    "manager_settings_light_dark_renders_inspected": true,
+    "manager_settings_light_dark_renders_inspected": false,
     "package_checksum_file_count": 13,
     "publication_provenance_gate_passed": true,
     "affected_rx9060xt_runtime_retest_performed": false,
@@ -108,10 +108,10 @@
   },
   "configuration_note": "Fresh Lossless Scaling setup defaults to WorkingScale=0 and NeuralMaxHeight=480. The direct-game route keeps final output under the game and uses the game's FSR input dimensions for the rich neural path when available.",
   "manager_release": {
-    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.3-win-x64.zip",
+    "asset": "DLSS5-AMD-Swapper-v0.3.0-pre.4-win-x64.zip",
     "source_package": "artifacts/DLSS5-AMD-Swapper-local.zip",
-    "sha256": "2230d91ed67ea8f9e44c41f9b6f4804f1988e32101e985d802133eca3ccead76",
-    "bytes": 66043328,
+    "sha256": "0cfc3cc5adf83f1aa13fa39db0322c331a2cb3a771270f6b173ee04d39eb7deb",
+    "bytes": 66041105,
     "self_contained_win_x64": true,
     "forbidden_file_count": 0,
     "hash_mismatch_count": 0
@@ -122,7 +122,10 @@
     "downloaded": false,
     "source": "user-supplied",
     "latest_official_stable_checked": "v0.9.4",
-    "stock_release_replaces_custom_fork": false
+    "stock_release_replaces_custom_fork": false,
+    "amd_nr_build_marker": "AMD-NR v",
+    "amd_nr_latest_checked": "Alpha0.3.1",
+    "amd_nr_gameplay_verified": false
   },
   "direct_game_live_20260912": {
     "game": "Crimson Desert (Steam build 25246367, updated 2026-09-11)",
