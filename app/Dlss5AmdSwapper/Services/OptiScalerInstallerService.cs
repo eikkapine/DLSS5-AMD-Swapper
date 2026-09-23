@@ -13,7 +13,7 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
     internal const string CrimsonDesertIncompatibleProxySha256 = "07a1e2ca3fbf6c9c9a2923a755603c69fabf115b0904c92f10efe95fdb2b0caa";
     public const string CrimsonDesertCompatibilityMessage = "This OptiScaler AMD pre-SR v1.2 proxy is incompatible with Crimson Desert startup. Use the official AMD runtime for this game.";
     public static readonly string[] ProxyNames = ["dxgi.dll", "version.dll", "winmm.dll", "dbghelp.dll", "wininet.dll", "winhttp.dll"];
-    public static readonly string[] RootManagedNames = ["OptiScaler.ini", "OptiScaler.log", "amd_presr.log", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin"];
+    public static readonly string[] RootManagedNames = ["OptiScaler.ini", "OptiScaler.log", "amd_presr.log", "dlssnr_on_amd.log", "lmxxf_backend.log", "dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll", "dlssnr_on_amd_weights.bin", "LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak"];
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ActiveFolders = new(StringComparer.OrdinalIgnoreCase);
 
@@ -213,6 +213,9 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                     await CopyVerifiedAsync(match ?? package.PassDllPaths[0], passName);
                 }
                 await CopyVerifiedAsync(weights.Path, OptiScalerPackageService.WeightsName);
+                // AMD-NR's optional lmxxf runtime (RX 9000); the fork asks in-game which runtime to use.
+                foreach (var name in OptiScalerPackageService.LmxxfRuntimeNames)
+                    if (package.Files.ContainsKey(name)) await CopyVerifiedAsync(Path.Combine(package.Root, name), name);
 
                 foreach (var relative in dependencyRelatives)
                 {
@@ -302,13 +305,14 @@ public sealed class OptiScalerInstallerService(GameProbeService probe, DirectGam
                 var removed = new List<string>();
                 var preserved = new List<string>();
                 var preexisting = new HashSet<string>(manifest.PreexistingDependencies, StringComparer.OrdinalIgnoreCase);
-                var candidates = manifest.After.Keys.Concat(manifest.InstalledProxyNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                var candidates = manifest.After.Keys.Concat(manifest.InstalledProxyNames).Concat(DirectGameInstallerService.RuntimeLogNames).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
                 foreach (var relative in candidates)
                 {
                     var path = Path.Combine(folder, relative);
                     if (manifest.Before.ContainsKey(relative) || preexisting.Contains(relative)) { preserved.Add(relative); continue; }
                     if (!File.Exists(path)) continue;
+                    if (DirectGameInstallerService.RuntimeLogNames.Contains(relative, StringComparer.OrdinalIgnoreCase)) { File.Delete(path); removed.Add(relative); continue; }
                     var current = new FileState(new FileInfo(path).Length, await DirectGameInstallerService.Sha256Async(path, cancellationToken));
                     if (manifest.After.TryGetValue(relative, out var expected) && expected == current) { File.Delete(path); removed.Add(relative); }
                     else preserved.Add(relative);

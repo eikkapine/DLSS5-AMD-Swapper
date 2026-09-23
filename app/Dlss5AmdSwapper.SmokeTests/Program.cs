@@ -46,6 +46,26 @@ await RunAsync("Installer restore preserves changed and pre-existing files", asy
     Assert(!game.Busy, "Restore left the game busy.");
 });
 
+await RunAsync("Installer restore deletes the runtime log a game session rewrote", async () =>
+{
+    using var temp = new TempDirectory();
+    var game = new GameEntry { Name = "Fixture", ExePath = Path.Combine(temp.Path, "FixtureGame.exe") };
+    var proxy = Path.Combine(temp.Path, "version.dll");
+    var log = Path.Combine(temp.Path, "dlssnr_on_amd.log");
+    await File.WriteAllTextAsync(proxy, "managed proxy");
+    await File.WriteAllTextAsync(log, "written by the last game session");
+    var proxyState = new FileState(new FileInfo(proxy).Length, await DirectGameInstallerService.Sha256Async(proxy));
+    await File.WriteAllTextAsync(game.ManifestPath, System.Text.Json.JsonSerializer.Serialize(new
+    {
+        before = new Dictionary<string, FileState>(),
+        after = new Dictionary<string, FileState> { ["version.dll"] = proxyState, ["dlssnr_on_amd.log"] = new(1, "old") },
+        installed_proxy_names = new[] { "version.dll" }
+    }));
+    var result = await new DirectGameInstallerService(new GameProbeService()).RemoveAsync(game, false);
+    Assert(!File.Exists(log) && result.Removed.Contains("dlssnr_on_amd.log"), "The runtime log survived restore.");
+    Assert(!result.ManifestRetained && !File.Exists(game.ManifestPath), "A runtime log kept the game managed.");
+});
+
 await RunAsync("Installer refuses removal while a game is running", async () =>
 {
     using var temp = new TempDirectory();

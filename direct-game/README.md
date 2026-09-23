@@ -11,7 +11,7 @@ I use it mainly for supported single-player/offline 64-bit games. Common anti-ch
 
 The normal workflow is through `Dlss5AmdSwapper.exe`:
 
-1. Under **Settings**, select your official `dlssnr_on_amd_setup.exe` and `nvngx_dlssnr.dll` (for the post-FSR route) or specify your `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder/zip and weights file (for the pre-SR route).
+1. Under **Settings**, select your official `dlssnr_on_amd_setup.exe` and `nvngx_dlssnr.dll` (for the post-FSR route) or specify your `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder/zip, or an AMD-NR folder with its matching Runtime zip extracted into it, and weights file (for the pre-SR route). See [AMD-NR packages](../docs/optiscaler-presr.md#amd-nr-packages-3zwr1).
 2. Scan Steam or add a game executable.
 3. Let the compatibility probe check x64, FSR, DX12 and anti-cheat markers.
 4. Click **Set up** and select your preferred route and preset.

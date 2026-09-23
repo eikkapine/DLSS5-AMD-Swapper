@@ -8,7 +8,7 @@ internal static class RuntimeReleaseCatalogTests
     {
         await run("Runtime release checks validate official stable release metadata", () =>
         {
-            foreach (var repository in new[] { RuntimeReleaseCatalog.AmdRepository, RuntimeReleaseCatalog.OptiScalerRepository })
+            foreach (var repository in new[] { RuntimeReleaseCatalog.AmdRepository, RuntimeReleaseCatalog.OptiScalerRepository, RuntimeReleaseCatalog.AmdNrRepository })
             {
                 var url = $"https://github.com/{repository}/releases/tag/v0.3.1";
                 var valid = JsonSerializer.Serialize(new { tag_name = "v0.3.1", html_url = url, draft = false, prerelease = false });

@@ -21,7 +21,8 @@ public partial class MainWindow
             client.DefaultRequestHeaders.UserAgent.ParseAdd("DLSS5-AMD-Swapper");
             var results = await Task.WhenAll(
                 RuntimeReleaseCatalog.CheckAsync(client, RuntimeReleaseCatalog.AmdRepository),
-                RuntimeReleaseCatalog.CheckAsync(client, RuntimeReleaseCatalog.OptiScalerRepository));
+                RuntimeReleaseCatalog.CheckAsync(client, RuntimeReleaseCatalog.OptiScalerRepository),
+                RuntimeReleaseCatalog.CheckAsync(client, RuntimeReleaseCatalog.AmdNrRepository));
             if (_closing) return;
             var packageVersion = _optiPackage?.ForkVersion ?? "not verified in this session";
             ShowDiagnosticsOverlay("Runtime updates", "Latest stable releases from the official GitHub projects.",
@@ -29,7 +30,7 @@ public partial class MainWindow
                 $"\n\nSelected AMD pre-SR package: {packageVersion}" +
                 "\n\nDirect Game: run Set up / Update to download and verify the official AMD runtime. Game-specific compatibility pins remain in effect." +
                 "\n\nLossless Scaling: update the user-supplied compatibility version.dll through bridge setup." +
-                "\n\nStock OptiScaler releases cannot replace the custom amd-presr neural package. Use a complete compatible fork package and verify it before updating." +
+                "\n\nStock OptiScaler releases cannot replace the custom amd-presr neural package. Use a complete compatible fork package, such as AMD-NR with its matching Runtime zip, and verify it before updating." +
                 "\n\nThis check does not change installed runtimes or prove game compatibility.",
                 "Open AMD releases", () => Process.Start(new ProcessStartInfo(DirectGameInstallerService.UpstreamReleasePage) { UseShellExecute = true }));
         }

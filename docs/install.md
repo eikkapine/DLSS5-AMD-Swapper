@@ -39,12 +39,12 @@ For the currently tested upstream route, use **AMD Software: Adrenalin Edition 2
 
 Use this alternative direct-game backend when you want to evaluate neural rendering before super-resolution (FSR (ffx)) upscaling rather than after it.
 
-1. In **Settings**, specify your user-supplied `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder or zip. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package archives (cached under `%LOCALAPPDATA%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
+1. In **Settings**, specify your user-supplied `OptiScaler-AMD-PreSR-Multipass-v1.2` package folder or zip, or an [AMD-NR](optiscaler-presr.md#amd-nr-packages-3zwr1) folder with its matching Runtime zip extracted into it. The manager automatically scans `Downloads`, `Desktop`, and `Documents` for package folders and archives (cached under `%LOCALAPPDATA%\DLSS5 AMD Swapper\optiscaler-packages\<hash>`).
 2. Specify your locally generated `dlssnr_on_amd_weights.bin`. The manager reuses locally generated weights from the bridge runtime folder, Lossless Scaling folder, or previously managed game folders; all copies must agree in SHA-256 hash. Git LFS pointer stubs and undersized files are rejected. The project never downloads or bundles package files or weights.
 3. Open **Game library**, select a compatible x64 DirectX 12 target, and click **Set up**.
 4. In the route selection dialog, choose **OptiScaler pre-SR**.
-5. Select **Quality** (pre-SR neural pass, the game's own FSR ratio, no frame generation) or **Performance** (pre-SR with a 3.0x ratio override and 3x frame generation through OptiScaler).
-6. Click **Set up**. The manager validates PE x64 binaries, verifies the `amd-presr` version string and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
+5. Select a preset (**Light**, **Balanced**, **Detail** or **Max**) and a scaling tier; see [Presets](optiscaler-presr.md#presets). No preset enables frame generation.
+6. Click **Set up**. The manager validates PE x64 binaries, verifies the `amd-presr` version string (or AMD-NR build string) and `dlssnr_amd` marker, copies required proxy and dependency files, and writes a schema 3 `.dlss5-amd-swapper.json` manifest.
 7. Follow the game's input guidance, then press `Del` to open the in-game OptiScaler menu. **Assetto Corsa Rally:** select DLSS or XeSS in game settings; this fork disables its FSR inputs. OptiScaler can translate that input to the AMD `ffx` output selected by the preset. **Cyberpunk 2077:** DLSS, FSR and XeSS inputs are supported upstream; with path tracing, prefer XeSS or FSR as described in the [upstream guide](https://github.com/OptiScaler/OptiScaler/wiki/Cyberpunk-2077).
 8. Use **Refresh evidence** in the manager to verify active passes, render and target dimensions, and execution times.
 

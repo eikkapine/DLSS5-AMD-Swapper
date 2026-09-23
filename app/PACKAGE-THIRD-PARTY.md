@@ -7,6 +7,7 @@ This package intentionally does not redistribute third-party runtime files. You 
 Referenced projects:
 
 - DLSS-NR-on-AMD: https://github.com/danielblnc/DLSS-NR-on-AMD
+- AMD-NR OptiScaler fork (user-supplied pre-SR package): https://github.com/3zwr1/AMD-NR---OptiScaler
 - DLSS5-Swapper (workflow/UI inspiration): https://github.com/rakanki911/DLSS5-Swapper
 - LSP-ReShade: https://github.com/FrankBarretta/LSP-ReShade
 - DLSS5-Feeder: https://github.com/jlrouzies-fr/DLSS5-Feeder

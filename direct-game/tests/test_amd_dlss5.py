@@ -103,6 +103,27 @@ class PackageTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             helper.validate_package(f.package, version_reader=fake_fork)
 
+    def test_amd_nr_package_uses_build_string_and_runtime_checksums(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        root = f.temp / "AMDNR-v0.3.1"
+        (root / "Runtime").mkdir(parents=True)
+        write_pe(root / "OptiScaler.dll", b"AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)\x00")
+        pass1 = write_pe(root / "dlssnr_amd_pass1.dll", b"dlssnr_amd")  # Runtime zip extracted beside OptiScaler.dll...
+        for index in (2, 3):
+            write_pe(root / "Runtime" / f"dlssnr_amd_pass{index}.dll", b"dlssnr_amd")  # ...or into Runtime\
+        (root / "LmxxfNrRuntime.dll").write_bytes(b"\x07")
+        upstream = lambda _p: ("OptiScaler", "11.0.0-dev (unknown) (20260923_150229)")  # noqa: E731
+        (root / "SHA256SUMS.txt").write_text("0" * 64 + " *Runtime/dlssnr_amd_pass1.dll\n", encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "dlssnr_amd_pass1.dll"):
+            helper.validate_package(root, version_reader=upstream)
+        (root / "SHA256SUMS.txt").write_text(helper.sha256(pass1) + " *Runtime/dlssnr_amd_pass1.dll\n", encoding="utf-8")
+        info = helper.validate_package(root, version_reader=upstream)
+        self.assertEqual(info["fork_version"], "AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)")
+        self.assertTrue(info["sha256sums_verified"])
+        self.assertEqual(len(info["pass_dlls"]), 3)
+        self.assertIn("LmxxfNrRuntime.dll", info["files"])
+
     def test_weights_detection(self):
         f = Fixture()
         self.addCleanup(f.cleanup)
@@ -358,10 +379,28 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             helper.install_optiscaler(args, version_reader=fake_fork)
 
+        for log in helper.RUNTIME_LOG_NAMES:
+            (f.game_dir / log).write_text("written by a game session", encoding="utf-8")
         removed = helper.remove_optiscaler(helper.parse_args(["--game", str(f.exe), "--remove"]))
         self.assertIn("dxgi.dll", removed["removed"])
         self.assertFalse((f.game_dir / "dlssnr_amd_pass1.dll").exists())
+        self.assertFalse(any((f.game_dir / log).exists() for log in helper.RUNTIME_LOG_NAMES))
         self.assertFalse((f.game_dir / ".dlss5-amd-swapper.json").exists())
+
+    def test_post_fsr_remove_deletes_the_runtime_log_a_session_rewrote(self):
+        f = Fixture()
+        self.addCleanup(f.cleanup)
+        proxy = write_pe(f.game_dir / "version.dll")
+        log = f.game_dir / "dlssnr_on_amd.log"
+        log.write_text("rewritten by the last game session", encoding="utf-8")
+        (f.game_dir / helper.MANIFEST_NAME).write_text(json.dumps({
+            "route": helper.ROUTE_POST_FSR, "before": {},
+            "after": {"version.dll": helper.file_state(proxy), "dlssnr_on_amd.log": {"size": 1, "sha256": "0" * 64}},
+        }), encoding="utf-8")
+        result = helper.remove(helper.parse_args(["--game", str(f.exe), "--remove"]))
+        self.assertIn("dlssnr_on_amd.log", result["removed"])
+        self.assertFalse(log.exists())
+        self.assertFalse(result["manifest_retained"])
 
     def test_install_rolls_back(self):
         f = Fixture()

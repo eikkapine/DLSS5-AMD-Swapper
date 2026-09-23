@@ -14,6 +14,12 @@ public sealed class OptiScalerPackageService
     public const string DependencyFolderName = "OptiScaler";
     public const string RequiredUpscalerDependency = "amd_fidelityfx_upscaler_dx12.dll";
     public const string PackageFolderPrefix = "OptiScaler-AMD-PreSR-Multipass";
+    // 3zwr1's AMD-NR fork: same [DlssNr] keys, pass DLLs and amd_presr.log, but upstream's version
+    // resource. Its danielblnc runtime ships as a separate zip that SHA256SUMS lists under Runtime\.
+    public const string AmdNrMarker = "AMD-NR v";
+    public const string AmdNrFolderPrefix = "AMDNR-";
+    public const string RuntimeFolderName = "Runtime";
+    public static readonly string[] LmxxfRuntimeNames = ["LmxxfNrRuntime.dll", "LmxxfNrRuntime.pak"];
     public static readonly string[] PassNames = ["dlssnr_amd_pass1.dll", "dlssnr_amd_pass2.dll", "dlssnr_amd_pass3.dll"];
 
     public static OptiScalerPackage Validate(string root, Func<string, PeVersion>? versionReader = null)
@@ -35,16 +41,20 @@ public sealed class OptiScalerPackageService
         var version = versionReader(fork);
         if (!string.Equals(version.ProductName, "OptiScaler", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"{Path.GetFileName(fork)} does not identify itself as OptiScaler.");
-        if (version.ProductVersion is null || !version.ProductVersion.Contains(ForkMarker, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("This OptiScaler build is not the AMD pre-SR fork; the pre-SR route needs a build whose version contains amd-presr.");
+        var forkVersion = version.ProductVersion;
+        if (forkVersion is null || !forkVersion.Contains(ForkMarker, StringComparison.OrdinalIgnoreCase))
+            forkVersion = ReadAsciiRun(fork, AmdNrMarker)
+                ?? throw new InvalidOperationException("This OptiScaler build is not an AMD pre-SR fork; the pre-SR route needs a build whose version contains amd-presr, or 3zwr1's AMD-NR build.");
 
+        var runtime = Path.Combine(root, RuntimeFolderName);
         var passes = new List<string>();
         foreach (var name in PassNames)
         {
             var path = Path.Combine(root, name);
+            if (!File.Exists(path)) path = Path.Combine(runtime, name);
             if (!File.Exists(path))
             {
-                if (passes.Count == 0) throw new InvalidOperationException("dlssnr_amd_pass1.dll was not found in the package folder.");
+                if (passes.Count == 0) throw new InvalidOperationException("dlssnr_amd_pass1.dll was not found in the package folder. AMD-NR ships it in a separate Runtime zip: extract that beside OptiScaler.dll or into a Runtime folder there.");
                 continue;
             }
             if (GameProbeService.ReadPeMachine(path) != 0x8664) throw new InvalidOperationException($"{name} is not a 64-bit Windows PE file.");
@@ -56,6 +66,7 @@ public sealed class OptiScalerPackageService
         var dependencies = Path.Combine(root, DependencyFolderName);
         var enabler = FindPackageOrBundleSibling(root, EnablerName);
         var weights = FindPackageOrBundleSibling(root, WeightsName, IsRealWeightsFile);
+        if (weights is null && IsRealWeightsFile(Path.Combine(runtime, WeightsName))) weights = Path.Combine(runtime, WeightsName);
         var sums = Path.Combine(root, "SHA256SUMS.txt");
 
         var files = new Dictionary<string, FileState>(StringComparer.OrdinalIgnoreCase);
@@ -66,6 +77,8 @@ public sealed class OptiScalerPackageService
         }
         Record(fork);
         foreach (var pass in passes) Record(pass);
+        foreach (var name in LmxxfRuntimeNames)
+            if (File.Exists(Path.Combine(root, name))) Record(Path.Combine(root, name));
         if (File.Exists(ini)) Record(ini);
         if (enabler is not null && IsInsideRoot(root, enabler)) Record(enabler);
         if (Directory.Exists(dependencies))
@@ -77,9 +90,13 @@ public sealed class OptiScalerPackageService
         {
             // Only files the manager installs must match exactly; a stale checksum on a readme or script is a warning.
             bool IsInstalled(string relativePath) =>
-                files.ContainsKey(relativePath) || relativePath.Equals(WeightsName, StringComparison.OrdinalIgnoreCase);
-            foreach (var (relative, expected) in ParseSha256Sums(sums))
+                files.ContainsKey(relativePath) || Path.GetFileName(relativePath).Equals(WeightsName, StringComparison.OrdinalIgnoreCase);
+            foreach (var (listed, expected) in ParseSha256Sums(sums))
             {
+                // AMD-NR lists its Runtime zip under Runtime\; extracted beside OptiScaler.dll, the same entries
+                // still have to match, which is what catches pass DLLs from a different runtime release.
+                var relative = listed.StartsWith(RuntimeFolderName + "\\", StringComparison.OrdinalIgnoreCase) && !File.Exists(Path.Combine(root, listed))
+                    ? listed[(RuntimeFolderName.Length + 1)..] : listed;
                 var full = Path.GetFullPath(Path.Combine(root, relative));
                 if (!full.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"SHA256SUMS.txt lists a path outside the package: {relative}");
                 if (!File.Exists(full)) continue; // optional file absent; the required ones were checked above
@@ -94,7 +111,7 @@ public sealed class OptiScalerPackageService
                 var actual = files.TryGetValue(relativeKey, out var state) ? state.Sha256 : DirectGameInstallerService.Sha256Async(full).GetAwaiter().GetResult();
                 if (actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) continue;
                 if (IsInstalled(relativeKey))
-                    throw new InvalidOperationException($"SHA256SUMS.txt does not match {relative}. Re-download the package before installing.");
+                    throw new InvalidOperationException($"SHA256SUMS.txt does not match {relative}. Re-download the package (for AMD-NR, with the Runtime zip from the same release) before installing.");
                 sumsWarnings.Add(relative);
             }
             sumsVerified = true;
@@ -107,8 +124,19 @@ public sealed class OptiScalerPackageService
             enabler,
             weights is not null && IsRealWeightsFile(weights) ? weights : null,
             File.Exists(sums) ? sums : null,
-            version.ProductVersion,
+            forkVersion,
             files, sumsVerified, layout, sumsWarnings);
+    }
+
+    // The printable ASCII run starting at marker, e.g. "AMD-NR v0.3.1 / OptiScaler v11.0.0 (20260923_150229)".
+    private static string? ReadAsciiRun(string path, string marker)
+    {
+        var data = File.ReadAllBytes(path);
+        var start = data.AsSpan().IndexOf(Encoding.ASCII.GetBytes(marker));
+        if (start < 0) return null;
+        var end = start;
+        while (end < data.Length && end - start < 120 && data[end] is >= 0x20 and < 0x7F) end++;
+        return Encoding.ASCII.GetString(data, start, end - start);
     }
 
     public static string? ReadLfsPointerOid(string path)
@@ -231,6 +259,7 @@ public sealed class OptiScalerPackageService
             {
                 var name = Path.GetFileName(folder);
                 if (name.StartsWith(PackageFolderPrefix, StringComparison.OrdinalIgnoreCase)
+                    || name.StartsWith(AmdNrFolderPrefix, StringComparison.OrdinalIgnoreCase)
                     || (File.Exists(Path.Combine(folder, "dxgi.dll")) && File.Exists(Path.Combine(folder, PassNames[0]))))
                     results.Add(folder);
                 foreach (var zip in EnumerateZips(folder))

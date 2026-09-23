@@ -7,6 +7,7 @@ public static class RuntimeReleaseCatalog
 {
     public const string AmdRepository = "danielblnc/DLSS-NR-on-AMD";
     public const string OptiScalerRepository = "optiscaler/OptiScaler";
+    public const string AmdNrRepository = "3zwr1/AMD-NR---OptiScaler";
 
     public static async Task<string> CheckAsync(HttpClient client, string repository)
     {
@@ -47,7 +48,7 @@ public static class RuntimeReleaseCatalog
 
     private static void ValidateRepository(string repository)
     {
-        if (repository != AmdRepository && repository != OptiScalerRepository)
+        if (repository != AmdRepository && repository != OptiScalerRepository && repository != AmdNrRepository)
             throw new ArgumentException("Unsupported runtime repository.", nameof(repository));
     }
 }
